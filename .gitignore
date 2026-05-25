@@ -1,0 +1,5 @@
+hermes-agent-ref/
+node_modules/
+dist/
+*.log
+.env
