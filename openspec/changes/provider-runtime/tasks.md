@@ -13,7 +13,7 @@
 - [x] 2.3 实现 getProviderProfile 和 listProviders 函数
 - [x] 2.4 实现 provider alias 映射和 resolveProviderAlias 函数
 - [x] 2.5 注册内置提供商配置（openai, anthropic, openrouter, custom）
-- [ ] 2.6 编写 Provider Registry 单元测试
+- [x] 2.6 编写 Provider Registry 单元测试
 
 ## 3. 凭证解析
 
@@ -21,7 +21,7 @@
 - [x] 3.2 实现 base_url 解析（config → profile → env var）
 - [x] 3.3 实现 credential source 追踪
 - [x] 3.4 实现 API Key 隔离检查（key 不发送到错误端点）
-- [ ] 3.5 编写凭证解析单元测试
+- [x] 3.5 编写凭证解析单元测试
 
 ## 4. API Mode 路由
 
@@ -29,7 +29,7 @@
 - [x] 4.2 实现 resolveApiMode 函数（explicit → profile → heuristic → default）
 - [x] 4.3 实现 base_url 启发式检测（api.anthropic.com → anthropic_messages）
 - [x] 4.4 实现 client type 选择逻辑
-- [ ] 4.5 编写 API Mode 路由单元测试
+- [x] 4.5 编写 API Mode 路由单元测试
 
 ## 5. OpenAI 兼容客户端
 
@@ -39,7 +39,7 @@
 - [x] 5.4 实现 interruptibleCall 方法（后台线程 + 中断事件）
 - [x] 5.5 实现 token usage 提取（input, output, cache_read, cache_write）
 - [x] 5.6 实现错误分类器（auth, rate_limit, context_overflow, billing, server_error）
-- [ ] 5.7 编写 OpenAI 客户端单元测试（mock SDK）
+- [x] 5.7 编写 OpenAI 客户端单元测试（mock SDK）
 
 ## 6. Anthropic 客户端适配
 
@@ -47,7 +47,7 @@
 - [x] 6.2 实现消息格式转换（OpenAI → Anthropic 格式）
 - [x] 6.3 实现工具 schema 转换
 - [x] 6.4 实现响应规范化（Anthropic → OpenAI 格式）
-- [ ] 6.5 编写 Anthropic 适配器单元测试
+- [x] 6.5 编写 Anthropic 适配器单元测试
 
 ## 7. 辅助 LLM 客户端
 
@@ -55,7 +55,7 @@
 - [x] 7.2 实现辅助配置解析（provider, model, max_tokens）
 - [x] 7.3 实现 "main" provider 回退到主对话模型
 - [x] 7.4 实现 max_tokens 默认值保护
-- [ ] 7.5 编写辅助客户端单元测试
+- [x] 7.5 编写辅助客户端单元测试
 
 ## 8. 回退模型链
 
@@ -63,7 +63,7 @@
 - [x] 8.2 实现 tryFallback 方法，按顺序尝试回退
 - [x] 8.3 实现 one-shot 激活标志（fallback_activated）
 - [x] 8.4 实现回退客户端重建（新凭证 + 新配置）
-- [ ] 8.5 编写回退链单元测试
+- [x] 8.5 编写回退链单元测试
 
 ## 9. 模型元数据
 
@@ -71,7 +71,7 @@
 - [x] 9.2 注册常用模型元数据（Claude, GPT-4, GPT-4o 等）
 - [x] 9.3 实现 getContextLength 查询（未知模型返回默认值）
 - [x] 9.4 实现 calculateCost 函数（基于 token 计数和定价数据）
-- [ ] 9.5 编写模型元数据单元测试
+- [x] 9.5 编写模型元数据单元测试
 
 ## 10. 集成测试
 
