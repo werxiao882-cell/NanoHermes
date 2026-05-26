@@ -140,11 +140,13 @@ def build_tool_dispatcher():
     return tool_dispatch
 
 
-def interactive_mode(debug: bool = False):
+def interactive_mode(debug: bool = False, resume: str | None = None, resume_title: str | None = None):
     """交互对话模式 - 耦合所有核心模块。
 
     Args:
         debug: 是否开启 debug 模式。
+        resume: 恢复会话 ID，"latest" 表示最近会话。
+        resume_title: 通过标题恢复会话。
     """
     load_dotenv()
 
@@ -177,13 +179,53 @@ def interactive_mode(debug: bool = False):
     print(f"[工具] 已注册工具: {[t.name for t in __import__('src.tools.registry', fromlist=['ToolRegistry']).ToolRegistry.get_all_tools()]}")
 
     # ========================================================================
-    # 3. 初始化 Session Storage - 会话持久化
+    # 3. 初始化 Session Storage - 会话持久化 + JSONL 历史
     # ========================================================================
     from src.session.session_db import SessionDB
+    from src.session.jsonl_store import JsonlSessionStore
+
     db_path = Path.home() / ".nanohermes" / "sessions.db"
     db = SessionDB(db_path)
-    session_id = db.create_session(model=model, provider="dashscope")
-    print(f"[会话] {session_id}")
+    jsonl_store = JsonlSessionStore()
+
+    # 会话恢复逻辑
+    resumed_session_id = None
+    if resume_title:
+        # 通过标题恢复
+        resumed_session_id = db.resolve_session_by_title(resume_title)
+        if resumed_session_id:
+            print(f"[恢复] 通过标题 '{resume_title}' 找到会话: {resumed_session_id[:8]}...")
+        else:
+            print(f"[警告] 未找到标题为 '{resume_title}' 的会话，创建新会话")
+    elif resume:
+        if resume == "latest":
+            # 恢复最近会话
+            sessions = jsonl_store.list_sessions()
+            if sessions:
+                # 按文件修改时间排序，取最新的
+                session_files = [(s, jsonl_store._get_file_path(s).stat().st_mtime) for s in sessions]
+                session_files.sort(key=lambda x: x[1], reverse=True)
+                resumed_session_id = session_files[0][0]
+                print(f"[恢复] 最近会话: {resumed_session_id[:8]}...")
+            else:
+                print("[警告] 没有历史会话，创建新会话")
+        else:
+            # 按 ID 恢复
+            if jsonl_store.session_exists(resume):
+                resumed_session_id = resume
+                print(f"[恢复] 会话: {resumed_session_id[:8]}...")
+            else:
+                print(f"[警告] 会话 {resume[:8]}... 不存在，创建新会话")
+
+    if resumed_session_id:
+        session_id = resumed_session_id
+        db.reopen_session(session_id)
+        # 加载 JSONL 历史
+        history = jsonl_store.load_messages(session_id)
+        print(f"[历史] 加载 {len(history)} 条消息")
+    else:
+        session_id = db.create_session(model=model, provider="dashscope")
+        print(f"[会话] {session_id}")
 
     # ========================================================================
     # 4. 初始化 Prompt Assembly - 系统提示组装
@@ -238,10 +280,32 @@ def interactive_mode(debug: bool = False):
     # 7. 启动交互
     # ========================================================================
     system_prompt = assembler.assemble()
-    messages = [{"role": "system", "content": system_prompt}]
 
+    # 如果恢复了会话，加载 JSONL 历史作为消息
+    if resumed_session_id:
+        history = jsonl_store.load_messages(session_id)
+        # 过滤掉 system 消息（我们已有新的 system_prompt）
+        messages = [{"role": "system", "content": system_prompt}]
+        for msg in history:
+            role = msg.get("role")
+            if role == "system":
+                continue
+            # 重建 OpenAI 格式的消息
+            openai_msg = {"role": role}
+            if "content" in msg:
+                openai_msg["content"] = msg["content"]
+            if "tool_calls" in msg:
+                openai_msg["tool_calls"] = msg["tool_calls"]
+            if "tool_call_id" in msg:
+                openai_msg["tool_call_id"] = msg["tool_call_id"]
+            messages.append(openai_msg)
+        print(f"[历史] 已加载 {len(history)} 条消息")
+    else:
+        messages = [{"role": "system", "content": system_prompt}]
+
+    resume_hint = " (已恢复历史)" if resumed_session_id else ""
     print("=" * 50)
-    print("  NanoHermes v0.1.0 - 交互对话模式")
+    print(f"  NanoHermes v0.1.0 - 交互对话模式{resume_hint}")
     print("  输入 'quit' 或 'exit' 退出")
     print("  输入 'clear' 清空对话")
     print("  输入 'status' 查看会话状态")
@@ -275,8 +339,9 @@ def interactive_mode(debug: bool = False):
         if not user_input:
             continue
 
-        # 保存用户消息
+        # 保存用户消息到 SQLite 和 JSONL
         db.insert_message(session_id, "user", user_input)
+        jsonl_store.append_message(session_id, "user", user_input)
         messages.append({"role": "user", "content": user_input})
 
         print("\n[思考中]...", end="", flush=True)
@@ -289,8 +354,9 @@ def interactive_mode(debug: bool = False):
             iterations = result.get("iterations", 0)
             usage = result.get("usage")
 
-            # 保存助手消息
+            # 保存助手消息到 SQLite 和 JSONL
             db.insert_message(session_id, "assistant", content)
+            jsonl_store.append_message(session_id, "assistant", content)
 
             if usage:
                 db.update_token_counts(
@@ -321,12 +387,16 @@ def main():
     parser = argparse.ArgumentParser(description="NanoHermes - 自进化 AI Agent 系统")
     parser.add_argument("--test-api", action="store_true", help="测试 API 连接")
     parser.add_argument("--debug", action="store_true", help="开启 debug 模式，输出请求/响应详情")
+    parser.add_argument("--resume", nargs="?", const="latest", metavar="SESSION_ID",
+                        help="恢复历史会话。不指定 ID 时恢复最近会话，或指定 SESSION_ID")
+    parser.add_argument("--resume-title", metavar="TITLE",
+                        help="通过标题恢复历史会话")
     args = parser.parse_args()
 
     if args.test_api:
         test_api()
     else:
-        interactive_mode(debug=args.debug)
+        interactive_mode(debug=args.debug, resume=args.resume, resume_title=args.resume_title)
 
 
 if __name__ == "__main__":

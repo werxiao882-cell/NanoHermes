@@ -125,3 +125,21 @@
 - [x] 7.5 编写完整工作流集成测试（创建会话 → 插入消息 → 搜索 → 结束 → 恢复）
 - [x] 7.6 编写压缩延续链集成测试
 - [x] 7.7 编写标题 lineage 集成测试
+
+## 8. JSONL 会话历史存储
+
+- [ ] 8.1 实现 JsonlSessionStore 类，支持 JSONL 格式追加写入
+- [ ] 8.2 实现 append_message 方法，支持完整消息元数据（role, content, tool_calls, reasoning）
+- [ ] 8.3 实现 load_messages 方法，从 JSONL 文件加载完整历史
+- [ ] 8.4 实现 list_sessions 方法，列出所有有 JSONL 文件的会话
+- [ ] 8.5 实现 session_exists 和 delete_session 方法
+- [ ] 8.6 编写 JSONL 存储的单元测试
+
+## 9. 会话恢复命令
+
+- [ ] 9.1 实现 --resume <session_id> 命令行参数
+- [ ] 9.2 实现 --resume-title "title" 命令行参数
+- [ ] 9.3 实现 --resume（无参数）恢复最近会话
+- [ ] 9.4 实现恢复时加载 JSONL 历史并显示摘要
+- [ ] 9.5 实现恢复失败时的错误处理和新建会话
+- [ ] 9.6 编写会话恢复的集成测试
