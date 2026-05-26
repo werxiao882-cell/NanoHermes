@@ -60,6 +60,7 @@ class ConversationLoop:
         self._tool_dispatch = tool_dispatch
         self._error_classifier = ErrorClassifier()
         self._on_post_turn: Callable | None = None
+        self._on_message_append: Callable | None = None
         self._interrupted = False
         self.debug = debug
 
@@ -120,6 +121,9 @@ class ConversationLoop:
                         "tool_call_id": tool_call.get("id", ""),
                         "content": result,
                     })
+                    # 通知调用方消息已追加
+                    if self._on_message_append:
+                        self._on_message_append(messages[-1])
                 continue
 
             # 文本响应，结束循环
@@ -278,3 +282,14 @@ class ConversationLoop:
             hook: 钩子函数。
         """
         self._on_post_turn = hook
+
+    def set_on_message_append(self, callback: Callable) -> None:
+        """设置消息追加回调。
+
+        每次消息被追加到 messages 列表时调用（包括 tool 消息）。
+        用于实时保存到 JSONL 等持久化存储。
+
+        Args:
+            callback: 回调函数，接收追加的消息 dict。
+        """
+        self._on_message_append = callback

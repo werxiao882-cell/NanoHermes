@@ -128,12 +128,14 @@
 
 ## 8. JSONL 会话历史存储
 
-- [ ] 8.1 实现 JsonlSessionStore 类，支持 JSONL 格式追加写入
-- [ ] 8.2 实现 append_message 方法，支持完整消息元数据（role, content, tool_calls, reasoning）
-- [ ] 8.3 实现 load_messages 方法，从 JSONL 文件加载完整历史
-- [ ] 8.4 实现 list_sessions 方法，列出所有有 JSONL 文件的会话
-- [ ] 8.5 实现 session_exists 和 delete_session 方法
-- [ ] 8.6 编写 JSONL 存储的单元测试
+- [x] 8.1 实现 JsonlSessionStore 类，支持 JSONL 格式追加写入
+- [x] 8.2 实现 append_message 方法，支持完整消息元数据（role, content, tool_calls, reasoning）
+- [x] 8.3 实现 load_messages 方法，从 JSONL 文件加载完整历史
+- [x] 8.4 实现 list_sessions 方法，列出所有有 JSONL 文件的会话
+- [x] 8.5 实现 session_exists 和 delete_session 方法
+- [x] 8.6 编写 JSONL 存储的单元测试
+- [x] 8.7 实现 ConversationLoop on_message_append 回调，实时保存 tool 消息到 JSONL
+- [x] 8.8 验证 JSONL 包含完整上下文（用户/助手/工具调用/工具结果）
 
 ## 9. 会话恢复命令
 
