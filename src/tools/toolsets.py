@@ -32,7 +32,7 @@ TOOLSETS: dict[str, list[str]] = {
     "search": ["web_search"],
 
     # 安全工具集：只读操作
-    "safe": ["read_file", "search_files", "web_search"],
+    "safe": ["read_file", "search_files"],
 }
 
 # 旧版工具集名称映射（向后兼容）
