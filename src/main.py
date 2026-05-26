@@ -68,6 +68,7 @@ def build_model_caller(client, model: str):
 
     Returns:
         调用函数: (messages, tools) -> dict
+        返回包含 content, tool_calls, usage, reasoning, raw_response, request_body
     """
     def call_model(messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None) -> dict[str, Any]:
         kwargs: dict[str, Any] = {
@@ -81,11 +82,12 @@ def build_model_caller(client, model: str):
 
         choice = response.choices[0] if response.choices else None
         if not choice:
-            return {"content": None, "tool_calls": None}
+            return {"content": None, "tool_calls": None, "reasoning": None, "raw_response": None, "request_body": kwargs}
 
         message = choice.message
         content = message.content
         tool_calls = None
+        reasoning = None
 
         if message.tool_calls:
             tool_calls = [
@@ -100,13 +102,22 @@ def build_model_caller(client, model: str):
                 for tc in message.tool_calls
             ]
 
+        # 提取 reasoning 内容（Qwen 等模型的思考过程）
+        if hasattr(message, 'reasoning') and message.reasoning:
+            reasoning = message.reasoning
+        elif hasattr(message, 'reasoning_content') and message.reasoning_content:
+            reasoning = message.reasoning_content
+
         return {
             "content": content,
             "tool_calls": tool_calls,
+            "reasoning": reasoning,
             "usage": {
                 "input_tokens": response.usage.prompt_tokens if response.usage else 0,
                 "output_tokens": response.usage.completion_tokens if response.usage else 0,
             },
+            "raw_response": response.model_dump() if hasattr(response, 'model_dump') else str(response),
+            "request_body": kwargs,
         }
 
     return call_model
