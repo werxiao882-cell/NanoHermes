@@ -23,6 +23,92 @@ from typing import Any
 from dotenv import load_dotenv
 
 
+def list_sessions_command():
+    """列出所有历史会话。"""
+    from src.session.jsonl_store import JsonlSessionStore
+    from src.session.session_db import SessionDB
+
+    jsonl_store = JsonlSessionStore()
+    session_ids = jsonl_store.list_sessions()
+
+    if not session_ids:
+        print("[信息] 没有历史会话")
+        return
+
+    # 按修改时间排序
+    session_files = []
+    for sid in session_ids:
+        file_path = jsonl_store._get_file_path(sid)
+        mtime = file_path.stat().st_mtime
+        msg_count = jsonl_store.get_message_count(sid)
+        session_files.append((sid, mtime, msg_count))
+
+    session_files.sort(key=lambda x: x[1], reverse=True)
+
+    print(f"\n{'='*60}")
+    print(f"  历史会话列表 ({len(session_files)} 个)")
+    print(f"{'='*60}")
+
+    for i, (sid, mtime, msg_count) in enumerate(session_files, 1):
+        from datetime import datetime
+        time_str = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
+
+        # 尝试从 SQLite 获取标题
+        title = None
+        try:
+            db_path = Path.home() / ".nanohermes" / "sessions.db"
+            if db_path.exists():
+                db = SessionDB(db_path)
+                session_info = db.get_session(sid)
+                if session_info:
+                    title = session_info.get("title")
+                db.close()
+        except Exception:
+            pass
+
+        display_title = title or f"会话 {sid[:8]}"
+        print(f"  {i:2d}. {_bold(display_title)}")
+        print(f"      ID: {sid}")
+        print(f"      时间: {time_str}  |  消息: {msg_count} 条")
+        print()
+
+    print(f"{'='*60}")
+    print(f"  恢复: python -m src.main --resume <ID>")
+    print(f"  恢复最近: python -m src.main --resume")
+    print(f"{'='*60}\n")
+
+
+def generate_auto_title(client, model: str, first_message: str) -> str | None:
+    """使用大模型自动生成会话标题。
+
+    Args:
+        client: OpenAI SDK 客户端。
+        model: 模型名称。
+        first_message: 用户的第一条消息。
+
+    Returns:
+        生成的标题（≤20 字符），失败返回 None。
+    """
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "你是一个标题生成器。根据用户的输入，生成一个简短的会话标题，不超过 20 个字符。只输出标题，不要输出其他内容。"},
+                {"role": "user", "content": first_message[:200]},
+            ],
+            max_tokens=20,
+            temperature=0.7,
+        )
+        title = response.choices[0].message.content
+        if title:
+            # 清理标题
+            title = title.strip().strip('"').strip("'").strip()
+            if len(title) > 20:
+                title = title[:20]
+            return title if title else None
+    except Exception:
+        pass
+    return None
 def test_api():
     """测试 API 连接。"""
     load_dotenv()
@@ -322,7 +408,12 @@ def interactive_mode(debug: bool = False, resume: str | None = None, resume_titl
     print("  输入 'quit' 或 'exit' 退出")
     print("  输入 'clear' 清空对话")
     print("  输入 'status' 查看会话状态")
+    print("  输入 'sessions' 查看历史会话列表")
+    print("  输入 'title <标题>' 设置当前会话标题")
     print("=" * 50)
+
+    # 跟踪是否已经自动生成标题
+    auto_title_generated = resumed_session_id is not None
 
     while True:
         try:
@@ -343,10 +434,23 @@ def interactive_mode(debug: bool = False, resume: str | None = None, resume_titl
         if user_input.lower() == "status":
             session_info = db.get_session(session_id)
             if session_info:
+                title = session_info.get("title") or "(未设置)"
                 print(f"[状态] 会话: {session_id}")
+                print(f"       标题: {title}")
                 print(f"       模型: {session_info.get('model', 'N/A')}")
                 print(f"       输入 Token: {session_info.get('input_tokens', 0)}")
                 print(f"       输出 Token: {session_info.get('output_tokens', 0)}")
+            continue
+
+        if user_input.lower() == "sessions":
+            list_sessions_command()
+            continue
+
+        if user_input.lower().startswith("title "):
+            new_title = user_input[6:].strip()
+            if new_title:
+                db.set_session_title(session_id, new_title)
+                print(f"[标题] 已设置为: {new_title}")
             continue
 
         if not user_input:
@@ -356,6 +460,17 @@ def interactive_mode(debug: bool = False, resume: str | None = None, resume_titl
         db.insert_message(session_id, "user", user_input)
         jsonl_store.append_message(session_id, "user", user_input)
         messages.append({"role": "user", "content": user_input})
+
+        # 自动生成标题（仅对新会话的第一条消息）
+        if not auto_title_generated and not resumed_session_id:
+            auto_title_generated = True
+            print("\n[生成标题]...", end="", flush=True)
+            title = generate_auto_title(client, model, user_input)
+            if title:
+                db.set_session_title(session_id, title)
+                print(f" {title}")
+            else:
+                print(" (跳过)")
 
         print("\n[思考中]...", end="", flush=True)
 
@@ -403,10 +518,14 @@ def main():
                         help="恢复历史会话。不指定 ID 时恢复最近会话，或指定 SESSION_ID")
     parser.add_argument("--resume-title", metavar="TITLE",
                         help="通过标题恢复历史会话")
+    parser.add_argument("--list-sessions", action="store_true",
+                        help="列出所有历史会话")
     args = parser.parse_args()
 
     if args.test_api:
         test_api()
+    elif args.list_sessions:
+        list_sessions_command()
     else:
         interactive_mode(debug=args.debug, resume=args.resume, resume_title=args.resume_title)
 
