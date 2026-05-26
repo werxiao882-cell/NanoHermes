@@ -10,6 +10,8 @@
 - 实现会话生命周期管理：创建、结束、恢复、分支
 - 实现会话标题管理和 lineage 追踪（压缩延续链）
 - 实现声明式 schema 协调，支持无迁移的列添加
+- 实现 JSONL 格式的完整会话历史存储，支持流式追加和完整恢复
+- 实现会话恢复命令，支持通过 CLI 命令加载历史会话继续对话
 
 ## 能力
 
@@ -20,6 +22,8 @@
 - `session-lifecycle`: 会话生命周期管理，支持创建、结束、恢复、分支。parent_session_id 支持会话 lineage 追踪。
 - `session-title`: 会话标题管理，支持唯一标题、标题解析、lineage 中最新会话解析、编号标题变体（如 "title #2"）。
 - `schema-reconciliation`: 声明式 schema 协调，SCHEMA_SQL 是唯一真实来源。启动时对比 live 列和声明列，自动添加缺失列。
+- `jsonl-history`: JSONL 格式的完整会话历史存储。每条消息一行 JSON，支持流式追加写入。与 SessionDB 配合使用：SQLite 用于搜索和统计，JSONL 用于完整历史恢复。
+- `session-resume`: 会话恢复命令，支持通过 CLI 命令加载历史会话继续对话。支持按 ID、标题或最近活动恢复。
 
 ### 修改能力
 

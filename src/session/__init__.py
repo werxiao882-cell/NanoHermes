@@ -6,9 +6,11 @@ SQLite 会话持久化存储，支持：
 - 会话生命周期管理
 - 标题管理和 lineage 追踪
 - 声明式 schema 协调
+- JSONL 格式完整历史存储
 """
 
 from src.session.session_db import SessionDB
 from src.session.schema import SCHEMA_SQL, FTS_SQL, FTS_TRIGRAM_SQL
+from src.session.jsonl_store import JsonlSessionStore
 
-__all__ = ["SessionDB", "SCHEMA_SQL", "FTS_SQL", "FTS_TRIGRAM_SQL"]
+__all__ = ["SessionDB", "SCHEMA_SQL", "FTS_SQL", "FTS_TRIGRAM_SQL", "JsonlSessionStore"]
