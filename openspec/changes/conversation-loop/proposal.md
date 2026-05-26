@@ -8,20 +8,22 @@
 - 实现 API 错误分类器，支持智能故障转移和恢复
 - 实现后台记忆/技能审查线程
 - 实现轨迹保存
+- 实现 debug 模式，输出发送到模型的完整请求和模型返回的完整响应
 
 ## 能力
 
-### 新增能力
+### New Capabilities
 
 - `conversation-loop`: 核心对话循环，包含模型调用、工具分发、迭代预算、中断检查、后轮次钩子。
 - `error-classifier`: API 错误分类器，包含错误分类学（auth、billing、rate_limit、context_overflow、format_error 等），提供恢复策略提示。
 - `background-review`: 后台审查线程，fork Agent 评估对话，决定是否保存记忆或更新技能。使用工具白名单，不影响主对话。
+- `debug-mode`: Debug 模式，输出发送到大模型的完整请求（system prompt + messages + tools）和模型返回的完整响应（content + tool_calls + usage），以及工具执行结果。通过 `--debug` 命令行参数开启。
 
-### 修改能力
+### Modified Capabilities
 
 <!-- 无现有能力需要修改 -->
 
-## 影响
+## Impact
 
 - 新增 `src/conversation/` 目录
 - 依赖所有其他功能模块

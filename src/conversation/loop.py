@@ -7,10 +7,15 @@
 4. 错误分类和重试
 5. 后轮次钩子
 6. 压缩触发检查
+
+Debug 模式：
+- 输出发送到模型的完整请求（system prompt + messages + tools）
+- 输出模型返回的完整响应（content + tool_calls + usage）
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Callable
 
@@ -30,6 +35,7 @@ class ConversationLoop:
         tool_dispatch: 工具分发函数。
         error_classifier: 错误分类器。
         on_post_turn: 后轮次钩子。
+        debug: 是否开启 debug 模式。
     """
 
     def __init__(
@@ -37,6 +43,7 @@ class ConversationLoop:
         max_iterations: int = 90,
         model_call: Callable | None = None,
         tool_dispatch: Callable | None = None,
+        debug: bool = False,
     ):
         """初始化对话循环。
 
@@ -44,6 +51,7 @@ class ConversationLoop:
             max_iterations: 最大迭代次数。
             model_call: 模型调用函数。
             tool_dispatch: 工具分发函数。
+            debug: 是否开启 debug 模式，输出请求/响应详情。
         """
         self.max_iterations = max_iterations
         self._model_call = model_call
@@ -51,6 +59,7 @@ class ConversationLoop:
         self._error_classifier = ErrorClassifier()
         self._on_post_turn: Callable | None = None
         self._interrupted = False
+        self.debug = debug
 
     def run(
         self,
@@ -74,6 +83,10 @@ class ConversationLoop:
 
             iteration += 1
 
+            # Debug: 输出请求
+            if self.debug:
+                self._debug_print_request(iteration, messages, tools)
+
             # 调用模型
             try:
                 response = self._call_model(messages, tools)
@@ -87,10 +100,19 @@ class ConversationLoop:
                     continue
                 raise
 
+            # Debug: 输出响应
+            if self.debug:
+                self._debug_print_response(iteration, response)
+
             # 检查是否有工具调用
             if response.get("tool_calls"):
                 for tool_call in response["tool_calls"]:
                     result = self._dispatch_tool(tool_call)
+
+                    # Debug: 输出工具结果
+                    if self.debug:
+                        self._debug_print_tool(tool_call, result)
+
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tool_call.get("id", ""),
@@ -111,6 +133,92 @@ class ConversationLoop:
             "iterations": iteration,
             "usage": None,
         }
+
+    def _debug_print_request(
+        self,
+        iteration: int,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+    ) -> None:
+        """Debug: 打印发送到模型的请求。
+
+        Args:
+            iteration: 当前迭代次数。
+            messages: 消息列表。
+            tools: 工具 schema 列表。
+        """
+        print(f"\n{'='*60}")
+        print(f"[DEBUG] 第 {iteration} 轮 - 请求")
+        print(f"{'='*60}")
+        print(f"消息数量: {len(messages)}")
+        for i, msg in enumerate(messages):
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            # 截断长内容
+            if content and len(content) > 200:
+                content = content[:200] + "..."
+            print(f"  [{i}] {role}: {content}")
+            if msg.get("tool_call_id"):
+                print(f"      tool_call_id: {msg['tool_call_id']}")
+            if msg.get("tool_calls"):
+                for tc in msg["tool_calls"]:
+                    func = tc.get("function", {})
+                    print(f"      tool_call: {func.get('name', '')}({func.get('arguments', '')})")
+
+        if tools:
+            print(f"\n工具数量: {len(tools)}")
+            for t in tools:
+                print(f"  - {t.get('name', 'unknown')}: {t.get('description', '')[:80]}")
+        print()
+
+    def _debug_print_response(self, iteration: int, response: dict[str, Any]) -> None:
+        """Debug: 打印模型返回的响应。
+
+        Args:
+            iteration: 当前迭代次数。
+            response: 模型响应。
+        """
+        print(f"{'='*60}")
+        print(f"[DEBUG] 第 {iteration} 轮 - 响应")
+        print(f"{'='*60}")
+
+        content = response.get("content", "")
+        if content:
+            if len(content) > 500:
+                content = content[:500] + "..."
+            print(f"内容: {content}")
+
+        tool_calls = response.get("tool_calls")
+        if tool_calls:
+            print(f"\n工具调用: {len(tool_calls)} 个")
+            for tc in tool_calls:
+                func = tc.get("function", {})
+                print(f"  - {func.get('name', '')}({func.get('arguments', '')})")
+
+        usage = response.get("usage")
+        if usage:
+            print(f"\nToken 用量: 输入 {usage.get('input_tokens', 0)}, 输出 {usage.get('output_tokens', 0)}")
+        print()
+
+    def _debug_print_tool(self, tool_call: dict[str, Any], result: str) -> None:
+        """Debug: 打印工具执行结果。
+
+        Args:
+            tool_call: 工具调用信息。
+            result: 工具执行结果。
+        """
+        func = tool_call.get("function", {})
+        name = func.get("name", "unknown")
+
+        # 截断长结果
+        display_result = result
+        if len(display_result) > 300:
+            display_result = display_result[:300] + "..."
+
+        print(f"[DEBUG] 工具执行: {name}")
+        print(f"  参数: {func.get('arguments', '')}")
+        print(f"  结果: {display_result}")
+        print()
 
     def _call_model(
         self,
