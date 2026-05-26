@@ -126,8 +126,12 @@ def build_tool_dispatcher():
     return tool_dispatch
 
 
-def interactive_mode():
-    """交互对话模式 - 耦合所有核心模块。"""
+def interactive_mode(debug: bool = False):
+    """交互对话模式 - 耦合所有核心模块。
+
+    Args:
+        debug: 是否开启 debug 模式。
+    """
     load_dotenv()
 
     api_key = os.environ.get("DASHSCOPE_API_KEY") or os.environ.get("OPENAI_API_KEY")
@@ -207,6 +211,7 @@ def interactive_mode():
         max_iterations=90,
         model_call=model_caller,
         tool_dispatch=tool_dispatch_func,
+        debug=debug,
     )
 
     # 获取工具 schema
@@ -299,12 +304,13 @@ def main():
     """主入口函数。"""
     parser = argparse.ArgumentParser(description="NanoHermes - 自进化 AI Agent 系统")
     parser.add_argument("--test-api", action="store_true", help="测试 API 连接")
+    parser.add_argument("--debug", action="store_true", help="开启 debug 模式，输出请求/响应详情")
     args = parser.parse_args()
 
     if args.test_api:
         test_api()
     else:
-        interactive_mode()
+        interactive_mode(debug=args.debug)
 
 
 if __name__ == "__main__":
