@@ -17,7 +17,7 @@
 - `conversation-loop`: 核心对话循环，包含模型调用、工具分发、迭代预算、中断检查、后轮次钩子。
 - `error-classifier`: API 错误分类器，包含错误分类学（auth、billing、rate_limit、context_overflow、format_error 等），提供恢复策略提示。
 - `background-review`: 后台审查线程，fork Agent 评估对话，决定是否保存记忆或更新技能。使用工具白名单，不影响主对话。
-- `debug-mode`: Debug 模式，输出发送到大模型的完整请求（system prompt + messages + tools）和模型返回的完整响应（content + tool_calls + usage），以及工具执行结果。通过 `--debug` 命令行参数开启。
+- `debug-mode`: Debug 模式，输出发送到大模型的完整请求体（JSON）、模型返回的完整响应体（JSON）、模型的思考内容（reasoning），以及工具执行结果。通过 `--debug` 命令行参数开启。
 
 ### Modified Capabilities
 
