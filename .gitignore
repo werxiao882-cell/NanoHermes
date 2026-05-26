@@ -1,5 +1,30 @@
-hermes-agent-ref/
-node_modules/
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
 dist/
-*.log
+build/
+
+# 虚拟环境
+.venv/
+venv/
+
+# 本地配置（包含 API Key）
 .env
+
+# 数据库
+*.db
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
+
+# 参考文档（不提交到库）
+hermes-agent-ref/
+
+# 日志
+*.log
