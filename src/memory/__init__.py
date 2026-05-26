@@ -8,7 +8,7 @@
 """
 
 from src.memory.provider import MemoryProvider
-from src.memory.manager import MemoryManager
+from src.memory.managers import MemoryManager
 from src.memory.file_provider import FileMemoryProvider
 
 __all__ = ["MemoryProvider", "MemoryManager", "FileMemoryProvider"]
