@@ -405,8 +405,13 @@ def classify_error(error: Exception) -> ClassifiedError:
 
     # API 错误（有 HTTP 状态码）
     if isinstance(error, APIError):
-        status_code = error.status_code
+        # 新版 SDK 可能没有 status_code 属性
+        status_code = getattr(error, 'status_code', None)
+        # 尝试从 body 中获取状态码
+        if status_code is None and isinstance(getattr(error, 'body', None), dict):
+            status_code = error.body.get('status_code') or error.body.get('code')
         message = str(error)
+        msg_lower = message.lower()
 
         if status_code == 401 or status_code == 403:
             return ClassifiedError(
@@ -429,7 +434,7 @@ def classify_error(error: Exception) -> ClassifiedError:
                 retryable=True,
                 original=error,
             )
-        if status_code == 400 and "context_length" in message.lower():
+        if status_code == 400 and ("context" in msg_lower and ("length" in msg_lower or "overflow" in msg_lower or "exceed" in msg_lower or "maximum" in msg_lower)):
             return ClassifiedError(
                 category=ErrorCategory.CONTEXT_OVERFLOW,
                 message=f"上下文溢出: {message}",
