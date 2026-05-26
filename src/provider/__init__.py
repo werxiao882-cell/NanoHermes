@@ -15,7 +15,7 @@ from src.provider.credentials import resolve_credentials
 from src.provider.api_mode import ApiMode, resolve_api_mode
 from src.provider.client_factory import build_client
 from src.provider.fallback import FallbackChain
-from src.provider.model_metadata import ModelMetadata, get_context_length, calculate_cost
+from src.provider.model_metadata import ModelInfo, ModelPricing, get_context_length, calculate_cost
 
 __all__ = [
     "ProviderProfile",
@@ -29,7 +29,8 @@ __all__ = [
     "resolve_api_mode",
     "build_client",
     "FallbackChain",
-    "ModelMetadata",
+    "ModelInfo",
+    "ModelPricing",
     "get_context_length",
     "calculate_cost",
 ]
