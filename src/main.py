@@ -167,6 +167,8 @@ def interactive_mode(debug: bool = False):
     # 2. 初始化 Tool Runtime - 工具注册和分发
     # ========================================================================
     from src.tools.registry import discover_tools
+    from src.tools import terminal  # noqa: F401 - 触发终端工具自动注册
+    from src.tools import file_tools  # noqa: F401 - 触发文件工具自动注册
     from src.tools.dispatcher import dispatch as tool_dispatch_func
 
     # 自动发现并注册工具模块
