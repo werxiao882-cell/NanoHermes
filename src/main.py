@@ -272,6 +272,19 @@ def interactive_mode(debug: bool = False, resume: str | None = None, resume_titl
         debug=debug,
     )
 
+    # 设置消息追加回调，实时保存所有消息（包括 tool 消息）到 JSONL
+    def _on_message_append(msg: dict[str, Any]) -> None:
+        role = msg.get("role", "")
+        jsonl_store.append_message(
+            session_id,
+            role=role,
+            content=msg.get("content"),
+            tool_calls=msg.get("tool_calls"),
+            tool_call_id=msg.get("tool_call_id"),
+        )
+
+    loop.set_on_message_append(_on_message_append)
+
     # 获取工具 schema
     from src.tools.registry import get_tool_schemas
     tool_schemas = get_tool_schemas()
@@ -354,9 +367,8 @@ def interactive_mode(debug: bool = False, resume: str | None = None, resume_titl
             iterations = result.get("iterations", 0)
             usage = result.get("usage")
 
-            # 保存助手消息到 SQLite 和 JSONL
+            # 保存助手消息到 SQLite（JSONL 通过 on_message_append 回调自动保存）
             db.insert_message(session_id, "assistant", content)
-            jsonl_store.append_message(session_id, "assistant", content)
 
             if usage:
                 db.update_token_counts(

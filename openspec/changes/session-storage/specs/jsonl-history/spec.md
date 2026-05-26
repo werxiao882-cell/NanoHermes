@@ -1,15 +1,19 @@
 ## ADDED Requirements
 
 ### Requirement: JSONL Session History Storage
-The system SHALL store complete session history in JSONL format, with one JSON object per line, supporting append-only writes and full session recovery.
+The system SHALL store complete session history in JSONL format, with one JSON object per line, supporting append-only writes and full session recovery. All messages including tool calls and tool results SHALL be preserved.
 
 #### Scenario: Append message to JSONL file
 - **WHEN** a message is appended to a session
 - **THEN** a JSON line containing role, content, timestamp, and optional metadata is written to {session_id}.jsonl
 
+#### Scenario: Append tool result to JSONL file
+- **WHEN** a tool execution completes during conversation loop
+- **THEN** a JSON line with role "tool", tool_call_id, and content (tool result) is written to {session_id}.jsonl
+
 #### Scenario: Load messages from JSONL file
 - **WHEN** load_messages is called with a valid session_id
-- **THEN** all messages are returned in chronological order as a list of dicts
+- **THEN** all messages including tool calls and tool results are returned in chronological order as a list of dicts
 
 #### Scenario: Handle corrupted JSONL lines
 - **WHEN** a JSONL file contains malformed JSON lines
@@ -39,7 +43,7 @@ The system SHALL support resuming a historical session via CLI command, loading 
 - **THEN** an error message is displayed and a new session is created
 
 ### Requirement: Session History Integration with CLI
-The streaming CLI SHALL integrate JSONL history storage, automatically appending each message and supporting session recovery.
+The streaming CLI SHALL integrate JSONL history storage, automatically appending each message including tool results and supporting session recovery.
 
 #### Scenario: CLI appends user messages to JSONL
 - **WHEN** the user sends a message in CLI mode
@@ -49,6 +53,21 @@ The streaming CLI SHALL integrate JSONL history storage, automatically appending
 - **WHEN** the model returns a response in CLI mode
 - **THEN** the response (including reasoning and tool calls) is appended to the session's JSONL file
 
+#### Scenario: CLI appends tool results to JSONL
+- **WHEN** a tool is executed during conversation loop
+- **THEN** the tool result with role "tool" and tool_call_id is appended to the session's JSONL file via on_message_append callback
+
 #### Scenario: CLI loads history on resume
 - **WHEN** the CLI starts with --resume flag
-- **THEN** the session's JSONL history is loaded and displayed before accepting new input
+- **THEN** the session's JSONL history including tool calls and results is loaded and displayed before accepting new input
+
+### Requirement: Message Append Callback
+The ConversationLoop SHALL provide an on_message_append callback that is invoked every time a message is appended to the messages list, including tool messages.
+
+#### Scenario: Callback fires for tool messages
+- **WHEN** a tool execution result is appended to messages
+- **THEN** the on_message_append callback is invoked with the tool message dict
+
+#### Scenario: Callback fires for assistant messages
+- **WHEN** an assistant response is appended to messages
+- **THEN** the on_message_append callback is invoked with the assistant message dict
