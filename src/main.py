@@ -76,7 +76,10 @@ def build_model_caller(client, model: str):
             "messages": messages,
         }
         if tools:
-            kwargs["tools"] = tools
+            # OpenAI API 要求 tools 格式为 [{"type": "function", "function": {...}}]
+            kwargs["tools"] = [
+                {"type": "function", "function": t} for t in tools
+            ]
 
         response = client.chat.completions.create(**kwargs)
 
