@@ -9,6 +9,8 @@
 - 实现后台记忆/技能审查线程
 - 实现轨迹保存
 - 实现 debug 模式，输出发送到模型的完整请求和模型返回的完整响应
+- 实现 CLI 斜杠命令系统（/clear, /status, /sessions, /title, /skills, /tools）
+- 实现 /tools 命令查看已加载工具列表
 
 ## 能力
 
@@ -18,6 +20,8 @@
 - `error-classifier`: API 错误分类器，包含错误分类学（auth、billing、rate_limit、context_overflow、format_error 等），提供恢复策略提示。
 - `background-review`: 后台审查线程，fork Agent 评估对话，决定是否保存记忆或更新技能。使用工具白名单，不影响主对话。
 - `debug-mode`: Debug 模式，输出发送到大模型的完整请求体（JSON）、模型返回的完整响应体（JSON）、模型的思考内容（reasoning），以及工具执行结果。通过 `--debug` 命令行参数开启。
+- `slash-commands`: CLI 斜杠命令系统，所有内置命令使用 `/xxx` 格式。支持 /clear, /status, /sessions, /title, /skills, /tools。模型不会拦截斜杠命令。
+- `tools-list`: /tools 命令查看已加载工具列表，显示工具名称、工具集、描述。
 
 ### Modified Capabilities
 
