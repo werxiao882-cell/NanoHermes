@@ -17,6 +17,7 @@ import argparse
 import json
 import os
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -109,6 +110,56 @@ def generate_auto_title(client, model: str, first_message: str) -> str | None:
     except Exception:
         pass
     return None
+
+
+def generate_auto_title_async(
+    client,
+    model: str,
+    first_message: str,
+    db,
+    session_id: str,
+) -> threading.Thread:
+    """异步生成会话标题，不阻塞对话。
+
+    如果标题生成失败，使用用户首条消息的截取部分作为标题。
+
+    Args:
+        client: OpenAI SDK 客户端。
+        model: 模型名称。
+        first_message: 用户的第一条消息。
+        db: SessionDB 实例。
+        session_id: 会话 ID。
+
+    Returns:
+        后台线程。
+    """
+
+    def _title_task():
+        """后台标题生成任务。"""
+        try:
+            title = generate_auto_title(client, model, first_message)
+            if title:
+                db.set_session_title(session_id, title)
+                print(f"\r[标题] {title}          ")  # 覆盖之前的提示
+            else:
+                # 生成失败，使用截取的首条消息
+                fallback = first_message[:20].strip()
+                if fallback:
+                    db.set_session_title(session_id, fallback)
+                    print(f"\r[标题] {fallback}          ")
+        except Exception:
+            # 完全失败，使用截取的首条消息
+            fallback = first_message[:20].strip()
+            if fallback:
+                try:
+                    db.set_session_title(session_id, fallback)
+                except Exception:
+                    pass
+                print(f"\r[标题] {fallback}          ")
+
+    thread = threading.Thread(target=_title_task, daemon=True)
+    thread.start()
+    return thread
 def test_api():
     """测试 API 连接。"""
     load_dotenv()
@@ -607,16 +658,12 @@ def interactive_mode(debug: bool = False, resume: str | None = None, resume_titl
         jsonl_store.append_message(session_id, "user", user_input)
         messages.append({"role": "user", "content": user_input})
 
-        # 自动生成标题（仅对新会话的第一条消息）
+        # 自动生成标题（异步，不阻塞对话）
         if not auto_title_generated and not resumed_session_id:
             auto_title_generated = True
             print("\n[生成标题]...", end="", flush=True)
-            title = generate_auto_title(client, model, user_input)
-            if title:
-                db.set_session_title(session_id, title)
-                print(f" {title}")
-            else:
-                print(" (跳过)")
+            # 异步生成标题，失败时使用首条消息截取
+            generate_auto_title_async(client, model, user_input, db, session_id)
 
         print("\n[思考中]...", end="", flush=True)
 
