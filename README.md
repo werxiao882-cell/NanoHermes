@@ -263,6 +263,132 @@ python -m pytest tests/test_jsonl_store.py -v
 
 详见 `openspec/specs/project-conventions/spec.md`。
 
+## Vibe Coding 最佳实践
+
+基于 NanoHermes 项目的实际开发经验，总结出以下 Vibe Coding 最佳实践：
+
+### 1. 探索先行，谋定后动
+
+在开始编码前，先进入 explore mode 讨论：
+- 项目整体架构和模块依赖关系
+- 实现优先级和关键路径
+- 技术选型和替代方案对比
+- 潜在风险和未知因素
+
+> **经验**: NanoHermes 的 10 个核心模块在实现前都经过了充分的架构讨论，避免了返工。
+
+### 2. 小步快跑，频繁提交
+
+- 每个小功能一个 commit，保持提交粒度小
+- 提交信息清晰描述变更内容
+- 功能实现后立即提交，不要堆积
+
+```bash
+# 好的提交示例
+feat(provider-runtime): 实现 ProviderProfile 数据结构和注册表
+test(provider-runtime): 添加 Provider Registry 单元测试
+fix(session-storage): 修复 JSONL 保存工具调用结果
+```
+
+### 3. 测试驱动，质量保障
+
+- 每个功能模块都要有对应的单元测试
+- 测试失败立即修复，不要遗留
+- 不仅单元测试，还要端到端测试验证完整流程
+- 并发测试验证多线程/多进程场景
+
+```bash
+# 运行所有测试
+python -m pytest tests/ -v
+
+# 运行特定模块测试
+python -m pytest tests/provider/ -v
+
+# 运行端到端测试
+python -m pytest tests/test_e2e.py -v -s
+```
+
+### 4. 文档同步，知识沉淀
+
+- 代码实现的同时更新 OpenSpec 规范
+- 每个模块包含 `ARCHITECTURE.md` 架构文档
+- README 持续更新，反映最新功能
+- 提交信息包含 OpenSpec 更新说明
+
+### 5. 详细注释，中文优先
+
+- 所有代码添加详细中文注释
+- 类、函数、关键逻辑块都要有注释
+- 注释说明"为什么"而不仅仅是"做什么"
+
+```python
+def resolve_credentials(env_vars: list[str], ...) -> CredentialResult:
+    """按优先级链解析凭证。
+
+    解析顺序：
+    1. 显式传入的 API Key（最高优先级）
+    2. 环境变量（按配置的优先级顺序查找）
+    3. 配置文件中的值
+    4. 提供商默认值
+
+    安全检查：
+    - 在检查环境变量时，会验证该 Key 是否与目标 base_url 兼容
+    """
+```
+
+### 6. 参考实现，站在巨人肩膀上
+
+- 参考成熟项目（如 Hermes Agent）的架构设计
+- 学习优秀的代码模式和最佳实践
+- 根据项目实际情况进行适配和优化
+
+> **经验**: NanoHermes 的技能管理系统参考了 Hermes Agent 的 `skill_manager_tool.py`，实现了创建、编辑、补丁、删除等完整功能。
+
+### 7. 统一规范，保持一致性
+
+- 统一文件命名格式（如 `<category>_tools.py`）
+- 统一代码风格和注释格式
+- 统一错误处理和返回格式
+- 统一测试结构和命名
+
+### 8. 用户反馈循环
+
+- 用户提出需求 → 快速实现 → 测试验证 → 用户反馈 → 持续改进
+- 保持沟通畅通，及时响应问题
+- 根据反馈调整实现方向
+
+### 9. 模块化设计，职责清晰
+
+- 每个模块职责单一，高内聚低耦合
+- 每个类别独立文件，便于维护
+- 清晰的依赖关系，避免循环依赖
+
+```
+src/tools/
+├── registry.py              # 注册表（核心）
+├── dispatcher.py            # 分发器（核心）
+├── terminal.py              # 终端工具
+├── file_tools.py            # 文件工具
+├── clarify_tools.py         # 澄清提问
+├── code_execution_tools.py  # 代码执行
+└── ...                      # 其他工具类别
+```
+
+### 10. 持续集成，自动化验证
+
+- 每次提交前运行测试
+- 使用 CI/CD 自动化测试流程
+- 测试覆盖率作为质量指标
+
+---
+
+**NanoHermes 项目统计**:
+-  10 个核心模块
+- 🧪 166 个单元测试
+- 📝 48 个源文件
+- 🔄 20+ 次提交
+- ⏱️ 从 0 到完整实现，高效迭代
+
 ## 许可证
 
 MIT
