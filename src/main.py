@@ -548,6 +548,70 @@ def interactive_mode(debug: bool = False, resume: str | None = None, resume_titl
             iterations = result.get("iterations", 0)
             usage = result.get("usage")
 
+            # 检查是否有 clarify 工具调用
+            from src.tools.clarify_tool import get_pending_clarification, respond_to_clarification, clear_pending_clarification
+            pending = get_pending_clarification()
+
+            if pending and pending.get("status") == "pending":
+                # 显示澄清问题
+                print(f"\n{'='*50}")
+                print(f"  💬 {pending['question']}")
+                print(f"{'='*50}")
+
+                options = pending.get("options", [])
+                allow_custom = pending.get("allow_custom", True)
+
+                # 显示选项
+                for i, opt in enumerate(options, 1):
+                    print(f"  {i}. {opt}")
+
+                if allow_custom:
+                    print(f"  0. 自定义输入")
+
+                print()
+
+                # 获取用户输入
+                while True:
+                    choice = input("  请选择 (数字或输入): ").strip()
+
+                    # 检查是否选择预设选项
+                    if choice.isdigit():
+                        idx = int(choice)
+                        if idx == 0 and allow_custom:
+                            # 自定义输入
+                            custom = input("  请输入: ").strip()
+                            if custom:
+                                respond_to_clarification(custom)
+                                break
+                        elif 1 <= idx <= len(options):
+                            respond_to_clarification(options[idx - 1])
+                            break
+                        else:
+                            print(f"  无效选项，请选择 1-{len(options)} 或 0")
+                    else:
+                        # 自定义输入
+                        if allow_custom and choice:
+                            respond_to_clarification(choice)
+                            break
+                        else:
+                            print("  请输入数字或自定义内容")
+
+                clear_pending_clarification()
+
+                # 将用户回答作为新消息继续对话
+                user_response = pending.get("response", "")
+                messages.append({
+                    "role": "user",
+                    "content": f"[Clarify Response] {user_response}"
+                })
+
+                # 继续运行对话循环
+                print("\n[继续思考中]...", end="", flush=True)
+                result = loop.run(messages, tool_schemas if tool_schemas else None)
+                content = result.get("final_response", "")
+                iterations = result.get("iterations", 0)
+                usage = result.get("usage")
+
             # 保存助手消息到 SQLite（JSONL 通过 on_message_append 回调自动保存）
             db.insert_message(session_id, "assistant", content)
 

@@ -14,21 +14,20 @@ from src.tools.registry import register_tool
 # ============================================================================
 # clarify - 向用户提问
 # ============================================================================
-def clarify(question: str = "", task_id: str = None) -> str:
-    """向用户提问，等待用户回答。
+def clarify(question: str = "", options: list = None, allow_custom: bool = True, task_id: str = None) -> str:
+    """向用户提问，支持预设选项和自定义输入。
 
     Args:
         question: 要问的问题。
+        options: 预设选项列表（最多 4 个）。
+        allow_custom: 是否允许用户自定义输入。
         task_id: 任务 ID。
 
     Returns:
         JSON 字符串，包含提问状态。
     """
-    return json.dumps({
-        "status": "clarification_requested",
-        "question": question,
-        "message": "Waiting for user response..."
-    }, ensure_ascii=False)
+    from src.tools.clarify_tool import clarify as do_clarify
+    return do_clarify(question=question, options=options, allow_custom=allow_custom, task_id=task_id)
 
 
 # ============================================================================
@@ -279,11 +278,20 @@ def _register_default_tools() -> None:
         toolset="clarify",
         schema={
             "name": "clarify",
-            "description": "向用户提问，等待用户回答。",
+            "description": "向用户提问，支持预设选项和自定义输入。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "question": {"type": "string", "description": "要问的问题。"},
+                    "options": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "预设选项列表（最多 4 个）。",
+                    },
+                    "allow_custom": {
+                        "type": "boolean",
+                        "description": "是否允许用户自定义输入（默认 true）。",
+                    },
                 },
                 "required": ["question"],
             },
