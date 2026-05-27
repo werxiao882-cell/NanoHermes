@@ -10,11 +10,30 @@ import pytest
 @pytest.fixture(autouse=True)
 def _setup_default_tools():
     """Setup and register default tools before each test."""
+    import importlib
     from src.tools.registry import ToolRegistry
     ToolRegistry.clear()
 
-    from src.tools.default_tools import _register_default_tools
-    _register_default_tools()
+    # Reload all tool modules to trigger re-registration
+    from src.tools import clarify_tools
+    from src.tools import code_execution_tools
+    from src.tools import cronjob_tools
+    from src.tools import delegation_tools
+    from src.tools import memory_tools
+    from src.tools import session_search_tools
+    from src.tools import skills_tools
+    from src.tools import process_tools
+    from src.tools import file_tools
+
+    importlib.reload(clarify_tools)
+    importlib.reload(code_execution_tools)
+    importlib.reload(cronjob_tools)
+    importlib.reload(delegation_tools)
+    importlib.reload(memory_tools)
+    importlib.reload(session_search_tools)
+    importlib.reload(skills_tools)
+    importlib.reload(process_tools)
+    importlib.reload(file_tools)
 
     yield
 
