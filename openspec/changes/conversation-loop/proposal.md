@@ -18,7 +18,9 @@
   - 工具调用进度显示（类似 Hermes 的 preparing xxx... 格式）
   - 工具执行时间显示
   - 代理响应分隔符
+  - 实际对话循环集成（非 Mock）
 - 实现传统 CLI 工具调用显示，展示工具名称、参数摘要和执行耗时，避免死循环
+- 实现工具调用简要结果显示（Read, Write, Glob 等操作返回摘要）
 
 ## 能力
 
@@ -30,7 +32,8 @@
 - `debug-mode`: Debug 模式，输出发送到大模型的完整请求体（JSON）、模型返回的完整响应体（JSON）、模型的思考内容（reasoning），以及工具执行结果。通过 `--debug` 命令行参数开启。
 - `slash-commands`: CLI 斜杠命令系统，所有内置命令使用 `/xxx` 格式。支持 /clear, /status, /sessions, /title, /skills, /tools。模型不会拦截斜杠命令。
 - `tools-list`: /tools 命令查看已加载工具列表，显示工具名称、工具集、描述。
-- `modern-tui`: 现代化 TUI 聊天界面，基于 rich + prompt_toolkit 实现。包含顶部横幅（模型/工具/技能/会话信息）、对话输出区域（流式显示工具调用和响应）、底部固定输入区（支持斜杠命令自动补全）。通过 `--tui` 参数启动。
+- `modern-tui`: 现代化 TUI 聊天界面，基于 rich + prompt_toolkit 实现。包含顶部横幅（模型/工具/技能/会话信息）、对话输出区域（流式显示工具调用和响应）、底部固定输入区（支持斜杠命令自动补全）。集成实际对话循环，非 Mock 实现。通过 `--tui` 参数启动。
+- `tool-result-summary`: 工具调用简要结果显示，Read/Write/Glob 等操作返回摘要信息，方便用户理解工具执行情况。
 
 ### Modified Capabilities
 
