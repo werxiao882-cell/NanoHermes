@@ -4,11 +4,13 @@
 - 顶部横幅（模型、工具、技能、会话信息）
 - 对话输出区域（流式显示工具调用和响应）
 - 底部固定输入区（支持斜杠命令自动补全）
+- 工具调用进度显示
 """
 
 from __future__ import annotations
 
 import sys
+import time
 from typing import Any, Callable
 
 from prompt_toolkit import PromptSession
@@ -141,6 +143,48 @@ class TUIChat:
             line.append(content, style="dim")
 
         self.conversation_lines.append(line)
+
+    def show_tool_progress(self, tool_name: str, action: str, elapsed: float = 0.0) -> None:
+        """显示工具调用进度。
+
+        格式类似：
+        │ 🟦 preparing skills_list...
+        │ 🟦 skills   list all 0.2s
+
+        Args:
+            tool_name: 工具名称。
+            action: 工具动作/参数。
+            elapsed: 执行时间（秒）。
+        """
+        # 使用 rich 的 status 或简单打印
+        self.console.print(f"│ 🟦 {tool_name}  {action} {elapsed:.1f}s", style="dim")
+
+    def show_tool_start(self, tool_name: str, action: str) -> None:
+        """显示工具开始执行。
+
+        Args:
+            tool_name: 工具名称。
+            action: 工具动作/参数。
+        """
+        self.console.print(f"│ 🟦 preparing {tool_name}...", style="dim")
+
+    def show_tool_complete(self, tool_name: str, action: str, elapsed: float) -> None:
+        """显示工具执行完成。
+
+        Args:
+            tool_name: 工具名称。
+            action: 工具动作/参数。
+            elapsed: 执行时间（秒）。
+        """
+        self.console.print(f"│ 🟦 {tool_name}  {action} {elapsed:.1f}s", style="dim")
+
+    def show_separator(self, agent_name: str = "Hermes") -> None:
+        """显示代理响应分隔符。
+
+        Args:
+            agent_name: 代理名称。
+        """
+        self.console.print(f"┌─ {agent_name} " + "─" * 50, style="bold yellow")
 
     def get_input(self) -> str:
         """获取用户输入。
