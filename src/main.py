@@ -421,11 +421,35 @@ def interactive_mode(debug: bool = False, resume: str | None = None, resume_titl
     from src.conversation.loop import ConversationLoop
     from src.conversation.error_classifier import ErrorCategory
 
+    # 工具进度回调
+    def _on_tool_start(tool_name: str, args: str) -> None:
+        """工具开始执行时的回调。"""
+        print(f"│ 🟦 preparing {tool_name}...")
+
+    def _on_tool_end(tool_name: str, args: str, result: str, elapsed: float) -> None:
+        """工具结束执行时的回调。"""
+        # 格式化参数显示
+        try:
+            import json
+            args_dict = json.loads(args) if args else {}
+            # 取第一个值作为动作描述，如果没有则用 'exec'
+            action = next(iter(args_dict.values())) if args_dict else "exec"
+            if isinstance(action, dict):
+                action = "exec"
+            elif len(str(action)) > 20:
+                action = str(action)[:20] + "..."
+        except Exception:
+            action = "exec"
+
+        print(f"│ 🟦 {tool_name}   {action} {elapsed:.1f}s")
+
     loop = ConversationLoop(
         max_iterations=90,
         model_call=model_caller,
         tool_dispatch=tool_dispatch_func,
         debug=debug,
+        on_tool_start=_on_tool_start,
+        on_tool_end=_on_tool_end,
     )
 
     # 设置消息追加回调，实时保存所有消息（包括 tool 消息）到 JSONL

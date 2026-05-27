@@ -46,6 +46,8 @@ class ConversationLoop:
         model_call: Callable | None = None,
         tool_dispatch: Callable | None = None,
         debug: bool = False,
+        on_tool_start: Callable | None = None,
+        on_tool_end: Callable | None = None,
     ):
         """初始化对话循环。
 
@@ -54,6 +56,8 @@ class ConversationLoop:
             model_call: 模型调用函数。
             tool_dispatch: 工具分发函数。
             debug: 是否开启 debug 模式，输出请求/响应详情。
+            on_tool_start: 工具开始执行时的回调 (tool_name, args)。
+            on_tool_end: 工具结束执行时的回调 (tool_name, args, result, elapsed)。
         """
         self.max_iterations = max_iterations
         self._model_call = model_call
@@ -61,6 +65,8 @@ class ConversationLoop:
         self._error_classifier = ErrorClassifier()
         self._on_post_turn: Callable | None = None
         self._on_message_append: Callable | None = None
+        self._on_tool_start = on_tool_start
+        self._on_tool_end = on_tool_end
         self._interrupted = False
         self.debug = debug
 
@@ -110,11 +116,26 @@ class ConversationLoop:
             # 检查是否有工具调用
             if response.get("tool_calls"):
                 for tool_call in response["tool_calls"]:
+                    func = tool_call.get("function", {})
+                    tool_name = func.get("name", "unknown")
+                    tool_args = func.get("arguments", "{}")
+
+                    # 记录开始时间
+                    import time
+                    start_time = time.time()
+
+                    # 回调：工具开始
+                    if self._on_tool_start:
+                        self._on_tool_start(tool_name, tool_args)
+
                     result = self._dispatch_tool(tool_call)
 
-                    # Debug: 输出工具结果
-                    if self.debug:
-                        self._debug_print_tool(tool_call, result)
+                    # 计算耗时
+                    elapsed = time.time() - start_time
+
+                    # 回调：工具结束
+                    if self._on_tool_end:
+                        self._on_tool_end(tool_name, tool_args, result, elapsed)
 
                     messages.append({
                         "role": "tool",
