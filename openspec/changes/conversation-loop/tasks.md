@@ -67,32 +67,17 @@
 
 - [x] 6.1 实现 ConversationLoop 工具回调机制（on_tool_start, on_tool_end）
 - [x] 6.2 实现传统 CLI 工具调用显示（工具名称、参数摘要、执行耗时）
-- [x] 6.3 添加死循环防护（相同工具调用检测）
+- [x] 6.3 移除死循环防护（不限制模型能力）
 - [x] 6.4 更新 main.py 使用工具回调
 
-## 3. 错误分类器实现
+## 7. 后台审查实现
 
-- [ ] 3.1 实现 FailoverReason 枚举
-- [ ] 3.2 实现 ClassifiedError 类
-- [ ] 3.3 实现 ErrorClassifier 类
-- [ ] 3.4 实现所有错误模式匹配（auth、billing、rate_limit、context_overflow 等）
-- [ ] 3.5 实现恢复策略决策逻辑
-- [ ] 3.6 编写错误分类的单元测试
-  - [ ] 3.6.1 测试分类 401 认证错误
-  - [ ] 3.6.2 测试分类 402 计费错误
-  - [ ] 3.6.3 测试分类 429 速率限制
-  - [ ] 3.6.4 测试分类上下文溢出
-  - [ ] 3.6.5 测试分类服务器错误
-  - [ ] 3.6.6 测试分类未知错误
-
-## 4. 后台审查实现
-
-- [ ] 4.1 实现 spawnBackgroundReview 函数
-- [ ] 4.2 实现 forkAgent 函数
-- [ ] 4.3 实现 buildReviewPrompt 函数
-- [ ] 4.4 实现 _MEMORY_REVIEW_PROMPT 和 _SKILL_REVIEW_PROMPT 常量
-- [ ] 4.5 编写后台审查的单元测试
-  - [ ] 4.5.1 测试 fork Agent 继承配置
-  - [ ] 4.5.2 测试审查记忆
-  - [ ] 4.5.3 测试审查技能
-  - [ ] 4.5.4 测试无内容可保存
+- [x] 7.1 实现 spawnBackgroundReview 函数
+- [x] 7.2 实现 forkAgent 函数
+- [x] 7.3 实现 buildReviewPrompt 函数
+- [x] 7.4 实现 _MEMORY_REVIEW_PROMPT 和 _SKILL_REVIEW_PROMPT 常量
+- [x] 7.5 编写后台审查的单元测试
+  - [x] 7.5.1 测试 fork Agent 继承配置
+  - [x] 7.5.2 测试审查记忆
+  - [x] 7.5.3 测试审查技能
+  - [x] 7.5.4 测试无内容可保存
