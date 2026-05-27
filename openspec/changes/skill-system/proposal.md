@@ -24,6 +24,7 @@
 - `skill-lifecycle`: 技能生命周期状态：active → stale（stale_after_days 后）→ archived（archive_after_days 后）。pinned 技能豁免所有自动转换。
 - `skill-manager`: SkillManager 编排器，管理技能加载、启用/禁用、按名称查找。将技能描述注入系统提示 volatile 层，使模型知道可用技能。
 - `skill-prompt-injection`: 技能提示注入，将已启用技能的描述和摘要注入到系统提示的 volatile 层。模型可根据需要请求使用技能。
+- `skill-slash-commands`: 技能斜杠命令，使用 /skills, /skills enable, /skills disable 格式管理技能。
 
 ### 修改能力
 

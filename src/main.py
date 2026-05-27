@@ -419,13 +419,14 @@ def interactive_mode(debug: bool = False, resume: str | None = None, resume_titl
     print("=" * 50)
     print(f"  NanoHermes v0.1.0 - 交互对话模式{resume_hint}")
     print("  输入 'quit' 或 'exit' 退出")
-    print("  输入 'clear' 清空对话")
-    print("  输入 'status' 查看会话状态")
-    print("  输入 'sessions' 查看历史会话列表")
-    print("  输入 'title <标题>' 设置当前会话标题")
-    print("  输入 'skills' 查看可用技能")
-    print("  输入 'skills enable <名称>' 启用技能")
-    print("  输入 'skills disable <名称>' 禁用技能")
+    print("  输入 '/clear' 清空对话")
+    print("  输入 '/status' 查看会话状态")
+    print("  输入 '/sessions' 查看历史会话列表")
+    print("  输入 '/title <标题>' 设置当前会话标题")
+    print("  输入 '/skills' 查看可用技能")
+    print("  输入 '/skills enable <名称>' 启用技能")
+    print("  输入 '/skills disable <名称>' 禁用技能")
+    print("  输入 '/tools' 查看已加载工具")
     print("=" * 50)
 
     # 跟踪是否已经自动生成标题
@@ -442,12 +443,14 @@ def interactive_mode(debug: bool = False, resume: str | None = None, resume_titl
             print("[退出] 再见!")
             break
 
-        if user_input.lower() == "clear":
+        # /clear 清空对话
+        if user_input.lower() == "/clear":
             messages = [messages[0]]  # 保留 system message
             print("[清空] 对话已清空")
             continue
 
-        if user_input.lower() == "status":
+        # /status 查看会话状态
+        if user_input.lower() == "/status":
             session_info = db.get_session(session_id)
             if session_info:
                 title = session_info.get("title") or "(未设置)"
@@ -458,12 +461,21 @@ def interactive_mode(debug: bool = False, resume: str | None = None, resume_titl
                 print(f"       输出 Token: {session_info.get('output_tokens', 0)}")
             continue
 
-        if user_input.lower() == "sessions":
+        # /sessions 查看历史会话列表
+        if user_input.lower() == "/sessions":
             list_sessions_command()
             continue
 
-        # 技能命令
-        if user_input.lower() == "skills":
+        # /title 设置会话标题
+        if user_input.lower().startswith("/title "):
+            new_title = user_input[7:].strip()
+            if new_title:
+                db.set_session_title(session_id, new_title)
+                print(f"[标题] 已设置为: {new_title}")
+            continue
+
+        # /skills 查看可用技能
+        if user_input.lower() == "/skills":
             entries = skill_manager.list_skills()
             if not entries:
                 print("[技能] 没有已加载的技能")
@@ -475,27 +487,35 @@ def interactive_mode(debug: bool = False, resume: str | None = None, resume_titl
                 print()
             continue
 
-        if user_input.lower().startswith("skills enable "):
-            name = user_input[14:].strip()
+        # /skills enable 启用技能
+        if user_input.lower().startswith("/skills enable "):
+            name = user_input[15:].strip()
             if skill_manager.enable_skill(name):
                 print(f"[技能] 已启用: {name}")
             else:
                 print(f"[技能] 未找到: {name}")
             continue
 
-        if user_input.lower().startswith("skills disable "):
-            name = user_input[15:].strip()
+        # /skills disable 禁用技能
+        if user_input.lower().startswith("/skills disable "):
+            name = user_input[16:].strip()
             if skill_manager.disable_skill(name):
                 print(f"[技能] 已禁用: {name}")
             else:
                 print(f"[技能] 未找到: {name}")
             continue
 
-        if user_input.lower().startswith("title "):
-            new_title = user_input[6:].strip()
-            if new_title:
-                db.set_session_title(session_id, new_title)
-                print(f"[标题] 已设置为: {new_title}")
+        # /tools 查看已加载工具
+        if user_input.lower() == "/tools":
+            from src.tools.registry import ToolRegistry
+            tools = ToolRegistry.get_all_tools()
+            if not tools:
+                print("[工具] 没有已加载的工具")
+            else:
+                print(f"\n[工具] 已加载工具 ({len(tools)} 个):")
+                for t in tools:
+                    print(f"  ⚡ {t.name} ({t.toolset}): {t.description or t.schema.get('description', '')[:80]}")
+                print()
             continue
 
         if not user_input:
