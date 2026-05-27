@@ -23,16 +23,25 @@ from __future__ import annotations
 # ============================================================================
 TOOLSETS: dict[str, list[str]] = {
     # 终端工具集：命令执行
-    "terminal": ["terminal"],
+    "terminal": ["terminal", "process"],
 
-    # 文件工具集：文件读写、搜索
-    "file": ["read_file", "write_file", "search_files"],
+    # 文件工具集：文件读写、搜索、patch
+    "file": ["read_file", "write_file", "search_files", "patch"],
 
     # 搜索工具集：网络搜索
     "search": ["web_search"],
 
     # 安全工具集：只读操作
     "safe": ["read_file", "search_files"],
+
+    # 默认工具集
+    "clarify": ["clarify"],
+    "code_execution": ["execute_code"],
+    "cronjob": ["cronjob"],
+    "delegation": ["delegate_task"],
+    "memory": ["memory"],
+    "session_search": ["session_search"],
+    "skills": ["skill_manage", "skill_view", "skills_list"],
 }
 
 # 旧版工具集名称映射（向后兼容）
