@@ -338,12 +338,25 @@ def interactive_mode(debug: bool = False, resume: str | None = None, resume_titl
 
     # 预取记忆并注入到 stable 层
     memory_context = memory_manager.build_system_prompt_section()
+
+    # ========================================================================
+    # 5.5 初始化 Skill System - 技能管理
+    # ========================================================================
+    from src.skills.manager import SkillManager
+
+    skill_manager = SkillManager()
+    skills_prompt = skill_manager.build_skill_prompt()
+
+    # 组装 stable 层（身份 + 工具 + 记忆 + 技能）
+    stable_parts = [
+        "你是 NanoHermes，一个有用的 AI 助手。",
+        "你可以使用终端工具执行命令。",
+    ]
     if memory_context:
-        assembler.set_stable([
-            "你是 NanoHermes，一个有用的 AI 助手。",
-            "你可以使用终端工具执行命令。",
-            memory_context,
-        ])
+        stable_parts.append(memory_context)
+    if skills_prompt:
+        stable_parts.append(skills_prompt)
+    assembler.set_stable(stable_parts)
 
     # ========================================================================
     # 6. 初始化 Conversation Loop - 核心对话循环
@@ -410,6 +423,9 @@ def interactive_mode(debug: bool = False, resume: str | None = None, resume_titl
     print("  输入 'status' 查看会话状态")
     print("  输入 'sessions' 查看历史会话列表")
     print("  输入 'title <标题>' 设置当前会话标题")
+    print("  输入 'skills' 查看可用技能")
+    print("  输入 'skills enable <名称>' 启用技能")
+    print("  输入 'skills disable <名称>' 禁用技能")
     print("=" * 50)
 
     # 跟踪是否已经自动生成标题
@@ -444,6 +460,35 @@ def interactive_mode(debug: bool = False, resume: str | None = None, resume_titl
 
         if user_input.lower() == "sessions":
             list_sessions_command()
+            continue
+
+        # 技能命令
+        if user_input.lower() == "skills":
+            entries = skill_manager.list_skills()
+            if not entries:
+                print("[技能] 没有已加载的技能")
+            else:
+                print(f"\n[技能] 可用技能 ({len(entries)} 个):")
+                for e in entries:
+                    status = "✓" if e.enabled else "✗"
+                    print(f"  {status} {e.skill.name}: {e.skill.description}")
+                print()
+            continue
+
+        if user_input.lower().startswith("skills enable "):
+            name = user_input[14:].strip()
+            if skill_manager.enable_skill(name):
+                print(f"[技能] 已启用: {name}")
+            else:
+                print(f"[技能] 未找到: {name}")
+            continue
+
+        if user_input.lower().startswith("skills disable "):
+            name = user_input[15:].strip()
+            if skill_manager.disable_skill(name):
+                print(f"[技能] 已禁用: {name}")
+            else:
+                print(f"[技能] 未找到: {name}")
             continue
 
         if user_input.lower().startswith("title "):
