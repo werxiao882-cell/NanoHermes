@@ -9,6 +9,9 @@
 - 实现技能使用追踪
 - 实现 Curator 后台技能维护
 - 实现技能生命周期状态管理
+- 实现 SkillManager 编排器，管理技能加载、启用/禁用
+- 将技能内容注入到系统提示的 volatile 层，使模型知道可用技能
+- 实现 CLI 命令：/skills list, /skills enable, /skills disable, /skills info
 
 ## 能力
 
@@ -19,6 +22,8 @@
 - `skill-usage-tracking`: 技能使用追踪，记录 use_count、view_count、patch_count、last_activity_at、state（active/stale/archived）、pinned。
 - `curator`: Curator 后台维护，定期审查 Agent 创建的技能，自动转换生命周期状态。空闲时触发（min_idle_hours），间隔后运行（interval_hours）。
 - `skill-lifecycle`: 技能生命周期状态：active → stale（stale_after_days 后）→ archived（archive_after_days 后）。pinned 技能豁免所有自动转换。
+- `skill-manager`: SkillManager 编排器，管理技能加载、启用/禁用、按名称查找。将技能描述注入系统提示 volatile 层，使模型知道可用技能。
+- `skill-prompt-injection`: 技能提示注入，将已启用技能的描述和摘要注入到系统提示的 volatile 层。模型可根据需要请求使用技能。
 
 ### 修改能力
 
