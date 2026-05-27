@@ -226,6 +226,55 @@ def build_tool_dispatcher():
     return tool_dispatch
 
 
+def run_tui_mode(debug: bool = False, resume: str | None = None, resume_title: str | None = None):
+    """运行现代化 TUI 聊天界面。
+
+    Args:
+        debug: 是否开启 debug 模式。
+        resume: 恢复会话 ID。
+        resume_title: 通过标题恢复会话。
+    """
+    load_dotenv()
+
+    api_key = os.environ.get("DASHSCOPE_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    base_url = os.environ.get("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    model = os.environ.get("MODEL_NAME", "qwen3.6-plus")
+
+    if not api_key:
+        print("[错误] 未设置 API Key，请在 .env 文件中配置")
+        sys.exit(1)
+
+    from openai import OpenAI
+    client = OpenAI(api_key=api_key, base_url=base_url)
+
+    # 获取工具数量
+    from src.tools import terminal
+    from src.tools import file_tools
+    from src.tools import clarify_tools
+    from src.tools import code_execution_tools
+    from src.tools import cronjob_tools
+    from src.tools import delegation_tools
+    from src.tools import memory_tools
+    from src.tools import session_search_tools
+    from src.tools import skills_tools
+    from src.tools import process_tools
+    from src.tools.registry import ToolRegistry
+    tool_count = len(ToolRegistry.get_all_tools())
+
+    # 获取技能数量
+    from src.skills.manager import SkillManager
+    skill_manager = SkillManager()
+    skill_count = len(skill_manager.list_skills())
+
+    # 会话 ID
+    session_id = "new_session"
+
+    # 启动 TUI
+    from src.cli.tui_chat import TUIChat
+    tui = TUIChat(model=model, session_id=session_id, tool_count=tool_count, skill_count=skill_count)
+    tui.run()
+
+
 def interactive_mode(debug: bool = False, resume: str | None = None, resume_title: str | None = None):
     """交互对话模式 - 耦合所有核心模块。
 
@@ -657,12 +706,16 @@ def main():
                         help="通过标题恢复历史会话")
     parser.add_argument("--list-sessions", action="store_true",
                         help="列出所有历史会话")
+    parser.add_argument("--tui", action="store_true",
+                        help="启动现代化 TUI 聊天界面")
     args = parser.parse_args()
 
     if args.test_api:
         test_api()
     elif args.list_sessions:
         list_sessions_command()
+    elif args.tui:
+        run_tui_mode(debug=args.debug, resume=args.resume, resume_title=args.resume_title)
     else:
         interactive_mode(debug=args.debug, resume=args.resume, resume_title=args.resume_title)
 
