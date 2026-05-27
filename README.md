@@ -383,11 +383,55 @@ src/tools/
 ---
 
 **NanoHermes 项目统计**:
--  10 个核心模块
+- ️ 10 个核心模块
 - 🧪 166 个单元测试
 - 📝 48 个源文件
 - 🔄 20+ 次提交
 - ⏱️ 从 0 到完整实现，高效迭代
+
+## Vibe Coding 环境
+
+本项目使用以下工具和环境进行开发：
+
+| 类别 | 工具/框架 | 说明 |
+|------|-----------|------|
+| **Agent 框架** | opencode | 命令行 AI 编程助手，支持 explore mode 和 change proposal 工作流 |
+| **主要模型** | Qwen3.6-Plus (通义千问) | 通过 DashScope API 调用，支持工具调用和长上下文 |
+| **API 端点** | `https://dashscope.aliyuncs.com/compatible-mode/v1` | OpenAI 兼容模式 |
+| **编程语言** | Python 3.14 | 主要开发语言 |
+| **测试框架** | pytest + pytest-asyncio | 单元测试和异步测试 |
+| **UI 库** | rich + prompt_toolkit | TUI 聊天界面 |
+| **数据库** | SQLite (Python 标准库) | 会话持久化存储 |
+| **LLM SDK** | openai + anthropic | 多提供商支持 |
+| **配置管理** | python-dotenv + pyyaml | 环境变量和 YAML 配置 |
+| **版本控制** | Git + GitHub | 代码托管和协作 |
+| **包管理** | pip + pyproject.toml | Python 依赖管理 |
+| **镜像源** | 清华大学 PyPI 镜像 | 加速依赖下载 |
+
+### 模型配置示例
+
+```bash
+# .env 文件
+DASHSCOPE_API_KEY=sk-xxx
+DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+MODEL_NAME=qwen3.6-plus
+```
+
+### opencode 工作流
+
+```bash
+# 探索模式 - 讨论架构和设计
+/opsx-explore
+
+# 创建变更提案
+/opsx-propose add-new-feature
+
+# 实现变更
+/opsx-apply add-new-feature
+
+# 归档完成的变更
+/opsx-archive add-new-feature
+```
 
 ## 许可证
 
