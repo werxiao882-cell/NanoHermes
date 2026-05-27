@@ -42,6 +42,7 @@ TOOLSETS: dict[str, list[str]] = {
     "memory": ["memory"],
     "session_search": ["session_search"],
     "skills": ["skill_manage", "skill_view", "skills_list"],
+    "todo": ["todo"],
 }
 
 # 旧版工具集名称映射（向后兼容）

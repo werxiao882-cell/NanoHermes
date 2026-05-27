@@ -309,6 +309,7 @@ def run_tui_mode(debug: bool = False, resume: str | None = None, resume_title: s
     from src.tools import session_search_tools
     from src.tools import skills_tools
     from src.tools import process_tools
+    from src.tools import todo_tools
     from src.tools.registry import ToolRegistry
     tool_count = len(ToolRegistry.get_all_tools())
 
@@ -365,6 +366,7 @@ def interactive_mode(debug: bool = False, resume: str | None = None, resume_titl
     from src.tools import session_search_tools  # noqa: F401
     from src.tools import skills_tools  # noqa: F401
     from src.tools import process_tools  # noqa: F401
+    from src.tools import todo_tools  # noqa: F401
     from src.tools.dispatcher import dispatch as tool_dispatch_func
 
     # 自动发现并注册工具模块
