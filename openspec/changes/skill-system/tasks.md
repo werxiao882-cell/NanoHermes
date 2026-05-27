@@ -59,3 +59,15 @@
   - [ ] 6.1.1 测试 active → stale
   - [ ] 6.1.2 测试 stale → archived
   - [ ] 6.1.3 测试恢复归档技能
+
+## 7. 技能管理工具实现
+
+- [x] 7.1 实现 skill_manage 工具（create, edit, patch, delete, write_file, remove_file）
+- [x] 7.2 实现技能名称验证（≤64 字符，小写字母/数字/连字符/点/下划线）
+- [x] 7.3 实现 SKILL.md 前置元数据验证（name, description, --- 格式）
+- [x] 7.4 实现内容大小限制（SKILL.md ≤100k 字符，支持文件 ≤1MiB）
+- [x] 7.5 实现原子写入（临时文件 + os.replace）
+- [x] 7.6 实现路径安全验证（防止路径遍历，限制子目录）
+- [x] 7.7 实现 skill_view 工具（查看技能详情和支持文件）
+- [x] 7.8 实现 skills_list 工具（列出技能，支持关键词过滤）
+- [x] 7.9 编写技能管理工具的单元测试

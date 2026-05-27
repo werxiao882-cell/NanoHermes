@@ -186,7 +186,7 @@ class TestDefaultToolExecution:
         from src.tools.dispatcher import dispatch
         result = dispatch("skills_list", {})
         data = json.loads(result)
-        assert data["status"] == "success"
+        assert data["success"] is True
         assert data["skills"] == []
 
     def test_process_execution(self):
