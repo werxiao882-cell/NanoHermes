@@ -74,3 +74,20 @@
 - [ ] 9.2 编写终端工具集成测试（执行命令 → 获取输出）
 - [ ] 9.3 编写危险命令审批集成测试
 - [ ] 9.4 编写工具集过滤集成测试（enabled/disabled）
+
+## 10. 工具文件重构
+
+- [x] 10.1 统一工具文件命名格式：`<category>_tools.py`
+- [x] 10.2 拆分 default_tools.py 为独立文件：
+  - clarify_tools.py
+  - code_execution_tools.py
+  - cronjob_tools.py
+  - delegation_tools.py
+  - memory_tools.py
+  - session_search_tools.py
+  - skills_tools.py
+  - process_tools.py
+- [x] 10.3 删除废弃的 default_tools.py 和 clarify_tool.py
+- [x] 10.4 更新 main.py 导入路径
+- [x] 10.5 更新测试文件导入路径
+- [x] 10.6 验证所有测试通过

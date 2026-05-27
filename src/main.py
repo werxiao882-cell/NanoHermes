@@ -255,9 +255,16 @@ def interactive_mode(debug: bool = False, resume: str | None = None, resume_titl
     # 2. 初始化 Tool Runtime - 工具注册和分发
     # ========================================================================
     from src.tools.registry import discover_tools
-    from src.tools import terminal  # noqa: F401 - 触发终端工具自动注册
-    from src.tools import file_tools  # noqa: F401 - 触发文件工具自动注册
-    from src.tools import default_tools  # noqa: F401 - 触发默认工具自动注册
+    from src.tools import terminal  # noqa: F401
+    from src.tools import file_tools  # noqa: F401
+    from src.tools import clarify_tools  # noqa: F401
+    from src.tools import code_execution_tools  # noqa: F401
+    from src.tools import cronjob_tools  # noqa: F401
+    from src.tools import delegation_tools  # noqa: F401
+    from src.tools import memory_tools  # noqa: F401
+    from src.tools import session_search_tools  # noqa: F401
+    from src.tools import skills_tools  # noqa: F401
+    from src.tools import process_tools  # noqa: F401
     from src.tools.dispatcher import dispatch as tool_dispatch_func
 
     # 自动发现并注册工具模块
@@ -549,7 +556,7 @@ def interactive_mode(debug: bool = False, resume: str | None = None, resume_titl
             usage = result.get("usage")
 
             # 检查是否有 clarify 工具调用
-            from src.tools.clarify_tool import get_pending_clarification, respond_to_clarification, clear_pending_clarification
+            from src.tools.clarify_tools import get_pending_clarification, respond_to_clarification, clear_pending_clarification
             pending = get_pending_clarification()
 
             if pending and pending.get("status") == "pending":

@@ -279,6 +279,53 @@ def _register_file_tools() -> None:
         description="搜索文件",
     )
 
+    # patch
+    register_tool(
+        name="patch",
+        toolset="file",
+        schema={
+            "name": "patch",
+            "description": "文件查找替换编辑。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "文件路径。"},
+                    "old_str": {"type": "string", "description": "要查找的字符串。"},
+                    "new_str": {"type": "string", "description": "替换后的字符串。"},
+                },
+                "required": ["path", "old_str", "new_str"],
+            },
+        },
+        handler=patch,
+        description="查找替换编辑",
+    )
+
+
+# ============================================================================
+# patch - 查找替换编辑
+# ============================================================================
+def patch(path: str = "", old_str: str = "", new_str: str = "", task_id: str = None) -> str:
+    """文件查找替换编辑。"""
+    try:
+        file_path = Path(path)
+        if not file_path.exists():
+            return json.dumps({"error": f"File not found: {path}"}, ensure_ascii=False)
+
+        content = file_path.read_text(encoding="utf-8")
+        if old_str not in content:
+            return json.dumps({"error": f"String not found: {old_str[:50]}..."}, ensure_ascii=False)
+
+        new_content = content.replace(old_str, new_str, 1)
+        file_path.write_text(new_content, encoding="utf-8")
+
+        return json.dumps({
+            "status": "success",
+            "path": path,
+            "message": "Patch applied successfully."
+        }, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"error": f"Patch failed: {type(e).__name__}: {e}"}, ensure_ascii=False)
+
 
 # 模块导入时自动注册
 _register_file_tools()
