@@ -25,7 +25,7 @@
 - `skill-usage-tracking`: 技能使用追踪，记录 use_count、view_count、patch_count、last_activity_at、state（active/stale/archived）、pinned。
 - `curator`: Curator 后台维护，定期审查 Agent 创建的技能，自动转换生命周期状态。空闲时触发（min_idle_hours），间隔后运行（interval_hours）。
 - `skill-lifecycle`: 技能生命周期状态：active → stale（stale_after_days 后）→ archived（archive_after_days 后）。pinned 技能豁免所有自动转换。
-- `skill-manager`: SkillManager 编排器，管理技能加载、启用/禁用、按名称查找。将技能描述注入系统提示 volatile 层，使模型知道可用技能。
+- `skill-manager`: SkillManager 编排器，管理技能加载、启用/禁用、创建、编辑、删除、支持文件管理。核心业务逻辑集中在此类中。将技能描述注入系统提示 volatile 层，使模型知道可用技能。
 - `skill-prompt-injection`: 技能提示注入，将已启用技能的描述和摘要注入到系统提示的 volatile 层。模型可根据需要请求使用技能。
 - `skill-slash-commands`: 技能斜杠命令，使用 /skills, /skills enable, /skills disable 格式管理技能。
 - `skill-manage-tool`: 技能管理工具，支持 create（创建）、edit（编辑）、patch（补丁）、delete（删除）、write_file（写入支持文件）、remove_file（删除支持文件）。参考 Hermes Agent 实现，包含名称验证、前置元数据验证、内容大小限制、原子写入、路径安全等。
