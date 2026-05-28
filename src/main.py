@@ -297,8 +297,9 @@ def run_tui_mode(debug: bool = False, resume: str | None = None, resume_title: s
 
     from openai import OpenAI
     client = OpenAI(api_key=api_key, base_url=base_url)
+    model_caller = build_model_caller(client, model)
 
-    # 获取工具数量
+    # 初始化工具
     from src.tools import terminal
     from src.tools import file_tools
     from src.tools import clarify_tools
@@ -311,7 +312,11 @@ def run_tui_mode(debug: bool = False, resume: str | None = None, resume_title: s
     from src.tools import process_tools
     from src.tools import todo_tools
     from src.tools.registry import ToolRegistry
+    from src.tools.dispatcher import dispatch as tool_dispatch_func
+    from src.tools.registry import get_tool_schemas
+
     tool_count = len(ToolRegistry.get_all_tools())
+    tool_schemas = get_tool_schemas()
 
     # 获取技能数量
     from src.skills.manager import SkillManager
@@ -323,7 +328,15 @@ def run_tui_mode(debug: bool = False, resume: str | None = None, resume_title: s
 
     # 启动 TUI
     from src.cli.tui_chat import TUIChat
-    tui = TUIChat(model=model, session_id=session_id, tool_count=tool_count, skill_count=skill_count)
+    tui = TUIChat(
+        model=model,
+        session_id=session_id,
+        tool_count=tool_count,
+        skill_count=skill_count,
+        model_caller=model_caller,
+        tool_dispatch=tool_dispatch_func,
+        tool_schemas=tool_schemas,
+    )
     tui.run()
 
 
