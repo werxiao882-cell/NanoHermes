@@ -57,7 +57,8 @@
 │  ├── memory_tools.py     - 持久记忆                          │
 │  ├── session_search_tools.py - 历史会话搜索                  │
 │  ├── skills_tools.py     - 技能管理（调用 SkillManager）     │
-│  └── process_tools.py    - 后台进程管理                      │
+│  ├── process_tools.py    - 后台进程管理                      │
+│  └── todo_tools.py       - 任务计划（TodoStore + 状态管理）  │
 └──────────────────────────────────────────────────────────────┘
 ```
 
