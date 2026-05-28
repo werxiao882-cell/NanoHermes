@@ -5,12 +5,14 @@
 - 对话输出区域（流式显示工具调用和响应）
 - 底部固定输入区（支持斜杠命令自动补全）
 - 工具调用进度显示
+- 实际对话循环集成
 """
 
 from __future__ import annotations
 
 import sys
 import time
+import json
 from typing import Any, Callable
 
 from prompt_toolkit import PromptSession
@@ -22,6 +24,7 @@ from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
+from rich.status import Status
 
 # ============================================================================
 # 斜杠命令自动补全
@@ -67,7 +70,16 @@ class TUIChat:
         conversation_lines: 对话输出行列表。
     """
 
-    def __init__(self, model: str, session_id: str, tool_count: int, skill_count: int):
+    def __init__(
+        self,
+        model: str,
+        session_id: str,
+        tool_count: int,
+        skill_count: int,
+        model_caller: Callable | None = None,
+        tool_dispatch: Callable | None = None,
+        tool_schemas: list[dict[str, Any]] | None = None,
+    ):
         """初始化 TUI 聊天界面。
 
         Args:
@@ -75,6 +87,9 @@ class TUIChat:
             session_id: 会话 ID。
             tool_count: 工具数量。
             skill_count: 技能数量。
+            model_caller: 模型调用函数。
+            tool_dispatch: 工具分发函数。
+            tool_schemas: 工具 schema 列表。
         """
         self.console = Console()
         self.history = InMemoryHistory()
@@ -88,6 +103,10 @@ class TUIChat:
         self.tool_count = tool_count
         self.skill_count = skill_count
         self.conversation_lines: list[Text] = []
+        self.model_caller = model_caller
+        self.tool_dispatch = tool_dispatch
+        self.tool_schemas = tool_schemas or []
+        self.messages: list[dict[str, Any]] = []
 
     def _render_banner(self) -> Panel:
         """渲染顶部横幅。"""
@@ -144,21 +163,6 @@ class TUIChat:
 
         self.conversation_lines.append(line)
 
-    def show_tool_progress(self, tool_name: str, action: str, elapsed: float = 0.0) -> None:
-        """显示工具调用进度。
-
-        格式类似：
-        │ 🟦 preparing skills_list...
-        │ 🟦 skills   list all 0.2s
-
-        Args:
-            tool_name: 工具名称。
-            action: 工具动作/参数。
-            elapsed: 执行时间（秒）。
-        """
-        # 使用 rich 的 status 或简单打印
-        self.console.print(f"│ 🟦 {tool_name}  {action} {elapsed:.1f}s", style="dim")
-
     def show_tool_start(self, tool_name: str, action: str) -> None:
         """显示工具开始执行。
 
@@ -177,6 +181,32 @@ class TUIChat:
             elapsed: 执行时间（秒）。
         """
         self.console.print(f"│ 🟦 {tool_name}  {action} {elapsed:.1f}s", style="dim")
+
+    def show_tool_result_summary(self, tool_name: str, result: str) -> None:
+        """显示工具调用简要结果。
+
+        Args:
+            tool_name: 工具名称。
+            result: 工具执行结果（JSON 字符串）。
+        """
+        try:
+            data = json.loads(result)
+            if tool_name == "read_file":
+                lines = data.get("content", "").count("\n") + 1
+                self.console.print(f"│ 📄 read_file: {lines} lines read", style="dim")
+            elif tool_name == "write_file":
+                bytes_written = data.get("bytes_written", 0)
+                self.console.print(f"│ 📝 write_file: {bytes_written} bytes written", style="dim")
+            elif tool_name == "search_files":
+                count = data.get("total_found", 0)
+                self.console.print(f"│ 🔍 search_files: {count} files found", style="dim")
+            elif tool_name == "terminal":
+                exit_code = data.get("exit_code", -1)
+                self.console.print(f"│ 💻 terminal: exit code {exit_code}", style="dim")
+            else:
+                self.console.print(f"│ ✅ {tool_name}: completed", style="dim")
+        except (json.JSONDecodeError, AttributeError):
+            self.console.print(f"│ ✅ {tool_name}: completed", style="dim")
 
     def show_separator(self, agent_name: str = "Hermes") -> None:
         """显示代理响应分隔符。
@@ -200,6 +230,76 @@ class TUIChat:
     def clear_conversation(self) -> None:
         """清空对话区域。"""
         self.conversation_lines.clear()
+        self.messages = [m for m in self.messages if m.get("role") == "system"]
+
+    def _run_conversation_loop(self, user_input: str) -> None:
+        """运行实际对话循环。
+
+        Args:
+            user_input: 用户输入。
+        """
+        if not self.model_caller or not self.tool_dispatch:
+            # Fallback to mock if no caller/dispatch
+            self.add_message("assistant", "This is a simulated response.", is_tool=False)
+            return
+
+        # Add user message
+        self.messages.append({"role": "user", "content": user_input})
+
+        max_iterations = 10
+        for iteration in range(max_iterations):
+            # Call model
+            with self.console.status("[dim]Thinking...[/dim]", spinner="dots"):
+                response = self.model_caller(self.messages, self.tool_schemas if self.tool_schemas else None)
+
+            content = response.get("content", "")
+            tool_calls = response.get("tool_calls")
+
+            if tool_calls:
+                # Process tool calls
+                for tool_call in tool_calls:
+                    func = tool_call.get("function", {})
+                    tool_name = func.get("name", "unknown")
+                    tool_args = func.get("arguments", "{}")
+
+                    # Show tool start
+                    try:
+                        args_dict = json.loads(tool_args)
+                        action = next(iter(args_dict.values())) if args_dict else "exec"
+                        if isinstance(action, dict):
+                            action = "exec"
+                        elif len(str(action)) > 20:
+                            action = str(action)[:20] + "..."
+                    except (json.JSONDecodeError, StopIteration):
+                        action = "exec"
+
+                    self.show_tool_start(tool_name, action)
+
+                    # Execute tool
+                    start_time = time.time()
+                    result = self.tool_dispatch(tool_name, tool_args)
+                    elapsed = time.time() - start_time
+
+                    # Show tool complete and result summary
+                    self.show_tool_complete(tool_name, action, elapsed)
+                    self.show_tool_result_summary(tool_name, result)
+
+                    # Add tool result to messages
+                    self.messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.get("id", ""),
+                        "content": result,
+                    })
+
+                continue
+
+            # No tool calls, show response
+            if content:
+                self.show_separator()
+                self.console.print(content)
+                self.console.print()
+                self.messages.append({"role": "assistant", "content": content})
+            break
 
     def run(self) -> None:
         """运行 TUI 主循环。"""
@@ -223,13 +323,13 @@ class TUIChat:
                     self.console.print(f"  {cmd}")
                 continue
 
-            # 添加用户消息
+            # Add user message to display
             self.add_message("user", user_input)
 
-            # 这里应该调用对话循环，现在只是模拟
-            self.add_message("assistant", "This is a simulated response.", is_tool=False)
+            # Run actual conversation loop
+            self._run_conversation_loop(user_input)
 
-            # 刷新显示
+            # Refresh display
             self.console.print(self._render_banner())
             self.console.print()
             self.console.print(self._render_conversation())
