@@ -123,7 +123,6 @@ class TUIChat:
     def _render_conversation(self) -> Panel:
         """渲染对话输出区域。"""
         conversation_text = Text()
-        conversation_text.append("Conversation output\n\n", style="dim")
 
         for line in self.conversation_lines:
             conversation_text.append(line)
@@ -208,7 +207,7 @@ class TUIChat:
         except (json.JSONDecodeError, AttributeError):
             self.console.print(f"│ ✅ {tool_name}: completed", style="dim")
 
-    def show_separator(self, agent_name: str = "Hermes") -> None:
+    def show_separator(self, agent_name: str = "NanoHermes") -> None:
         """显示代理响应分隔符。
 
         Args:
