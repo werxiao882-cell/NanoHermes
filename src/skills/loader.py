@@ -1,5 +1,11 @@
 """SkillLoader - SKILL.md 解析器。
 
+参考 Hermes Agent 实现，支持：
+- BOM 字符处理
+- YAML 库解析（优先）+ 简单解析回退
+- 列表类型的 platforms 字段
+- 嵌套元数据（metadata.hermes.config 等）
+
 SKILL.md 标准格式：
 ---
 name: skill-name
@@ -7,6 +13,7 @@ description: 简短描述（≤60 字符）
 version: 1.0.0
 author: Author Name
 license: MIT
+platforms: [linux, macos]
 ---
 
 # Skill Name
@@ -20,6 +27,13 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+# 尝试导入 yaml 库（可选依赖）
+try:
+    import yaml
+    _HAS_YAML = True
+except ImportError:
+    _HAS_YAML = False
 
 
 @dataclass
@@ -49,7 +63,10 @@ class Skill:
 class SkillLoader:
     """SKILL.md 解析器。
 
-    解析 YAML frontmatter 和 Markdown 正文。
+    参考 Hermes Agent 的 parse_frontmatter 实现：
+    - 优先使用 yaml.safe_load 解析（支持嵌套结构、列表）
+    - 回退到简单 key:value 解析（无 yaml 库时）
+    - 处理 BOM 字符
     """
 
     def load(self, path: str | Path) -> Skill:
@@ -77,13 +94,20 @@ class SkillLoader:
                 f"SKILL.md description 超过 60 字符 ({len(description)}): {path}"
             )
 
+        # 处理 platforms 字段（可能是字符串或列表）
+        platforms = frontmatter.get("platforms")
+        if isinstance(platforms, str):
+            platforms = [p.strip() for p in platforms.split(",") if p.strip()]
+        elif platforms is not None and not isinstance(platforms, list):
+            platforms = [str(platforms)]
+
         return Skill(
             name=name,
             description=description,
             version=frontmatter.get("version", "1.0.0"),
             author=frontmatter.get("author", ""),
             license=frontmatter.get("license", ""),
-            platforms=frontmatter.get("platforms"),
+            platforms=platforms,
             body=body,
             path=str(path),
         )
@@ -91,12 +115,22 @@ class SkillLoader:
     def _parse_frontmatter(self, text: str) -> tuple[dict[str, Any], str]:
         """解析 YAML frontmatter。
 
+        参考 Hermes Agent 实现：
+        1. 移除 BOM 字符
+        2. 查找 --- 分隔符
+        3. 优先使用 yaml.safe_load 解析
+        4. 回退到简单 key:value 解析
+
         Args:
             text: SKILL.md 全文。
 
         Returns:
             (frontmatter_dict, body) 元组。
         """
+        # 移除 BOM 字符
+        text = text.lstrip("\ufeff")
+
+        # 查找 frontmatter 分隔符
         match = re.match(r"^---\n(.*?)\n---\n(.*)$", text, re.DOTALL)
         if not match:
             raise ValueError("SKILL.md 缺少 YAML frontmatter")
@@ -104,14 +138,24 @@ class SkillLoader:
         yaml_text = match.group(1)
         body = match.group(2).strip()
 
+        # 优先使用 yaml 库解析
+        if _HAS_YAML:
+            try:
+                frontmatter = yaml.safe_load(yaml_text)
+                if isinstance(frontmatter, dict):
+                    return frontmatter, body
+            except Exception:
+                pass  # 回退到简单解析
+
         # 简单 YAML 解析（不使用外部库）
         frontmatter = {}
         for line in yaml_text.split("\n"):
-            if ":" in line:
-                key, _, value = line.partition(":")
-                key = key.strip()
-                value = value.strip().strip('"').strip("'")
-                frontmatter[key] = value
+            if ":" not in line:
+                continue
+            key, _, value = line.partition(":")
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            frontmatter[key] = value
 
         return frontmatter, body
 
