@@ -45,7 +45,7 @@ class TestMainModule:
         from src import main
         assert hasattr(main, "main")
         assert hasattr(main, "test_api")
-        assert hasattr(main, "interactive_mode")
+        assert hasattr(main, "main_chat")
 
     def test_build_model_caller(self):
         """测试 build_model_caller 构建正确的调用函数。"""
