@@ -162,6 +162,33 @@ class TUIChat:
 
         self.conversation_lines.append(line)
 
+    def show_reasoning(self, reasoning: str, elapsed_ms: float = 0) -> None:
+        """显示模型思考内容（可折叠）。
+
+        格式：
+        + Thought: 494ms
+          (点击 + 展开思考内容)
+
+        Args:
+            reasoning: 思考内容。
+            elapsed_ms: 思考耗时（毫秒）。
+        """
+        if not reasoning:
+            return
+
+        if elapsed_ms < 1000:
+            time_str = f"{elapsed_ms:.0f}ms"
+        else:
+            time_str = f"{elapsed_ms / 1000:.1f}s"
+
+        # 显示折叠的思考内容
+        self.console.print(f"[bold orange]+ Thought: {time_str}[/bold orange]")
+        # 显示预览（前 50 字符）
+        preview = reasoning[:50] + "..." if len(reasoning) > 50 else reasoning
+        self.console.print(f"[dim]  {preview}[/dim]")
+        self.console.print("[dim]  (点击 + 展开完整思考内容)[/dim]")
+        self.console.print()
+
     def show_tool_start(self, tool_name: str, action: str) -> None:
         """显示工具开始执行。
 
@@ -253,6 +280,11 @@ class TUIChat:
 
             content = response.get("content", "")
             tool_calls = response.get("tool_calls")
+            reasoning = response.get("reasoning")
+
+            # Show reasoning if available
+            if reasoning:
+                self.show_reasoning(reasoning)
 
             if tool_calls:
                 # Process tool calls
