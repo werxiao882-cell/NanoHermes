@@ -132,7 +132,8 @@ class TestSkillLoader:
 
             loader = SkillLoader()
             skill = loader.load(skill_file)
-            assert skill.platforms == "[linux, macos]"
+            # platforms 应该被正确解析为列表
+            assert skill.platforms == ["linux", "macos"]
 
     def test_parse_frontmatter_simple(self):
         """Test parsing simple frontmatter."""
