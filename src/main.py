@@ -317,27 +317,59 @@ def main_chat(debug: bool = False, resume: str | None = None, resume_title: str 
 
     tool_count = len(ToolRegistry.get_all_tools())
     tool_schemas = get_tool_schemas()
+    
+    # 按工具集分类工具
+    tool_categories = {}
+    for tool in ToolRegistry.get_all_tools():
+        category = tool.toolset
+        if category not in tool_categories:
+            tool_categories[category] = []
+        tool_categories[category].append(tool.name)
 
     # 获取技能数量
     from src.skills.manager import SkillManager
     skill_manager = SkillManager()
     skill_count = len(skill_manager.list_skills())
+    
+    # 按类别分类技能
+    skill_categories = {}
+    for entry in skill_manager.list_skills():
+        # 从路径推断类别
+        path = entry.skill.path
+        if "/skills/" in path:
+            parts = path.split("/skills/")[1].split("/")
+            if len(parts) >= 2:
+                category = parts[0]
+            else:
+                category = "other"
+        else:
+            category = "other"
+        
+        if category not in skill_categories:
+            skill_categories[category] = []
+        skill_categories[category].append(entry.skill.name)
 
     # 会话 ID
     session_id = "new_session"
 
-    # 启动 TUI
-    from src.cli.tui_chat import TUIChat
-    tui = TUIChat(
+    # 使用 TUI v2
+    from src.cli.tui import create_tui_v2
+    adapter = create_tui_v2(
+        model_caller=model_caller,
+        tool_dispatch=tool_dispatch_func,
         model=model,
         session_id=session_id,
         tool_count=tool_count,
         skill_count=skill_count,
-        model_caller=model_caller,
-        tool_dispatch=tool_dispatch_func,
         tool_schemas=tool_schemas,
+        tool_categories=tool_categories,
+        skill_categories=skill_categories,
+        config={"typing_speed": 10},
     )
-    tui.run()
+    
+    # 运行 TUI v2（异步）
+    import asyncio
+    asyncio.run(adapter.run())
 
 
 def main():
@@ -358,7 +390,11 @@ def main():
     elif args.list_sessions:
         list_sessions_command()
     else:
-        main_chat(debug=args.debug, resume=args.resume, resume_title=args.resume_title)
+        main_chat(
+            debug=args.debug,
+            resume=args.resume,
+            resume_title=args.resume_title,
+        )
 
 
 if __name__ == "__main__":

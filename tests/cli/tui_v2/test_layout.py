@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
 
-from src.cli.tui_v2.layout import LayoutManager, LayoutConfig, DynamicPanelManager
+from src.cli.layout import LayoutManager, LayoutConfig, DynamicPanelManager
 
 
 class TestLayoutManager:
@@ -25,7 +25,7 @@ class TestLayoutManager:
         assert manager.config.min_width == 100
         assert manager.config.show_tool_panel is False
     
-    @patch("src.cli.tui_v2.layout.get_terminal_size")
+    @patch("src.cli.layout.get_terminal_size")
     def test_get_layout_fullscreen(self, mock_size):
         """测试全屏布局。"""
         mock_size.return_value = (120, 40)
@@ -38,7 +38,7 @@ class TestLayoutManager:
         assert layout["width"] == 120
         assert layout["height"] == 40
     
-    @patch("src.cli.tui_v2.layout.get_terminal_size")
+    @patch("src.cli.layout.get_terminal_size")
     def test_get_layout_vertical_split(self, mock_size):
         """测试垂直分割布局。"""
         mock_size.return_value = (120, 40)
@@ -51,7 +51,7 @@ class TestLayoutManager:
         assert "main" in layout
         assert "tool_panel" in layout
     
-    @patch("src.cli.tui_v2.layout.get_terminal_size")
+    @patch("src.cli.layout.get_terminal_size")
     def test_get_layout_horizontal_split(self, mock_size):
         """测试水平分割布局。"""
         mock_size.return_value = (120, 40)
@@ -62,7 +62,7 @@ class TestLayoutManager:
         
         assert layout["type"] == "horizontal_split"
     
-    @patch("src.cli.tui_v2.layout.get_terminal_size")
+    @patch("src.cli.layout.get_terminal_size")
     def test_check_min_size_ok(self, mock_size):
         """测试最小尺寸检查（通过）。"""
         mock_size.return_value = (100, 30)
@@ -73,7 +73,7 @@ class TestLayoutManager:
         assert ok is True
         assert msg == ""
     
-    @patch("src.cli.tui_v2.layout.get_terminal_size")
+    @patch("src.cli.layout.get_terminal_size")
     def test_check_min_size_warning(self, mock_size):
         """测试最小尺寸检查（警告）。"""
         mock_size.return_value = (60, 20)
