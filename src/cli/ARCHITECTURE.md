@@ -1,63 +1,51 @@
-# CLI Architecture
+# CLI 模块架构
 
-## Responsibility
-现代化聊天界面实现，支持传统 CLI 和 TUI 两种模式。
-提供用户交互、斜杠命令处理、工具调用显示、对话循环集成。
+## 概述
 
-## Components
+CLI 模块提供 NanoHermes 的终端用户界面。仅支持 TUI v2 现代化终端界面。
+
+## 目录结构
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                    User Input                                 │
-│                  (prompt_toolkit)                             │
-└────────────────────────┬─────────────────────────────────────┘
-                         │
-                         ▼
-┌──────────────────────────────────────────────────────────────┐
-│                    Slash Command Handler                      │
-│                                                              │
-│  /clear, /status, /sessions, /title, /skills, /tools         │
-│  Auto-completion via SlashCommandCompleter                   │
-└────────────────────────┬─────────────────────────────────────┘
-                         │
-                         ▼
-┌──────────────────────────────────────────────────────────────┐
-│                    Conversation Loop                          │
-│                                                              │
-│  model_caller(messages, tools) → response                    │
-│  tool_dispatch(name, args) → result                          │
-│  Tool result summary display                                 │
-└──────────────────────────────────────────────────────────────┘
-
-┌──────────────────────────────────────────────────────────────┐
-│                    TUI Chat (tui_chat.py)                     │
-│                                                              │
-│  Banner: Model, Tools, Skills, Session info                  │
-│  Conversation: User/Assistant/Tool messages                  │
-│  Tool Progress: preparing → executing → complete             │
-│  Tool Summary: read_file (N lines), write_file (N bytes)     │
-│  Input: prompt_toolkit with slash command completion         │
-└──────────────────────────────────────────────────────────────┘
+src/cli/
+├── __init__.py          # 模块初始化
+├── ARCHITECTURE.md      # 架构文档
+└── tui_v2/              # TUI v2 现代化界面
+    ├── __init__.py
+    ├── app.py           # TUI 主应用类
+    ├── adapter.py       # 系统适配器（模型调用、工具分发）
+    ├── state.py         # 状态管理器
+    ├── event_handler.py # 事件处理器
+    ├── completers.py    # 输入补全器
+    ├── history.py       # 输入历史
+    ├── streaming.py     # 流式输出
+    ├── layout.py        # 响应式布局
+    ├── components/      # UI 组件
+    │   ├── widgets.py   # 面板、加载指示器、进度条
+    │   ├── status_bar.py# 状态栏
+    │   ── tool_display.py # 工具可视化
+    └── utils/
+        └── ansi.py      # ANSI 转义码控制
 ```
 
-## Data Flow
-1. 用户输入消息或斜杠命令
-2. 斜杠命令由 TUI/CLI 直接处理（/clear, /status 等）
-3. 普通消息传递给 ConversationLoop
-4. ConversationLoop 调用 model_caller 获取模型响应
-5. 如果响应包含 tool_calls，调用 tool_dispatch 执行工具
-6. 显示工具调用进度和简要结果
-7. 将工具结果返回给模型，继续循环
-8. 最终文本响应显示给用户
+## 技术栈
 
-## Design Decisions
-- **Decision**: 使用 prompt_toolkit 作为输入库
-  - **Reason**: 支持历史记录、自动补全、样式定制
-- **Decision**: TUI 和传统 CLI 共享相同的对话循环逻辑
-  - **Reason**: 代码复用，行为一致
-- **Decision**: 工具调用显示简要结果而非完整输出
-  - **Reason**: 避免冗长输出干扰用户，保持界面清晰
+- **prompt_toolkit** - 核心终端 UI 库（输入、补全、历史记录）
+- **rich** - Markdown 渲染和面板
+- **ANSI 转义码** - 底层终端控制
 
-## Dependencies
-- Internal: src/conversation/loop.py, src/tools/dispatcher.py
-- External: prompt_toolkit, rich
+## 启动方式
+
+```bash
+# 启动 TUI v2（唯一支持的方式）
+python -m src.main
+
+# 测试 API 连接
+python -m src.main --test-api
+```
+
+## 已移除
+
+- `streaming_cli.py` - 旧版流式 CLI（已移除）
+- `tui_chat.py` - 旧版 TUI（已移除）
+- `--cli` 标志 - 旧版 CLI 回退（已移除）
