@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import patch
 
-from src.cli.tui_v2.utils.ansi import (
+from src.cli.widgets import (
     set_color,
     set_bg_color,
     move_cursor,
@@ -12,8 +12,8 @@ from src.cli.tui_v2.utils.ansi import (
     styled_text,
     get_terminal_size,
     ANSI_RESET,
+    Panel, Spinner, ProgressBar,
 )
-from src.cli.tui_v2.components.widgets import Panel, Spinner, ProgressBar
 
 
 class TestANSIControl:

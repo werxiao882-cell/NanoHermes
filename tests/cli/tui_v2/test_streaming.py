@@ -4,7 +4,7 @@ import pytest
 import asyncio
 from unittest.mock import patch, MagicMock
 
-from src.cli.tui_v2.streaming import (
+from src.cli.streaming import (
     TypewriterEffect,
     StreamingMarkdown,
     StreamingOutputBuffer,

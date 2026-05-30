@@ -8,8 +8,8 @@ from unittest.mock import patch
 
 from prompt_toolkit.document import Document
 
-from src.cli.tui_v2.completers import CommandCompleter, FilePathCompleter, ContextAwareCompleter
-from src.cli.tui_v2.history import TUIHistory
+from src.cli.completers import CommandCompleter, FilePathCompleter, ContextAwareCompleter
+from src.cli.history import TUIHistory
 
 
 class TestCommandCompleter:
@@ -101,8 +101,8 @@ class TestTUIHistory:
     
     def test_append_and_load(self, tmp_path):
         """测试添加和加载。"""
-        with patch("src.cli.tui_v2.history.HISTORY_DIR", tmp_path), \
-             patch("src.cli.tui_v2.history.HISTORY_FILE", tmp_path / "history.json"):
+        with patch("src.cli.history.HISTORY_DIR", tmp_path), \
+             patch("src.cli.history.HISTORY_FILE", tmp_path / "history.json"):
             
             history = TUIHistory()
             history.append_string("hello")
@@ -116,8 +116,8 @@ class TestTUIHistory:
     
     def test_no_duplicate_consecutive(self, tmp_path):
         """测试不添加连续重复项。"""
-        with patch("src.cli.tui_v2.history.HISTORY_DIR", tmp_path), \
-             patch("src.cli.tui_v2.history.HISTORY_FILE", tmp_path / "history.json"):
+        with patch("src.cli.history.HISTORY_DIR", tmp_path), \
+             patch("src.cli.history.HISTORY_FILE", tmp_path / "history.json"):
             
             history = TUIHistory()
             history.append_string("hello")
@@ -128,8 +128,8 @@ class TestTUIHistory:
     
     def test_no_empty_strings(self, tmp_path):
         """测试不添加空字符串。"""
-        with patch("src.cli.tui_v2.history.HISTORY_DIR", tmp_path), \
-             patch("src.cli.tui_v2.history.HISTORY_FILE", tmp_path / "history.json"):
+        with patch("src.cli.history.HISTORY_DIR", tmp_path), \
+             patch("src.cli.history.HISTORY_FILE", tmp_path / "history.json"):
             
             history = TUIHistory()
             history.append_string("")
@@ -139,8 +139,8 @@ class TestTUIHistory:
     
     def test_max_items_limit(self, tmp_path):
         """测试最大条目限制。"""
-        with patch("src.cli.tui_v2.history.HISTORY_DIR", tmp_path), \
-             patch("src.cli.tui_v2.history.HISTORY_FILE", tmp_path / "history.json"):
+        with patch("src.cli.history.HISTORY_DIR", tmp_path), \
+             patch("src.cli.history.HISTORY_FILE", tmp_path / "history.json"):
             
             history = TUIHistory(max_items=5)
             for i in range(10):

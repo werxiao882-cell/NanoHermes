@@ -6,9 +6,9 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch, AsyncMock
 
-from src.cli.tui_v2.app import TUIApp
-from src.cli.tui_v2.state import TUIState, ToolCallRecord
-from src.cli.tui_v2.event_handler import TUIEventHandler
+from src.cli.tui import TUIApp
+from src.cli.state import TUIState, ToolCallRecord
+from src.cli.event_handler import TUIEventHandler
 
 
 class TestTUIState:
@@ -46,8 +46,8 @@ class TestTUIState:
     
     def test_save_and_load_state(self, tmp_path):
         """测试状态保存和加载。"""
-        with patch("src.cli.tui_v2.state.STATE_DIR", tmp_path), \
-             patch("src.cli.tui_v2.state.STATE_FILE", tmp_path / "state.json"):
+        with patch("src.cli.state.STATE_DIR", tmp_path), \
+             patch("src.cli.state.STATE_FILE", tmp_path / "state.json"):
             
             state = TUIState()
             state.session_id = "test-123"
@@ -131,7 +131,7 @@ class TestTUIEventHandler:
 class TestTUIApp:
     """TUIApp 测试。"""
     
-    @patch("src.cli.tui_v2.app.PromptSession")
+    @patch("src.cli.tui.PromptSession")
     def test_init(self, mock_session):
         """测试初始化。"""
         mock_session.return_value = AsyncMock()
@@ -142,7 +142,7 @@ class TestTUIApp:
         assert app.key_bindings is not None
         assert app.style is not None
     
-    @patch("src.cli.tui_v2.app.PromptSession")
+    @patch("src.cli.tui.PromptSession")
     def test_init_with_config(self, mock_session):
         """测试带配置初始化。"""
         mock_session.return_value = AsyncMock()
