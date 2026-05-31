@@ -118,22 +118,29 @@ def load_env_defaults() -> dict[str, Any]:
     if model_name:
         config["model"] = {"name": model_name}
 
+    # 如果设置了通用的 OPENAI_API_KEY，默认 provider 设为 openai
+    if os.environ.get("OPENAI_API_KEY"):
+        config.setdefault("model", {})["provider"] = "openai"
+
     # 提供商配置
     providers: dict[str, Any] = {}
 
+    # 优先读取业界通用的 OpenAI 兼容接口变量
+    openai_key = os.environ.get("OPENAI_API_KEY")
+    openai_url = os.environ.get("OPENAI_BASE_URL") or os.environ.get("OPENAI_API_BASE")
+    if openai_key:
+        providers["openai"] = {
+            "base_url": openai_url,  # None 时使用 SDK 默认值
+            "api_key_env": "OPENAI_API_KEY",
+        }
+
+    # 兼容特定厂商的变量
     dashscope_key = os.environ.get("DASHSCOPE_API_KEY")
     dashscope_url = os.environ.get("DASHSCOPE_BASE_URL")
     if dashscope_key:
         providers["dashscope"] = {
             "base_url": dashscope_url or "https://dashscope.aliyuncs.com/compatible-mode/v1",
             "api_key_env": "DASHSCOPE_API_KEY",
-        }
-
-    openai_key = os.environ.get("OPENAI_API_KEY")
-    if openai_key:
-        providers["openai"] = {
-            "base_url": "https://api.openai.com/v1",
-            "api_key_env": "OPENAI_API_KEY",
         }
 
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
