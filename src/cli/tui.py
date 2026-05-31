@@ -52,11 +52,13 @@ class TUIApp:
         skill_categories: dict[str, list[str]] | None = None,
         config: dict[str, Any] | None = None,
         session_db=None,
+        jsonl_store=None,
     ):
         self.config = config or {}
         self.state = TUIState()
         self.event_handler = TUIEventHandler(self.state)
         self.session_db = session_db
+        self.jsonl_store = jsonl_store
 
         layout_config = LayoutConfig(
             show_tool_panel=self.config.get("show_tool_panel", True),
@@ -186,6 +188,26 @@ class TUIApp:
         else:
             line.append(content, style="dim")
         self.conversation_lines.append(line)
+        self._save_message_to_storage(role, content)
+
+    def _save_message_to_storage(self, role: str, content: str) -> None:
+        """保存消息到 SessionDB 和 JsonlSessionStore。"""
+        if not self.session_id or self.session_id == "new_session":
+            return
+
+        # 保存到 SQLite（用于搜索和统计）
+        if self.session_db:
+            try:
+                self.session_db.insert_message(self.session_id, role, content)
+            except Exception as e:
+                logger.debug(f"Failed to save message to SQLite: {e}")
+
+        # 保存到 JSONL（用于完整历史恢复）
+        if self.jsonl_store:
+            try:
+                self.jsonl_store.append_message(self.session_id, role, content)
+            except Exception as e:
+                logger.debug(f"Failed to save message to JSONL: {e}")
 
     def show_reasoning(self, reasoning: str, elapsed_ms: float = 0) -> None:
         if not reasoning:
@@ -246,7 +268,13 @@ class TUIApp:
             self.add_message("assistant", "This is a simulated response.", is_tool=False)
             return
 
+        # 如果是新会话，创建会话记录
+        if self.session_id == "new_session" and self.session_db:
+            self.session_id = self.session_db.create_session(title=f"会话 {user_input[:30]}", model=self.model)
+            self.console.print(f"[dim]新会话已创建: {self.session_id[:8]}[/dim]\n")
+
         self.messages.append({"role": "user", "content": user_input})
+        self._save_message_to_storage("user", user_input)
 
         max_iterations = 10
         for iteration in range(max_iterations):
@@ -306,6 +334,7 @@ class TUIApp:
                 self.console.print(content)
                 self.console.print()
                 self.messages.append({"role": "assistant", "content": content})
+                self._save_message_to_storage("assistant", content)
             break
 
     async def _handle_command(self, command: str) -> bool:
@@ -494,6 +523,7 @@ def create_tui_v2(
     skill_categories: dict[str, list[str]] | None = None,
     config: dict[str, Any] | None = None,
     session_db=None,
+    jsonl_store=None,
 ) -> TUIApp:
     return TUIApp(
         model_caller=model_caller,
@@ -507,4 +537,5 @@ def create_tui_v2(
         skill_categories=skill_categories,
         config=config,
         session_db=session_db,
+        jsonl_store=jsonl_store,
     )
