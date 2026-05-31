@@ -56,5 +56,5 @@
   - **Reason**: 高效判断 stable 层是否变化
 
 ## Dependencies
-- Internal: src/memory/managers.py (volatile 层记忆注入)
+- Internal: src/memory/managers.py (volatile 层记忆注入), src/config/ (配置模块)
 - External: None

@@ -56,5 +56,5 @@
   - **Reason**: 提供全面的洞察，帮助用户了解使用模式
 
 ## Dependencies
-- Internal: src/session/session_db.py, src/provider/model_metadata.py
+- Internal: src/session/session_db.py, src/provider/model_metadata.py, src/config/ (配置模块)
 - External: None

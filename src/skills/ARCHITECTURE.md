@@ -82,5 +82,5 @@ Skill Directory Structure:
   - **Reason**: 保护重要技能不被自动归档
 
 ## Dependencies
-- Internal: src/tools/skills_tools.py (工具接口)
+- Internal: src/tools/skills_tools.py (工具接口), src/config/ (配置模块)
 - External: None

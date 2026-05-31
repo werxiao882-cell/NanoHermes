@@ -84,5 +84,5 @@
   - **Reason**: 业务逻辑与工具注册分离，符合单一职责原则
 
 ## Dependencies
-- Internal: src/skills/manager.py (技能管理)
+- Internal: src/skills/manager.py (技能管理), src/config/ (配置模块)
 - External: subprocess (stdlib), tempfile (stdlib)

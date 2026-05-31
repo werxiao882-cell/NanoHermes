@@ -81,5 +81,5 @@ SQLite 会话持久化存储，支持 WAL 并发、FTS5 全文搜索、JSONL 完
   - **Reason**: unicode61 分词器不支持 CJK 子串搜索，trigram 补充
 
 ## Dependencies
-- Internal: None (基础层)
+- Internal: src/config/ (配置模块)
 - External: sqlite3 (Python stdlib)
