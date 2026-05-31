@@ -21,7 +21,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # noqa: F401 - kept for backward compatibility
 
 
 def list_sessions_command():
@@ -162,11 +162,12 @@ def generate_auto_title_async(
     return thread
 def test_api():
     """测试 API 连接。"""
-    load_dotenv()
+    from src.config import load_config, get_api_key, get_base_url
 
-    api_key = os.environ.get("DASHSCOPE_API_KEY") or os.environ.get("OPENAI_API_KEY")
-    base_url = os.environ.get("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
-    model = os.environ.get("MODEL_NAME", "qwen3.6-plus")
+    config = load_config()
+    api_key = get_api_key(config)
+    base_url = get_base_url(config)
+    model = config.model.name
 
     if not api_key:
         print("[错误] 未设置 API Key，请在 .env 文件中配置 DASHSCOPE_API_KEY 或 OPENAI_API_KEY")
@@ -285,14 +286,15 @@ def main_chat(debug: bool = False, resume: str | None = None, resume_title: str 
         resume: 恢复会话 ID。
         resume_title: 通过标题恢复会话。
     """
-    load_dotenv()
+    from src.config import load_config, get_api_key, get_base_url
 
-    api_key = os.environ.get("DASHSCOPE_API_KEY") or os.environ.get("OPENAI_API_KEY")
-    base_url = os.environ.get("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
-    model = os.environ.get("MODEL_NAME", "qwen3.6-plus")
+    config = load_config()
+    api_key = get_api_key(config)
+    base_url = get_base_url(config)
+    model = config.model.name
 
     if not api_key:
-        print("[错误] 未设置 API Key，请在 .env 文件中配置")
+        print("[错误] 未设置 API Key，请检查 .env 或配置文件")
         sys.exit(1)
 
     from openai import OpenAI
@@ -364,7 +366,11 @@ def main_chat(debug: bool = False, resume: str | None = None, resume_title: str 
         tool_schemas=tool_schemas,
         tool_categories=tool_categories,
         skill_categories=skill_categories,
-        config={"typing_speed": 10},
+        config={
+            "typing_speed": config.tui.typing_speed,
+            "show_tool_panel": config.tui.show_tool_panel,
+            "tool_panel_position": config.tui.tool_panel_position,
+        },
     )
     
     # 运行 TUI v2（异步）
