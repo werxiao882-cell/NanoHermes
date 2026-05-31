@@ -354,11 +354,13 @@ def main_chat(debug: bool = False, resume: str | None = None, resume_title: str 
     # 会话 ID
     session_id = "new_session"
 
-    # 初始化 SessionDB
+    # 初始化 SessionDB 和 JsonlSessionStore
     from src.session.session_db import SessionDB
+    from src.session.jsonl_store import JsonlSessionStore
     from pathlib import Path
     db_path = Path.home() / ".nanohermes" / "sessions.db"
     session_db = SessionDB(db_path)
+    jsonl_store = JsonlSessionStore()
 
     # 使用 TUI v2
     from src.cli.tui import create_tui_v2
@@ -378,6 +380,7 @@ def main_chat(debug: bool = False, resume: str | None = None, resume_title: str 
             "tool_panel_position": config.tui.tool_panel_position,
         },
         session_db=session_db,
+        jsonl_store=jsonl_store,
     )
     
     # 运行 TUI v2（异步）
