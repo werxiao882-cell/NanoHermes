@@ -58,3 +58,22 @@
 #### Scenario: 会话不存在时
 - **WHEN** 用户输入 `/resume` 但会话不存在
 - **THEN** 系统提示"会话不存在，请检查 ID 或标题"
+
+### Requirement: 系统 SHALL 使用与 Hermes Agent 一致的 SQLite Schema 存储会话
+系统 SHALL 使用与 hermes-agent-ref 一致的 SQLite schema 设计会话存储，包含 sessions 和 messages 两张核心表。
+
+#### Scenario: sessions 表包含完整元数据
+- **WHEN** 创建新会话
+- **THEN** sessions 表记录 id, source, user_id, model, model_config, system_prompt, parent_session_id, started_at, ended_at, end_reason, message_count, tool_call_count, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, billing_provider, billing_base_url, billing_mode, estimated_cost_usd, actual_cost_usd, cost_status, cost_source, pricing_version, title, api_call_count, handoff_state, handoff_platform, handoff_error 字段
+
+#### Scenario: messages 表包含完整消息内容
+- **WHEN** 追加消息
+- **THEN** messages 表记录 session_id, role, content, tool_call_id, tool_calls, tool_name, timestamp, token_count, finish_reason, reasoning, reasoning_content, reasoning_details, codex_reasoning_items, codex_message_items, platform_message_id, observed 字段
+
+#### Scenario: FTS5 全文搜索索引自动更新
+- **WHEN** 插入新消息
+- **THEN** messages_fts 和 messages_fts_trigram 虚拟表通过触发器自动更新
+
+#### Scenario: 会话分支支持
+- **WHEN** 从现有会话创建分支
+- **THEN** 新会话的 parent_session_id 指向原会话 ID
