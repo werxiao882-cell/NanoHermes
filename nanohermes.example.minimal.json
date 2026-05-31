@@ -1,0 +1,6 @@
+{
+  "model": {
+    "provider": "dashscope",
+    "name": "qwen3.6-plus"
+  }
+}

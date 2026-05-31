@@ -21,7 +21,39 @@ pip install -i https://pypi.tuna.tsinghua.edu.cn/simple openai anthropic pyyaml 
 
 ### 配置
 
-在项目根目录创建 `.env` 文件（已包含在 `.gitignore` 中，不会被提交）：
+NanoHermes 使用 JSON 配置文件 + `.env` 环境变量管理所有设置。
+
+**优先级**：显式参数 > 项目配置 (`./nanohermes.json`) > 全局配置 (`~/.nanohermes/config.json`) > `.env` > 默认值
+
+#### 配置文件
+
+创建 `nanohermes.json`（项目级）或 `~/.nanohermes/config.json`（全局级）：
+
+```json
+{
+  "model": {
+    "provider": "dashscope",
+    "name": "qwen3.6-plus"
+  },
+  "providers": {
+    "dashscope": {
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "api_key_env": "DASHSCOPE_API_KEY"
+    }
+  },
+  "tui": {
+    "typing_speed": 10,
+    "show_tool_panel": true,
+    "tool_panel_position": "right"
+  }
+}
+```
+
+完整示例请参考 `nanohermes.example.json`。
+
+#### 环境变量（密钥）
+
+API Key 等敏感信息通过 `.env` 文件管理（不会被提交到 git）：
 
 ```bash
 # 通义千问 DashScope
@@ -31,11 +63,9 @@ MODEL_NAME=qwen3.6-plus
 
 # OpenAI
 # OPENAI_API_KEY=your-api-key-here
-# MODEL_NAME=gpt-4o
 
 # Anthropic
 # ANTHROPIC_API_KEY=your-api-key-here
-# MODEL_NAME=claude-sonnet-4-20250514
 ```
 
 ### 启动
@@ -79,6 +109,12 @@ NanoHermes/
 ├── src/                              # 源代码
 │   ├── main.py                       # 启动入口（交互模式 + API 测试 + 会话恢复）
 │   ├── __main__.py                   # python -m src.main 入口
+│   │
+│   ├── config/                       # Config - 统一配置管理
+│   │   ├── ARCHITECTURE.md           # 架构文档
+│   │   ├── __init__.py               # 模块入口
+│   │   ├── models.py                 # Pydantic 数据模型
+│   │   └── loader.py                 # 配置加载、合并、解析
 │   │
 │   ├── provider/                     # Provider Runtime - LLM 提供商运行时
 │   │   ├── ARCHITECTURE.md           # 架构文档
@@ -133,37 +169,40 @@ NanoHermes/
 │   ├── insights/                     # Insights Metrics - 洞察指标
 │   │   └── engine.py                 # InsightsEngine (token 聚合 + 成本估算)
 │   │
-│   └── auxiliary/                    # Auxiliary Client - 辅助 LLM
+│   ├── auxiliary/                    # Auxiliary Client - 辅助 LLM
+│   │   ├── ARCHITECTURE.md           # 架构文档
+│   │   └── client.py                 # AuxiliaryClient (后台任务调用)
+│   │
+│   └── cli/                          # CLI - 终端用户界面
 │       ├── ARCHITECTURE.md           # 架构文档
-│       └── client.py                 # AuxiliaryClient (后台任务调用)
+│       ├── __init__.py               # 模块入口
+│       ├── tui.py                    # TUI 主应用（合并 app + adapter）
+│       ├── state.py                  # 状态管理
+│       ├── event_handler.py          # 事件处理
+│       ├── completers.py             # 输入补全
+│       ├── history.py                # 输入历史
+│       ├── streaming.py              # 流式输出
+│       ├── layout.py                 # 响应式布局
+│       └── widgets.py                # UI 组件（合并 ANSI + 面板 + 状态栏 + 工具显示）
 │
-├── tests/                            # 单元测试 (135 个测试)
-│   ├── provider/                     # Provider Runtime 测试 (7 个文件)
-│   ├── tools/                        # Tool Runtime 测试 (5 个文件)
-│   ├── test_main_integration.py      # 集成测试 (14 个测试)
-│   ├── test_concurrent.py            # 并发测试 (6 个测试)
-│   ├── test_e2e.py                   # 端到端测试 (1 个测试)
-│   └── test_jsonl_store.py           # JSONL 存储测试 (17 个测试)
+├── tests/                            # 单元测试
+│   ├── provider/                     # Provider Runtime 测试
+│   ├── tools/                        # Tool Runtime 测试
+│   ├── cli/tui_v2/                   # TUI 测试
+│   ├── test_main_integration.py      # 集成测试
+│   ├── test_concurrent.py            # 并发测试
+│   ├── test_e2e.py                   # 端到端测试
+│   └── test_jsonl_store.py           # JSONL 存储测试
 │
 ├── openspec/                         # OpenSpec 变更管理
 │   ├── changes/                      # 活跃变更
-│   │   ├── provider-runtime/
-│   │   ├── tool-runtime/
-│   │   ├── session-storage/
-│   │   ├── memory-system/
-│   │   ├── skill-system/
-│   │   ├── context-compression/
-│   │   ├── system-prompt-assembly/
-│   │   ├── conversation-loop/
-│   │   ├── multi-agent-delegation/
-│   │   └── insights-metrics/
 │   └── specs/                        # 项目规范
-│       └── project-conventions/      # 架构文档规范
 │
+├── nanohermes.example.json           # 完整示例配置
+├── nanohermes.example.minimal.json   # 最小示例配置
 ├── .env                              # 本地配置 (不提交到 git)
 ├── .gitignore
 ├── pyproject.toml                    # Python 项目配置
-├── test_api.py                       # 快速 API 测试脚本
 └── README.md                         # 本文件
 ```
 
@@ -209,6 +248,7 @@ NanoHermes/
 
 | 模块 | 职责 | 状态 |
 |------|------|------|
+| **config-management** | 统一配置管理、JSON 配置文件加载、优先级解析链 | ✅ 完成 |
 | **provider-runtime** | 凭证解析、API 路由、客户端封装、回退链、模型元数据 | ✅ 完成 |
 | **tool-runtime** | 工具注册表、工具集、分发器、终端工具、文件工具、异步桥接 | ✅ 完成 |
 | **session-storage** | SQLite 会话存储、FTS5 搜索、JSONL 完整历史、会话恢复 | ✅ 完成 |
@@ -403,18 +443,32 @@ src/tools/
 | **UI 库** | rich + prompt_toolkit | TUI 聊天界面 |
 | **数据库** | SQLite (Python 标准库) | 会话持久化存储 |
 | **LLM SDK** | openai + anthropic | 多提供商支持 |
-| **配置管理** | python-dotenv + pyyaml | 环境变量和 YAML 配置 |
+| **配置管理** | JSON 配置文件 + python-dotenv + Pydantic 验证 | 统一配置管理 |
 | **版本控制** | Git + GitHub | 代码托管和协作 |
 | **包管理** | pip + pyproject.toml | Python 依赖管理 |
 | **镜像源** | 清华大学 PyPI 镜像 | 加速依赖下载 |
 
-### 模型配置示例
+### 配置示例
 
+**nanohermes.json**（结构配置）：
+```json
+{
+  "model": {
+    "provider": "dashscope",
+    "name": "qwen3.6-plus"
+  },
+  "providers": {
+    "dashscope": {
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "api_key_env": "DASHSCOPE_API_KEY"
+    }
+  }
+}
+```
+
+**.env**（密钥）：
 ```bash
-# .env 文件
 DASHSCOPE_API_KEY=sk-xxx
-DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-MODEL_NAME=qwen3.6-plus
 ```
 
 ### opencode 工作流

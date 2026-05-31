@@ -1,0 +1,35 @@
+{
+  "model": {
+    "provider": "dashscope",
+    "name": "qwen3.6-plus",
+    "context_length": null
+  },
+  "providers": {
+    "dashscope": {
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "api_key_env": "DASHSCOPE_API_KEY"
+    },
+    "openai": {
+      "base_url": "https://api.openai.com/v1",
+      "api_key_env": "OPENAI_API_KEY"
+    },
+    "anthropic": {
+      "base_url": null,
+      "api_key_env": "ANTHROPIC_API_KEY"
+    }
+  },
+  "mcp": {
+    "servers": []
+  },
+  "tui": {
+    "typing_speed": 10,
+    "show_tool_panel": true,
+    "tool_panel_position": "right"
+  },
+  "auxiliary": {
+    "provider": "main",
+    "model": "",
+    "max_tokens": null,
+    "temperature": null
+  }
+}
