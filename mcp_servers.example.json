@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "msprof-local": {
+      "name": "msprof_mcp",
+      "description": "msprof mcp server (local)",
+      "command": "uvx",
+      "args": ["msprof-mcp"],
+      "env": {},
+      "isActive": true,
+      "type": "stdio"
+    },
+    "msprof-remote": {
+      "name": "msprof_mcp_remote",
+      "description": "msprof mcp server (remote)",
+      "url": "http://remote-server:8000/mcp",
+      "isActive": true,
+      "type": "streamable-http"
+    }
+  }
+}
