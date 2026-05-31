@@ -58,5 +58,5 @@
   - **Reason**: 仅在需要时构建客户端，节省资源
 
 ## Dependencies
-- Internal: src/provider/ (ProviderResolver, credentials, api_mode)
+- Internal: src/provider/ (ProviderResolver, credentials, api_mode), src/config/ (配置模块)
 - External: openai SDK, anthropic SDK

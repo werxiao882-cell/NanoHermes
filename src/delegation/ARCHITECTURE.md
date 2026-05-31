@@ -63,5 +63,5 @@
   - **Reason**: 防止无限递归委托
 
 ## Dependencies
-- Internal: src/tools/ (受限工具集)
+- Internal: src/tools/ (受限工具集), src/config/ (配置模块)
 - External: None

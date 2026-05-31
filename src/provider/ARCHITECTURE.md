@@ -91,5 +91,5 @@
   - **Reason**: 避免在主模型和回退模型之间振荡
 
 ## Dependencies
-- Internal: None (基础层)
+- Internal: src/config/ (配置模块提供 API Key 和 Base URL)
 - External: openai SDK, anthropic SDK

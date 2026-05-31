@@ -74,5 +74,5 @@
   - **Reason**: 简单持久化，易于用户查看和编辑
 
 ## Dependencies
-- Internal: src/prompt/assembler.py (volatile 层注入)
+- Internal: src/prompt/assembler.py (volatile 层注入), src/config/ (配置模块)
 - External: None

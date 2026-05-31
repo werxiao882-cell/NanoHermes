@@ -63,5 +63,5 @@
   - **Reason**: 简单有效，避免过长输出占用上下文
 
 ## Dependencies
-- Internal: src/auxiliary/client.py (辅助 LLM 用于生成摘要)
+- Internal: src/auxiliary/client.py (辅助 LLM 用于生成摘要), src/config/ (配置模块)
 - External: None

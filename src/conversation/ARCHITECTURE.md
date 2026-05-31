@@ -74,5 +74,5 @@
   - **Reason**: 防止审查 Agent 执行危险操作
 
 ## Dependencies
-- Internal: src/provider/, src/tools/, src/session/, src/memory/
+- Internal: src/provider/, src/tools/, src/session/, src/memory/, src/config/
 - External: openai SDK
