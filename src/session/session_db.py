@@ -1,6 +1,6 @@
 """SessionDB - SQLite 会话数据库。
 
-提供会话和消息的完整生命周期管理：
+对齐 hermes-agent-ref 的会话存储设计，提供：
 1. 创建、结束、恢复、分支会话
 2. 消息插入、查询、搜索
 3. 标题管理和 lineage 追踪
@@ -171,6 +171,8 @@ class SessionDB:
         title: str | None = None,
         model: str | None = None,
         provider: str | None = None,
+        source: str = "local",
+        user_id: str | None = None,
     ) -> str:
         """创建新会话。
 
@@ -180,16 +182,19 @@ class SessionDB:
             title: 会话标题。
             model: 使用的模型名称。
             provider: 提供商 ID。
+            source: 来源平台（local/telegram/discord 等）。
+            user_id: 用户标识。
 
         Returns:
             会话 ID。
         """
         sid = session_id or str(uuid.uuid4())
+        now = time.time()
         sql = """
-            INSERT INTO sessions (session_id, parent_session_id, title, model, provider)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO sessions (id, source, user_id, model, parent_session_id, title, started_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         """
-        self._execute_write(sql, (sid, parent_session_id, title, model, provider))
+        self._execute_write(sql, (sid, source, user_id, model, parent_session_id, title, now))
         return sid
 
     def end_session(self, session_id: str, end_reason: str | None = None) -> None:
@@ -200,10 +205,10 @@ class SessionDB:
             end_reason: 结束原因（如 "completed", "interrupted", "compressed"）。
         """
         sql = """
-            UPDATE sessions SET ended_at = CURRENT_TIMESTAMP, end_reason = ?
-            WHERE session_id = ?
+            UPDATE sessions SET ended_at = ?, end_reason = ?
+            WHERE id = ?
         """
-        self._execute_write(sql, (end_reason, session_id))
+        self._execute_write(sql, (time.time(), end_reason, session_id))
 
     def reopen_session(self, session_id: str) -> None:
         """重新打开已结束的会话。
@@ -213,7 +218,7 @@ class SessionDB:
         """
         sql = """
             UPDATE sessions SET ended_at = NULL, end_reason = NULL
-            WHERE session_id = ?
+            WHERE id = ?
         """
         self._execute_write(sql, (session_id,))
 
@@ -229,7 +234,7 @@ class SessionDB:
         if self.conn is None:
             return None
         cursor = self.conn.execute(
-            "SELECT * FROM sessions WHERE session_id = ?",
+            "SELECT * FROM sessions WHERE id = ?",
             (session_id,),
         )
         row = cursor.fetchone()
@@ -269,8 +274,13 @@ class SessionDB:
         content: str | None = None,
         tool_calls: str | None = None,
         tool_call_id: str | None = None,
-        metadata: str | None = None,
-    ) -> str:
+        tool_name: str | None = None,
+        reasoning: str | None = None,
+        reasoning_content: str | None = None,
+        reasoning_details: str | None = None,
+        token_count: int | None = None,
+        finish_reason: str | None = None,
+    ) -> int:
         """插入一条消息。
 
         Args:
@@ -279,18 +289,26 @@ class SessionDB:
             content: 消息内容。
             tool_calls: 工具调用 JSON 字符串。
             tool_call_id: 工具调用 ID（tool 角色时设置）。
-            metadata: 元数据 JSON 字符串。
+            tool_name: 工具名称。
+            reasoning: 思考内容。
+            reasoning_content: 思考内容（备用）。
+            reasoning_details: 思考详情（JSON）。
+            token_count: Token 数量。
+            finish_reason: 完成原因。
 
         Returns:
-            消息 ID。
+            消息 ID（自增）。
         """
-        mid = str(uuid.uuid4())
         sql = """
-            INSERT INTO messages (message_id, session_id, role, content, tool_calls, tool_call_id, metadata)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, tool_name, timestamp, reasoning, reasoning_content, reasoning_details, token_count, finish_reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
-        self._execute_write(sql, (mid, session_id, role, content, tool_calls, tool_call_id, metadata))
-        return mid
+        cursor = self._execute_write(sql, (
+            session_id, role, content, tool_calls, tool_call_id, tool_name,
+            time.time(), reasoning, reasoning_content, reasoning_details,
+            token_count, finish_reason,
+        ))
+        return cursor.lastrowid
 
     def get_messages(self, session_id: str) -> list[dict[str, Any]]:
         """获取会话的所有消息。
@@ -328,12 +346,12 @@ class SessionDB:
         if self.conn is None:
             return []
 
-        fts_table = "messages_trigram" if use_trigram else "messages_fts"
+        fts_table = "messages_fts_trigram" if use_trigram else "messages_fts"
 
         if session_id:
             sql = f"""
                 SELECT m.* FROM messages m
-                JOIN {fts_table} f ON m.rowid = f.rowid
+                JOIN {fts_table} f ON m.id = f.rowid
                 WHERE {fts_table} MATCH ? AND m.session_id = ?
                 ORDER BY rank
             """
@@ -341,7 +359,7 @@ class SessionDB:
         else:
             sql = f"""
                 SELECT m.* FROM messages m
-                JOIN {fts_table} f ON m.rowid = f.rowid
+                JOIN {fts_table} f ON m.id = f.rowid
                 WHERE {fts_table} MATCH ?
                 ORDER BY rank
             """
@@ -362,7 +380,7 @@ class SessionDB:
         """
         # 清理标题：去除控制字符，限制长度
         clean_title = _sanitize_title(title)
-        sql = "UPDATE sessions SET title = ? WHERE session_id = ?"
+        sql = "UPDATE sessions SET title = ? WHERE id = ?"
         self._execute_write(sql, (clean_title, session_id))
 
     def get_session_title(self, session_id: str) -> str | None:
@@ -393,7 +411,7 @@ class SessionDB:
 
         # 精确匹配
         cursor = self.conn.execute(
-            "SELECT session_id FROM sessions WHERE title = ? AND ended_at IS NULL",
+            "SELECT id FROM sessions WHERE title = ? AND ended_at IS NULL",
             (title,),
         )
         row = cursor.fetchone()
@@ -403,7 +421,7 @@ class SessionDB:
         # 编号变体匹配（"title #2"）
         clean = _sanitize_title(title)
         cursor = self.conn.execute(
-            "SELECT session_id FROM sessions WHERE title LIKE ? AND ended_at IS NULL",
+            "SELECT id FROM sessions WHERE title LIKE ? AND ended_at IS NULL",
             (f"{clean} #%"),
         )
         row = cursor.fetchone()
@@ -419,13 +437,13 @@ class SessionDB:
             limit: 最大返回数量，默认 100。
 
         Returns:
-            会话列表，按创建时间倒序，包含 session_id 和 title。
+            会话列表，按创建时间倒序，包含 id 和 title。
         """
         if self.conn is None:
             return []
 
         cursor = self.conn.execute(
-            "SELECT session_id, title, created_at, model FROM sessions ORDER BY created_at DESC LIMIT ?",
+            "SELECT id, title, started_at, model FROM sessions ORDER BY started_at DESC LIMIT ?",
             (limit,),
         )
         return [dict(row) for row in cursor.fetchall()]
@@ -444,7 +462,7 @@ class SessionDB:
             return []
 
         cursor = self.conn.execute(
-            "SELECT session_id, title, created_at, model FROM sessions WHERE title LIKE ? ORDER BY created_at DESC LIMIT ?",
+            "SELECT id, title, started_at, model FROM sessions WHERE title LIKE ? ORDER BY started_at DESC LIMIT ?",
             (f"%{keyword}%", limit),
         )
         return [dict(row) for row in cursor.fetchall()]
@@ -460,6 +478,7 @@ class SessionDB:
         output_tokens: int = 0,
         cache_read_tokens: int = 0,
         cache_write_tokens: int = 0,
+        reasoning_tokens: int = 0,
         incremental: bool = True,
     ) -> None:
         """更新会话 token 计数。
@@ -470,6 +489,7 @@ class SessionDB:
             output_tokens: 输出 token 数。
             cache_read_tokens: 缓存读取 token 数。
             cache_write_tokens: 缓存写入 token 数。
+            reasoning_tokens: 思考 token 数。
             incremental: True 为增量更新，False 为绝对更新。
         """
         if incremental:
@@ -478,8 +498,9 @@ class SessionDB:
                     input_tokens = input_tokens + ?,
                     output_tokens = output_tokens + ?,
                     cache_read_tokens = cache_read_tokens + ?,
-                    cache_write_tokens = cache_write_tokens + ?
-                WHERE session_id = ?
+                    cache_write_tokens = cache_write_tokens + ?,
+                    reasoning_tokens = reasoning_tokens + ?
+                WHERE id = ?
             """
         else:
             sql = """
@@ -487,12 +508,13 @@ class SessionDB:
                     input_tokens = ?,
                     output_tokens = ?,
                     cache_read_tokens = ?,
-                    cache_write_tokens = ?
-                WHERE session_id = ?
+                    cache_write_tokens = ?,
+                    reasoning_tokens = ?
+                WHERE id = ?
             """
         self._execute_write(
             sql,
-            (input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, session_id),
+            (input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, session_id),
         )
 
     # ========================================================================

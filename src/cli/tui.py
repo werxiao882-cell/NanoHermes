@@ -463,11 +463,11 @@ class TUIApp:
                 self.console.print(f"[yellow]未找到匹配的会话: {identifier}[/yellow]")
                 return
             if len(matches) == 1:
-                session = self.session_db.get_session(matches[0]["session_id"])
+                session = self.session_db.get_session(matches[0]["id"])
             else:
                 self.console.print("[cyan]找到多个匹配，请选择:[/cyan]")
                 for m in matches:
-                    sid = m.get("session_id", "")
+                    sid = m.get("id", "")
                     title = m.get("title") or "(无标题)"
                     self.console.print(f"  [bold]{sid[:8]}[/bold]  {title}")
                 return
