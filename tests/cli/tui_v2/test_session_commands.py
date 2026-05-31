@@ -89,13 +89,13 @@ class TestResumeCommand:
         # 找到有消息的会话
         target_session = None
         for s in sessions:
-            msgs = populated_db.get_messages(s["session_id"])
+            msgs = populated_db.get_messages(s["id"])
             if len(msgs) >= 2:
                 target_session = s
                 break
 
         assert target_session is not None, "No session with 2+ messages found"
-        target_id = target_session["session_id"]
+        target_id = target_session["id"]
 
         with patch("src.cli.tui.PromptSession", return_value=MagicMock()):
             app = TUIApp(session_db=populated_db)
@@ -112,7 +112,7 @@ class TestResumeCommand:
         # 先找到该会话的 ID
         matches = populated_db.search_sessions_by_title("代码分析任务", limit=1)
         assert len(matches) == 1, f"Expected 1 match, got {len(matches)}"
-        target_id = matches[0]["session_id"]
+        target_id = matches[0]["id"]
 
         with patch("src.cli.tui.PromptSession", return_value=MagicMock()):
             app = TUIApp(session_db=populated_db)
@@ -128,7 +128,7 @@ class TestResumeCommand:
         # 先找到该会话的 ID
         matches = populated_db.search_sessions_by_title("调试", limit=1)
         assert len(matches) >= 1, f"Expected at least 1 match, got {len(matches)}"
-        target_id = matches[0]["session_id"]
+        target_id = matches[0]["id"]
 
         with patch("src.cli.tui.PromptSession", return_value=MagicMock()):
             app = TUIApp(session_db=populated_db)
@@ -198,7 +198,7 @@ class TestHandleCommandIntegration:
     async def test_handle_resume_command(self, populated_db):
         """测试 _handle_command 处理 /resume。"""
         sessions = populated_db.list_sessions()
-        target_id = sessions[0]["session_id"]
+        target_id = sessions[0]["id"]
 
         with patch("src.cli.tui.PromptSession", return_value=MagicMock()):
             app = TUIApp(session_db=populated_db)

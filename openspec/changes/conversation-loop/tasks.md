@@ -114,17 +114,17 @@
 
 ## 11. SQLite Schema 对齐 Hermes Agent
 
-- [ ] 11.1 更新 sessions 表 schema，添加 source, user_id, model_config, system_prompt, parent_session_id 字段
-- [ ] 11.2 更新 sessions 表 schema，添加 started_at (REAL), ended_at, end_reason 字段
-- [ ] 11.3 更新 sessions 表 schema，添加 message_count, tool_call_count, api_call_count 字段
-- [ ] 11.4 更新 sessions 表 schema，添加 input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens 字段
-- [ ] 11.5 更新 sessions 表 schema，添加 billing_provider, billing_base_url, billing_mode 字段
-- [ ] 11.6 更新 sessions 表 schema，添加 estimated_cost_usd, actual_cost_usd, cost_status, cost_source, pricing_version 字段
-- [ ] 11.7 更新 sessions 表 schema，添加 handoff_state, handoff_platform, handoff_error 字段
-- [ ] 11.8 更新 messages 表 schema，添加 tool_name, timestamp (REAL), token_count 字段
-- [ ] 11.9 更新 messages 表 schema，添加 finish_reason, reasoning, reasoning_content, reasoning_details 字段
-- [ ] 11.10 更新 messages 表 schema，添加 codex_reasoning_items, codex_message_items, platform_message_id, observed 字段
-- [ ] 11.11 实现 FTS5 全文搜索触发器（messages_fts_insert/update/delete）
-- [ ] 11.12 实现 trigram 分词器触发器（messages_fts_trigram_insert/update/delete）
-- [ ] 11.13 实现会话分支功能（parent_session_id 关联）
-- [ ] 11.14 编写 schema 迁移测试
+- [x] 11.1 更新 sessions 表 schema，添加 source, user_id, model_config, system_prompt, parent_session_id 字段
+- [x] 11.2 更新 sessions 表 schema，添加 started_at (REAL), ended_at, end_reason 字段
+- [x] 11.3 更新 sessions 表 schema，添加 message_count, tool_call_count, api_call_count 字段
+- [x] 11.4 更新 sessions 表 schema，添加 input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens 字段
+- [x] 11.5 更新 sessions 表 schema，添加 billing_provider, billing_base_url, billing_mode 字段
+- [x] 11.6 更新 sessions 表 schema，添加 estimated_cost_usd, actual_cost_usd, cost_status, cost_source, pricing_version 字段
+- [x] 11.7 更新 sessions 表 schema，添加 handoff_state, handoff_platform, handoff_error 字段
+- [x] 11.8 更新 messages 表 schema，添加 tool_name, timestamp (REAL), token_count 字段
+- [x] 11.9 更新 messages 表 schema，添加 finish_reason, reasoning, reasoning_content, reasoning_details 字段
+- [x] 11.10 更新 messages 表 schema，添加 codex_reasoning_items, codex_message_items, platform_message_id, observed 字段
+- [x] 11.11 实现 FTS5 全文搜索触发器（messages_fts_insert/update/delete）
+- [x] 11.12 实现 trigram 分词器触发器（messages_fts_trigram_insert/update/delete）
+- [x] 11.13 实现会话分支功能（parent_session_id 关联）
+- [x] 11.14 编写 schema 迁移测试
