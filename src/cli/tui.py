@@ -25,14 +25,14 @@ from src.cli.layout import LayoutManager, LayoutConfig
 from src.cli.completers import ContextAwareCompleter
 from src.cli.history import TUIHistory
 from src.cli.streaming import TypewriterEffect, StreamingMarkdown, StreamingStatusIndicator
-from src.cli.widgets import StatusBar
+from src.cli.widgets import StatusBar, ActivityFeed
 
 logger = logging.getLogger(__name__)
 
 SLASH_COMMANDS = [
     "/clear", "/status", "/sessions", "/title",
     "/skills", "/skills enable", "/skills disable",
-    "/tools", "/quit", "/exit",
+    "/tools", "/compress", "/quit", "/exit",
 ]
 
 
@@ -223,30 +223,30 @@ class TUIApp:
         self.console.print()
 
     def show_tool_start(self, tool_name: str, action: str) -> None:
-        self.console.print(f"│ 🟦 preparing {tool_name}...", style="dim")
+        self.console.print(ActivityFeed.format_start(tool_name, action))
 
     def show_tool_complete(self, tool_name: str, action: str, elapsed: float) -> None:
-        self.console.print(f"│ 🟦 {tool_name}  {action} {elapsed:.1f}s", style="dim")
+        self.console.print(ActivityFeed.format_complete(tool_name, action, elapsed))
 
     def show_tool_result_summary(self, tool_name: str, result: str) -> None:
         try:
             data = json.loads(result)
             if tool_name == "read_file":
                 lines = data.get("content", "").count("\n") + 1
-                self.console.print(f"│ 📄 read_file: {lines} lines read", style="dim")
+                self.console.print(ActivityFeed.format_result(tool_name, f"read_file: {lines} lines read"))
             elif tool_name == "write_file":
                 bytes_written = data.get("bytes_written", 0)
-                self.console.print(f"│ 📝 write_file: {bytes_written} bytes written", style="dim")
+                self.console.print(ActivityFeed.format_result(tool_name, f"write_file: {bytes_written} bytes written"))
             elif tool_name == "search_files":
                 count = data.get("total_found", 0)
-                self.console.print(f"│ 🔍 search_files: {count} files found", style="dim")
+                self.console.print(ActivityFeed.format_result(tool_name, f"search_files: {count} files found"))
             elif tool_name == "terminal":
                 exit_code = data.get("exit_code", -1)
-                self.console.print(f"│ 💻 terminal: exit code {exit_code}", style="dim")
+                self.console.print(ActivityFeed.format_result(tool_name, f"terminal: exit code {exit_code}"))
             else:
-                self.console.print(f"│ ✅ {tool_name}: completed", style="dim")
+                self.console.print(ActivityFeed.format_result(tool_name, f"{tool_name}: completed"))
         except (json.JSONDecodeError, AttributeError):
-            self.console.print(f"│ ✅ {tool_name}: completed", style="dim")
+            self.console.print(ActivityFeed.format_result(tool_name, f"{tool_name}: completed"))
 
     def show_separator(self, agent_name: str = "NanoHermes") -> None:
         self.console.print(f"┌─ {agent_name} " + "─" * 50, style="bold yellow")
@@ -377,6 +377,12 @@ class TUIApp:
             await self._cmd_resume(identifier)
             return True
 
+        if cmd.startswith("/compress"):
+            parts = command.strip().split(None, 1)
+            focus_topic = parts[1] if len(parts) > 1 else None
+            await self._cmd_compress(focus_topic)
+            return True
+
         return False
 
     async def process_message(self, message: str) -> None:
@@ -502,6 +508,64 @@ class TUIApp:
         title = session.get("title") or "(无标题)"
         self.console.print(f"\n[green]已恢复会话: {identifier[:8]} - {title}[/green]")
         self.console.print(f"[dim]共 {len(self.messages)} 条消息[/dim]\n")
+
+    async def _cmd_compress(self, focus_topic: str | None = None) -> None:
+        """处理 /compress 命令，手动触发上下文压缩。"""
+        if not self.model_caller:
+            self.console.print("[yellow]模型调用器不可用[/yellow]")
+            return
+
+        if len(self.messages) < 5:
+            self.console.print("[yellow]消息太少，无需压缩（至少 5 条）[/yellow]")
+            return
+
+        from src.compression import ContextCompressor
+        compressor = ContextCompressor(
+            model=self.model,
+            threshold_percent=0.50,
+            protect_first_n=3,
+            protect_last_n=20,
+            summary_target_ratio=0.20,
+        )
+
+        self.console.print("\n[cyan]🗜️ 正在压缩上下文...[/cyan]")
+
+        # 估算当前 token 数
+        approx_tokens = sum(len(m.get("content", "") or "") // 4 + 10 for m in self.messages)
+
+        def model_caller(msgs):
+            """简单的模型调用适配器。"""
+            response = self.model_caller(msgs)
+            return response
+
+        try:
+            compressed = compressor.compress(
+                self.messages,
+                current_tokens=approx_tokens,
+                focus_topic=focus_topic,
+                force=True,
+                model_caller=model_caller,
+            )
+
+            if len(compressed) == len(self.messages):
+                self.console.print("[yellow]压缩未生效（消息数未减少），可能已达最小压缩限度[/yellow]")
+                return
+
+            saved = len(self.messages) - len(compressed)
+            self.messages = compressed
+            self.console.print(f"[green]✓ 压缩完成：{len(self.messages) + saved} -> {len(self.messages)} 条消息（减少 {saved} 条）[/green]")
+
+            # 保存压缩后的消息
+            if self.session_db and self.session_id and self.session_id != "new_session":
+                for msg in compressed[-min(5, len(compressed)):]:
+                    role = msg.get("role", "user")
+                    content = msg.get("content", "")
+                    if role in ("user", "assistant"):
+                        self._save_message_to_storage(role, content)
+
+        except Exception as e:
+            self.console.print(f"[red]压缩失败: {e}[/red]")
+            logger.error(f"Compression failed: {e}", exc_info=True)
 
     async def shutdown(self) -> None:
         logger.info("TUI 正在关闭...")

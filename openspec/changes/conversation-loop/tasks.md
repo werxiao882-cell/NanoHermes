@@ -128,3 +128,29 @@
 - [x] 11.12 实现 trigram 分词器触发器（messages_fts_trigram_insert/update/delete）
 - [x] 11.13 实现会话分支功能（parent_session_id 关联）
 - [x] 11.14 编写 schema 迁移测试
+
+## 12. 上下文压缩实现
+
+- [x] 12.1 创建 `src/compression/` 目录及 `__init__.py`
+- [x] 12.2 实现 `ContextCompressor` 类（compressor.py）
+- [x] 12.3 实现 `_prune_old_tool_results()` 方法（Phase 1：修剪旧工具结果）
+- [x] 12.4 实现 `_protect_head_size()` 和 `_align_boundary_forward()` 方法（Phase 2：Head 保护）
+- [x] 12.5 实现 `_find_tail_cut_by_tokens()` 方法（Phase 2：Tail Token 预算保护）
+- [x] 12.6 实现 `_ensure_last_user_message_in_tail()` 方法（用户消息锚定）
+- [x] 12.7 实现 `_serialize_for_summary()` 方法（序列化待摘要内容）
+- [x] 12.8 实现 `_generate_summary()` 方法（Phase 3：LLM 摘要生成）
+- [x] 12.9 实现 `_compute_summary_budget()` 方法（摘要预算计算）
+- [x] 12.10 实现 `_fallback_to_main_for_compression()` 方法（辅助模型回退）
+- [x] 12.11 实现 `_sanitize_tool_pairs()` 方法（Phase 5：清理孤儿工具对）
+- [x] 12.12 实现 `_strip_historical_media()` 方法（历史媒体剥离）
+- [x] 12.13 实现 `compress()` 主方法（5 阶段压缩入口）
+- [x] 12.14 实现摘要模板常量（SUMMARY_PREFIX + 结构化章节）
+- [x] 12.15 实现工具结果去重和参数截断逻辑
+- [x] 12.16 实现失败处理和 cooldown 机制
+- [x] 12.17 实现反抖动保护（连续 2 次 <10% 节省跳过）
+- [ ] 12.18 实现会话分裂逻辑（end_session + create_session + parent_session_id）
+- [x] 12.19 实现 `/compress` TUI 命令处理
+- [x] 12.20 实现 `/compress <focus topic>` 焦点主题压缩
+- [ ] 12.21 集成到 TUI 对话循环（自动触发检查）
+- [ ] 12.22 编写上下文压缩单元测试
+- [ ] 12.23 编写上下文压缩集成测试

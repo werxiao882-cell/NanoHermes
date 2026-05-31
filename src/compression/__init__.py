@@ -1,10 +1,11 @@
 """上下文压缩模块。
 
-辅助 LLM 自动压缩长对话：
-- 检测上下文窗口使用率
-- 生成结构化摘要
-- 保护头部和尾部上下文
-- 工具输出剪枝
+对齐 hermes-agent-ref 的 ContextCompressor 实现，提供：
+- 5 阶段压缩算法（修剪、边界、摘要、组装、清理）
+- 结构化摘要模板
+- Head/Tail 边界保护
+- 辅助模型回退
+- 会话分裂
 """
 
 from src.compression.compressor import ContextCompressor
