@@ -412,6 +412,43 @@ class SessionDB:
 
         return None
 
+    def list_sessions(self, limit: int = 100) -> list[dict[str, Any]]:
+        """列出所有历史会话。
+
+        Args:
+            limit: 最大返回数量，默认 100。
+
+        Returns:
+            会话列表，按创建时间倒序，包含 session_id 和 title。
+        """
+        if self.conn is None:
+            return []
+
+        cursor = self.conn.execute(
+            "SELECT session_id, title, created_at, model FROM sessions ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def search_sessions_by_title(self, keyword: str, limit: int = 10) -> list[dict[str, Any]]:
+        """根据标题关键词搜索会话。
+
+        Args:
+            keyword: 搜索关键词。
+            limit: 最大返回数量。
+
+        Returns:
+            匹配的会话列表。
+        """
+        if self.conn is None:
+            return []
+
+        cursor = self.conn.execute(
+            "SELECT session_id, title, created_at, model FROM sessions WHERE title LIKE ? ORDER BY created_at DESC LIMIT ?",
+            (f"%{keyword}%", limit),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
     # ========================================================================
     # Token 计数
     # ========================================================================
