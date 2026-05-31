@@ -381,8 +381,7 @@ class TUIApp:
             await self.shutdown()
 
     def _show_welcome_message(self) -> None:
-        print("\n🤖 NanoHermes TUI v2 - 现代化终端界面")
-        print("输入 /help 查看可用命令，Ctrl+D 退出\n")
+        pass
 
     async def shutdown(self) -> None:
         logger.info("TUI 正在关闭...")
