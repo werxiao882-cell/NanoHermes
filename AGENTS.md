@@ -20,6 +20,11 @@ python -m src.main --tui        # 启动 TUI 聊天界面
 # 快速 API 测试（独立脚本）
 python test_api.py
 
+# MCP 服务器启动
+python -m src.mcp.server                    # Stdio 模式（默认）
+python -m src.mcp.server --transport streamable-http --port 8000  # HTTP 模式
+python -m src.mcp.server --transport sse --port 8000              # SSE 兼容模式
+
 # 测试
 python -m pytest tests/ -v              # 全部测试
 python -m pytest tests/provider/ -v     # 单个模块
@@ -41,6 +46,7 @@ python -m pytest tests/test_e2e.py -v -s  # 端到端（-s 显示输出）
 - **SQLite**: `~/.nanohermes/sessions.db`（会话元数据、FTS5 搜索）
 - **JSONL**: `~/.nanohermes/sessions/<session_id>.jsonl`（完整消息历史）
 - **Memory**: `~/.nanohermes/memory/`（MEMORY.md / USER.md）
+- **MCP Config**: `~/.nanohermes/mcp_servers.json`（外部 MCP 服务配置）
 
 ## 架构边界
 
@@ -49,6 +55,7 @@ src/
 ├── main.py / __main__.py    # 入口（耦合所有模块）
 ├── provider/                # LLM 提供商运行时（凭证/API路由/客户端/回退链）
 ├── tools/                   # 工具运行时（注册表/分发器/终端/文件/澄清/技能等）
+├── mcp/                     # MCP 协议支持（服务器/客户端/桥接/注册表）
 ├── session/                 # 会话存储（SQLite + JSONL 双存储）
 ├── memory/                  # 记忆系统（文件提供者 + 编排器）
 ├── skills/                  # 技能系统（SKILL.md 解析 + Curator 自进化）
