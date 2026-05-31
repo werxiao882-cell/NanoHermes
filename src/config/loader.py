@@ -76,6 +76,8 @@ def resolve_env_credentials(config_dict: dict[str, Any]) -> dict[str, Any]:
     """从环境变量解析 API Key 等凭证。
 
     遍历配置，查找 *_env 后缀的字段，从环境变量读取实际值。
+    注意：api_key_env 字段保留环境变量名，不替换为实际值，
+    因为 _resolve_api_key 需要用它来读取环境变量。
 
     Args:
         config_dict: 配置字典。
@@ -87,6 +89,8 @@ def resolve_env_credentials(config_dict: dict[str, Any]) -> dict[str, Any]:
     for key, value in config_dict.items():
         if isinstance(value, dict):
             resolved[key] = resolve_env_credentials(value)
+        elif key == "api_key_env":
+            resolved[key] = value
         elif key.endswith("_env") and isinstance(value, str):
             env_value = os.environ.get(value)
             if env_value:
