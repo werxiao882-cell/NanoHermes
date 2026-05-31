@@ -32,3 +32,29 @@
 #### Scenario: 审查技能
 - **WHEN** 对话中出现了新技术或工作流
 - **THEN** 审查线程使用 skill_manage 更新技能
+
+### Requirement: 系统 SHALL 支持 /sessions 命令查看历史会话
+系统 SHALL 在对话循环中处理 `/sessions` 命令，列出所有历史会话（会话 ID 和标题）。
+
+#### Scenario: 列出全部历史会话
+- **WHEN** 用户输入 `/sessions`
+- **THEN** 系统显示所有历史会话的 ID 和标题列表
+
+#### Scenario: 无历史会话时
+- **WHEN** 用户输入 `/sessions` 且无历史会话
+- **THEN** 系统提示"暂无历史会话"
+
+### Requirement: 系统 SHALL 支持 /resume 命令恢复历史会话
+系统 SHALL 在对话循环中处理 `/resume` 命令，支持通过会话 ID 或标题恢复历史会话。
+
+#### Scenario: 通过会话 ID 恢复
+- **WHEN** 用户输入 `/resume <session_id>`
+- **THEN** 系统加载该会话的历史消息并继续对话
+
+#### Scenario: 通过标题恢复
+- **WHEN** 用户输入 `/resume <标题关键词>`
+- **THEN** 系统匹配标题并恢复对应会话
+
+#### Scenario: 会话不存在时
+- **WHEN** 用户输入 `/resume` 但会话不存在
+- **THEN** 系统提示"会话不存在，请检查 ID 或标题"

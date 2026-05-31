@@ -51,10 +51,12 @@ class TUIApp:
         tool_categories: dict[str, list[str]] | None = None,
         skill_categories: dict[str, list[str]] | None = None,
         config: dict[str, Any] | None = None,
+        session_db=None,
     ):
         self.config = config or {}
         self.state = TUIState()
         self.event_handler = TUIEventHandler(self.state)
+        self.session_db = session_db
 
         layout_config = LayoutConfig(
             show_tool_panel=self.config.get("show_tool_panel", True),
@@ -336,6 +338,16 @@ class TUIApp:
             self.console.print(f"  Output Tokens: {self.status_bar.output_tokens}")
             return True
 
+        if cmd == "/sessions":
+            await self._cmd_sessions()
+            return True
+
+        if cmd.startswith("/resume"):
+            parts = command.strip().split(None, 1)
+            identifier = parts[1] if len(parts) > 1 else None
+            await self._cmd_resume(identifier)
+            return True
+
         return False
 
     async def process_message(self, message: str) -> None:
@@ -383,6 +395,85 @@ class TUIApp:
     def _show_welcome_message(self) -> None:
         pass
 
+    async def _cmd_sessions(self) -> None:
+        """处理 /sessions 命令，列出历史会话。"""
+        if not self.session_db:
+            self.console.print("[yellow]会话数据库不可用[/yellow]")
+            return
+
+        sessions = self.session_db.list_sessions(limit=50)
+        if not sessions:
+            self.console.print("[dim]暂无历史会话[/dim]")
+            return
+
+        self.console.print("\n[cyan]历史会话:[/cyan]")
+        for s in sessions:
+            sid = s.get("session_id", "")
+            title = s.get("title") or "(无标题)"
+            created = s.get("created_at", "")
+            short_id = sid[:8]
+            self.console.print(f"  [dim]{created}[/dim]  [bold]{short_id}[/bold]  {title}")
+        self.console.print()
+
+    async def _cmd_resume(self, identifier: str | None) -> None:
+        """处理 /resume 命令，恢复历史会话。"""
+        if not identifier:
+            self.console.print("[yellow]用法: /resume <session_id 或 标题关键词>[/yellow]")
+            return
+
+        if not self.session_db:
+            self.console.print("[yellow]会话数据库不可用[/yellow]")
+            return
+
+        # 先尝试按 ID 查找
+        session = self.session_db.get_session(identifier)
+        if not session:
+            # 尝试按标题搜索
+            matches = self.session_db.search_sessions_by_title(identifier, limit=5)
+            if not matches:
+                self.console.print(f"[yellow]未找到匹配的会话: {identifier}[/yellow]")
+                return
+            if len(matches) == 1:
+                session = self.session_db.get_session(matches[0]["session_id"])
+            else:
+                self.console.print("[cyan]找到多个匹配，请选择:[/cyan]")
+                for m in matches:
+                    sid = m.get("session_id", "")
+                    title = m.get("title") or "(无标题)"
+                    self.console.print(f"  [bold]{sid[:8]}[/bold]  {title}")
+                return
+
+        # 加载会话消息
+        messages = self.session_db.get_messages(identifier)
+        if not messages:
+            self.console.print("[yellow]会话存在但无消息记录[/yellow]")
+            return
+
+        # 重新打开会话
+        self.session_db.reopen_session(identifier)
+
+        # 更新当前会话 ID 和消息
+        old_session_id = self.session_id
+        self.session_id = identifier
+        self.messages = []
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if role == "assistant" and msg.get("tool_calls"):
+                try:
+                    tool_calls = json.loads(msg.get("tool_calls"))
+                    self.messages.append({"role": role, "content": content, "tool_calls": tool_calls})
+                except json.JSONDecodeError:
+                    self.messages.append({"role": role, "content": content})
+            elif role == "tool":
+                self.messages.append({"role": role, "content": content, "tool_call_id": msg.get("tool_call_id")})
+            else:
+                self.messages.append({"role": role, "content": content})
+
+        title = session.get("title") or "(无标题)"
+        self.console.print(f"\n[green]已恢复会话: {identifier[:8]} - {title}[/green]")
+        self.console.print(f"[dim]共 {len(self.messages)} 条消息[/dim]\n")
+
     async def shutdown(self) -> None:
         logger.info("TUI 正在关闭...")
         self.state.running = False
@@ -402,6 +493,7 @@ def create_tui_v2(
     tool_categories: dict[str, list[str]] | None = None,
     skill_categories: dict[str, list[str]] | None = None,
     config: dict[str, Any] | None = None,
+    session_db=None,
 ) -> TUIApp:
     return TUIApp(
         model_caller=model_caller,
@@ -414,4 +506,5 @@ def create_tui_v2(
         tool_categories=tool_categories,
         skill_categories=skill_categories,
         config=config,
+        session_db=session_db,
     )

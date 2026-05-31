@@ -354,6 +354,12 @@ def main_chat(debug: bool = False, resume: str | None = None, resume_title: str 
     # 会话 ID
     session_id = "new_session"
 
+    # 初始化 SessionDB
+    from src.session.session_db import SessionDB
+    from pathlib import Path
+    db_path = Path.home() / ".nanohermes" / "sessions.db"
+    session_db = SessionDB(db_path)
+
     # 使用 TUI v2
     from src.cli.tui import create_tui_v2
     adapter = create_tui_v2(
@@ -371,6 +377,7 @@ def main_chat(debug: bool = False, resume: str | None = None, resume_title: str 
             "show_tool_panel": config.tui.show_tool_panel,
             "tool_panel_position": config.tui.tool_panel_position,
         },
+        session_db=session_db,
     )
     
     # 运行 TUI v2（异步）
