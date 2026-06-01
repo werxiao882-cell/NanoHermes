@@ -1,4 +1,4 @@
-"""TUI v2 状态栏组件测试。"""
+"""TUI 状态栏组件测试。"""
 
 import pytest
 from rich.text import Text
