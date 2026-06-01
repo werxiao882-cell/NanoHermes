@@ -1,6 +1,6 @@
 """TUI 主模块。
 
-合并了 TUIApp 和 TUIV2Adapter，提供完整的 TUI 功能。
+提供完整的 TUI 功能，包括界面渲染、对话循环、命令处理等。
 """
 
 from __future__ import annotations
@@ -592,7 +592,7 @@ class TUIApp:
         logger.info("TUI 已关闭")
 
 
-def create_tui_v2(
+def create_tui(
     model_caller,
     tool_dispatch,
     model: str,

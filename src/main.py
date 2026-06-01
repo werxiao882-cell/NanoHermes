@@ -357,9 +357,9 @@ def main_chat(debug: bool = False, resume: str | None = None, resume_title: str 
     session_db = SessionDB(db_path)
     jsonl_store = JsonlSessionStore()
 
-    # 使用 TUI v2
-    from src.cli.tui import create_tui_v2
-    adapter = create_tui_v2(
+    # 使用 TUI
+    from src.cli.tui import create_tui
+    app = create_tui(
         model_caller=model_caller,
         tool_dispatch=tool_dispatch_func,
         model=model,
@@ -378,9 +378,9 @@ def main_chat(debug: bool = False, resume: str | None = None, resume_title: str 
         jsonl_store=jsonl_store,
     )
     
-    # 运行 TUI v2（异步）
+    # 运行 TUI（异步）
     import asyncio
-    asyncio.run(adapter.run())
+    asyncio.run(app.run())
 
 
 def main():

@@ -1,9 +1,9 @@
 """CLI 模块 - NanoHermes 终端界面。
 
-仅支持 TUI v2 现代化终端界面。
+提供现代化的 TUI 终端界面。
 """
 
-from src.cli.tui import TUIApp, create_tui_v2
+from src.cli.tui import TUIApp, create_tui
 from src.cli.state import TUIState, ToolCallRecord
 from src.cli.event_handler import TUIEventHandler
 from src.cli.completers import ContextAwareCompleter, CommandCompleter, FilePathCompleter
@@ -20,7 +20,7 @@ from src.cli.widgets import (
 )
 
 __all__ = [
-    "TUIApp", "create_tui_v2",
+    "TUIApp", "create_tui",
     "TUIState", "ToolCallRecord",
     "TUIEventHandler",
     "ContextAwareCompleter", "CommandCompleter", "FilePathCompleter",

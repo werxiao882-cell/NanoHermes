@@ -188,7 +188,7 @@ NanoHermes/
 ├── tests/                            # 单元测试
 │   ├── provider/                     # Provider Runtime 测试
 │   ├── tools/                        # Tool Runtime 测试
-│   ├── cli/tui_v2/                   # TUI 测试
+│   ├── cli/                              # TUI 测试
 │   ├── test_main_integration.py      # 集成测试
 │   ├── test_concurrent.py            # 并发测试
 │   ├── test_e2e.py                   # 端到端测试
