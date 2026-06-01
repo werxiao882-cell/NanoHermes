@@ -69,7 +69,6 @@ class TestEventBus:
         bus.on(EventType.TOOL_START, good_handler)
         bus.emit(EventType.TOOL_START, {})
 
-        # good_handler 应该仍然被调用
         assert len(results) == 1
         assert results[0] == "success"
 
@@ -88,7 +87,6 @@ class TestEventBus:
         bus.emit(EventType.TOOL_START, {})
         bus.emit(EventType.TOOL_END, {})
 
-        # 只有 TOOL_END 应该被触发
         assert len(results) == 1
 
     def test_clear_all_events(self):
@@ -106,7 +104,6 @@ class TestEventBus:
         bus.emit(EventType.TOOL_START, {})
         bus.emit(EventType.TOOL_END, {})
 
-        # 不应该有任何触发
         assert len(results) == 0
 
     def test_emit_with_none_data(self):
@@ -126,19 +123,45 @@ class TestEventBus:
     def test_emit_nonexistent_event(self):
         """测试触发未订阅的事件。"""
         bus = EventBus()
-        # 不应该抛出异常
         bus.emit(EventType.TOOL_START, {"test": "data"})
 
 
 class TestEventType:
     """测试 EventType 枚举。"""
 
-    def test_all_event_types_exist(self):
-        """测试所有事件类型都存在。"""
-        assert EventType.TURN_START.value == "turn_start"
+    def test_lifecycle_events(self):
+        """测试生命周期事件类型。"""
+        assert EventType.LOOP_START.value == "loop_start"
+        assert EventType.LOOP_END.value == "loop_end"
+        assert EventType.ITERATION_START.value == "iteration_start"
+        assert EventType.ITERATION_END.value == "iteration_end"
+
+    def test_model_events(self):
+        """测试模型调用事件类型。"""
+        assert EventType.MODEL_REQUEST.value == "model_request"
+        assert EventType.MODEL_RESPONSE.value == "model_response"
+        assert EventType.MODEL_ERROR.value == "model_error"
+        assert EventType.MODEL_RETRY.value == "model_retry"
+
+    def test_tool_events(self):
+        """测试工具事件类型。"""
         assert EventType.TOOL_START.value == "tool_start"
         assert EventType.TOOL_END.value == "tool_end"
+        assert EventType.TOOL_ERROR.value == "tool_error"
+
+    def test_message_events(self):
+        """测试消息事件类型。"""
         assert EventType.MESSAGE_APPEND.value == "message_append"
-        assert EventType.TURN_COMPLETE.value == "turn_complete"
-        assert EventType.POST_TURN.value == "post_turn"
+
+    def test_context_events(self):
+        """测试上下文事件类型。"""
+        assert EventType.PRE_COMPRESS.value == "pre_compress"
+
+    def test_control_events(self):
+        """测试控制事件类型。"""
         assert EventType.INTERRUPT.value == "interrupt"
+        assert EventType.MAX_ITERATIONS.value == "max_iterations"
+
+    def test_total_event_count(self):
+        """测试事件类型总数。"""
+        assert len(EventType) == 15
