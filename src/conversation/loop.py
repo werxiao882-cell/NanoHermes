@@ -10,14 +10,9 @@
 
 事件系统：
 - 使用 EventBus 解耦循环逻辑与外部处理器
-- 支持 16 种事件类型，覆盖完整生命周期
+- 支持 15 种事件类型，覆盖完整生命周期
 - 外部功能通过 loop.events.on() 订阅事件接入
-
-Debug 模式：
-- 输出发送到模型的完整请求体（JSON）
-- 输出模型返回的完整响应体（JSON）
-- 输出模型的思考内容（reasoning）
-- 输出工具调用和结果
+- Debug 模式通过 DebugHandler 订阅事件实现，与核心循环完全解耦
 """
 
 from __future__ import annotations
@@ -42,7 +37,6 @@ class ConversationLoop:
     Attributes:
         max_iterations: 最大迭代次数。
         events: 事件总线，用于订阅和触发事件。
-        debug: 是否开启 debug 模式。
     """
 
     def __init__(
@@ -58,16 +52,19 @@ class ConversationLoop:
             max_iterations: 最大迭代次数。
             model_call: 模型调用函数。
             tool_dispatch: 工具分发函数。
-            debug: 是否开启 debug 模式，输出请求/响应详情。
+            debug: 是否开启 debug 模式，注册 DebugHandler 输出详细日志。
         """
         self.max_iterations = max_iterations
         self._model_call = model_call
         self._tool_dispatch = tool_dispatch
         self._error_classifier = ErrorClassifier()
         self._interrupted = False
-        self.debug = debug
-
         self.events = EventBus()
+
+        # debug 模式：注册 DebugHandler 订阅事件输出调试日志
+        if debug:
+            from src.conversation.debug_handler import DebugHandler
+            DebugHandler().register(self.events)
 
     def run(
         self,
@@ -103,10 +100,6 @@ class ConversationLoop:
                 "iteration": iteration,
                 "messages": messages,
             })
-
-            # Debug: 输出请求体
-            if self.debug:
-                self._debug_print_request(iteration, messages, tools)
 
             # 调用模型
             model_start = time.time()
@@ -145,10 +138,6 @@ class ConversationLoop:
                     })
                     continue
                 raise
-
-            # Debug: 输出响应体和 reasoning
-            if self.debug:
-                self._debug_print_response(iteration, response)
 
             self.events.emit(EventType.ITERATION_END, {
                 "iteration": iteration,
@@ -242,70 +231,6 @@ class ConversationLoop:
         })
 
         return result
-
-    # ========================================================================
-    # Debug 输出
-    # ========================================================================
-
-    def _debug_print_request(
-        self,
-        iteration: int,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]] | None,
-    ) -> None:
-        """Debug: 打印发送到模型的完整请求体（JSON）。"""
-        request_body = {"messages": messages}
-        if tools:
-            request_body["tools"] = tools
-
-        print(f"\n{'='*70}")
-        print(f"[DEBUG] >>> 第 {iteration} 轮 - 请求体 (Request Body)")
-        print(f"{'='*70}")
-        print(json.dumps(request_body, ensure_ascii=False, indent=2))
-        print(f"{'='*70}\n")
-
-    def _debug_print_response(self, iteration: int, response: dict[str, Any]) -> None:
-        """Debug: 打印模型返回的完整响应体（JSON）和思考内容。"""
-        reasoning = response.get("reasoning")
-        if reasoning:
-            print(f"\n{'='*70}")
-            print(f"[DEBUG] 第 {iteration} 轮 - 思考内容 (Reasoning)")
-            print(f"{'='*70}")
-            print(reasoning)
-            print(f"{'='*70}\n")
-
-        raw_response = response.get("raw_response")
-        if raw_response:
-            print(f"\n{'='*70}")
-            print(f"[DEBUG] <<< 第 {iteration} 轮 - 响应体 (Response Body)")
-            print(f"{'='*70}")
-            if isinstance(raw_response, dict):
-                print(json.dumps(raw_response, ensure_ascii=False, indent=2))
-            else:
-                print(raw_response)
-            print(f"{'='*70}\n")
-        else:
-            print(f"\n{'='*70}")
-            print(f"[DEBUG] <<< 第 {iteration} 轮 - 响应摘要")
-            print(f"{'='*70}")
-
-            content = response.get("content", "")
-            if content:
-                if len(content) > 500:
-                    content = content[:500] + "..."
-                print(f"内容: {content}")
-
-            tool_calls = response.get("tool_calls")
-            if tool_calls:
-                print(f"\n工具调用: {len(tool_calls)} 个")
-                for tc in tool_calls:
-                    func = tc.get("function", {})
-                    print(f"  - {func.get('name', '')}({func.get('arguments', '')})")
-
-            usage = response.get("usage")
-            if usage:
-                print(f"\nToken 用量: 输入 {usage.get('input_tokens', 0)}, 输出 {usage.get('output_tokens', 0)}")
-            print()
 
     # ========================================================================
     # 内部方法
