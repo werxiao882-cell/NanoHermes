@@ -62,7 +62,7 @@ The streaming CLI SHALL integrate JSONL history storage, automatically appending
 - **THEN** the session's JSONL history including tool calls and results is loaded and displayed before accepting new input
 
 ### Requirement: Message Append Callback
-The ConversationLoop SHALL provide an on_message_append callback that is invoked every time a message is appended to the messages list, including tool messages.
+ConversationLoop SHALL 提供 on_message_append 回调，每次消息追加到消息列表时调用，包括 tool 消息。
 
 #### Scenario: Callback fires for tool messages
 - **WHEN** a tool execution result is appended to messages

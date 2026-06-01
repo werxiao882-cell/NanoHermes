@@ -3,6 +3,8 @@
 ### Requirement: 系统 SHALL 创建 FTS5 全文搜索索引
 系统 SHALL 创建 messages_fts 虚拟表，使用 unicode61 分词器。FTS 索引 SHALL 包含 content、tool_name、tool_calls 字段的组合。
 
+**设计理由：** FTS5 提供零配置全文搜索——不需要外部搜索引擎，不需要向量嵌入，不需要网络调用。对于个人 Agent 的历史搜索场景，这比复杂的 RAG 方案更简单可靠。
+
 #### Scenario: 创建 FTS 虚拟表
 - **WHEN** SessionDB 初始化时
 - **THEN** 创建 messages_fts 虚拟表，如果不存在

@@ -1,48 +1,50 @@
 ## ADDED Requirements
 
-### Requirement: _parseSchemaColumns 方法 SHALL 正确解析期望列
-测试 SHALL 验证使用内存 SQLite 数据库解析 SCHEMA_SQL 提取列定义。
+### Requirement: _parse_schema_columns 方法 SHALL 正确解析期望列
+
+测试 SHALL 验证使用内存 SQLite 解析 SCHEMA_SQL 并提取期望列。
 
 #### Scenario: 解析单表列
-- **GIVEN** SCHEMA_SQL 包含 sessions 表定义
-- **WHEN** 调用 _parseSchemaColumns
-- **THEN** 返回 sessions 表的所有列及其类型表达式
+- **GIVEN** SessionDB 实例
+- **WHEN** 调用 _parse_schema_columns
+- **THEN** 返回包含表名和列名的映射
 
 #### Scenario: 解析多表列
-- **GIVEN** SCHEMA_SQL 包含 sessions、messages、state_meta 表
-- **WHEN** 调用 _parseSchemaColumns
-- **THEN** 返回所有表的列定义
+- **GIVEN** SessionDB 实例，包含 sessions 和 messages 表
+- **WHEN** 调用 _parse_schema_columns
+- **THEN** 返回两个表的所有列
 
 #### Scenario: 解析带 DEFAULT 的列
-- **GIVEN** 列定义包含 `message_count INTEGER DEFAULT 0`
-- **WHEN** 调用 _parseSchemaColumns
-- **THEN** 返回类型表达式 'INTEGER DEFAULT 0'
+- **GIVEN** SessionDB 实例，包含带 DEFAULT 值的列
+- **WHEN** 调用 _parse_schema_columns
+- **THEN** 列类型表达式包含 DEFAULT 值
 
-### Requirement: _reconcileColumns 方法 SHALL 添加缺失列
-测试 SHALL 验证 live 列和期望列对比，自动添加缺失列。
+### Requirement: _reconcile_columns 方法 SHALL 添加缺失列
+
+测试 SHALL 验证对比 live 列和期望列，自动添加缺失列。
 
 #### Scenario: 添加缺失列
-- **GIVEN** 数据库缺少 billing_provider 列
-- **WHEN** 调用 _reconcileColumns
-- **THEN** 执行 ALTER TABLE ADD COLUMN 添加 billing_provider
+- **GIVEN** SessionDB 实例，缺少某个列
+- **WHEN** 调用 _reconcile_columns
+- **THEN** 执行 ALTER TABLE ADD COLUMN 添加缺失列
 
 #### Scenario: 不添加已存在的列
-- **GIVEN** 数据库包含所有声明的列
-- **WHEN** 调用 _reconcileColumns
+- **GIVEN** SessionDB 实例，所有列已存在
+- **WHEN** 调用 _reconcile_columns
 - **THEN** 不执行任何 ALTER TABLE 操作
 
 #### Scenario: 处理重复列错误
-- **GIVEN** 数据库已包含某列，但 SCHEMA_SQL 也声明了该列
-- **WHEN** 调用 _reconcileColumns
-- **THEN** 捕获 "duplicate column name" 错误，不抛出
+- **GIVEN** SessionDB 实例
+- **WHEN** 调用 _reconcile_columns 且列已存在
+- **THEN** 捕获错误并记录 debug 日志，不抛出异常
 
-### Requirement: 延迟索引创建 SHALL 在协调之后
-测试 SHALL 验证依赖新列的索引在协调之后创建。
+### Requirement: 索引创建 SHALL 在协调之后
 
-#### Scenario: 协调后创建索引
-- **GIVEN** 索引 WHERE 子句引用协调添加的列
-- **WHEN** 初始化 SessionDB
-- **THEN** 索引在 _reconcileColumns 之后创建
+测试 SHALL 验证依赖协调添加列的索引在协调后创建。
+
+#### Scenario: 延迟索引创建
+- **GIVEN** SessionDB 实例，协调后添加新列
+- **THEN** 索引在 _reconcile_columns 之后创建
 
 #### Scenario: 索引创建失败不阻塞启动
 - **GIVEN** 索引创建失败（列不存在）

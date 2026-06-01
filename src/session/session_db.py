@@ -13,15 +13,23 @@ from __future__ import annotations
 import logging
 import os
 import random
+import re
 import sqlite3
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from src.session.schema import SCHEMA_SQL, FTS_SQL, FTS_TRIGRAM_SQL
 
 logger = logging.getLogger(__name__)
+
+# 写锁竞争重试配置
+MAX_RETRIES = 15
+RETRY_MIN_MS = 0.020  # 20ms
+RETRY_MAX_MS = 0.150  # 150ms
+CHECKPOINT_INTERVAL = 50  # 每 50 次写入执行一次 checkpoint
+MAX_TITLE_LENGTH = 100
 
 
 class SessionDB:
@@ -37,6 +45,7 @@ class SessionDB:
         db_path: 数据库文件路径。
         conn: SQLite 连接对象。
         _closed: 是否已关闭。
+        _write_count: 写操作计数器。
     """
 
     def __init__(self, db_path: str | Path):
@@ -50,6 +59,7 @@ class SessionDB:
 
         self.conn: sqlite3.Connection | None = None
         self._closed = False
+        self._write_count = 0
 
         self._connect()
         self._apply_wal()
@@ -122,16 +132,106 @@ class SessionDB:
     def _reconcile_schema(self) -> None:
         """协调 schema，添加缺失的列。
 
-        这是一个简化实现：检查表是否存在，不需要添加列。
-        完整实现会比较 live 列和声明列。
+        使用内存 SQLite 数据库解析 SCHEMA_SQL，提取期望的列，
+        然后与实际列对比，自动添加缺失列。
+
+        优势：添加新列只需修改 SCHEMA_SQL，下次启动时自动协调。
+        不需要版本控制的迁移代码。
         """
-        pass  # 当前 schema 是完整的，无需协调
+        if self.conn is None:
+            return
+
+        # 使用内存数据库解析 schema
+        ref = sqlite3.connect(":memory:")
+        ref.executescript(SCHEMA_SQL)
+
+        expected = self._parse_schema_columns(ref)
+        ref.close()
+
+        # 对比 live 列和期望列
+        for table_name, declared_cols in expected.items():
+            live_cols = self._get_live_columns(table_name)
+
+            for col_name, col_type in declared_cols.items():
+                if col_name not in live_cols:
+                    try:
+                        self.conn.execute(
+                            f'ALTER TABLE "{table_name}" ADD COLUMN "{col_name}" {col_type}'
+                        )
+                        logger.debug(f"Added column {table_name}.{col_name}")
+                    except sqlite3.OperationalError as e:
+                        logger.debug(f"Reconcile {table_name}.{col_name}: {e}")
+
+        # 更新 schema_version
+        self._update_schema_version()
+
+    def _parse_schema_columns(
+        self, ref: sqlite3.Connection
+    ) -> dict[str, dict[str, str]]:
+        """从内存数据库解析期望的列。
+
+        Args:
+            ref: 内存 SQLite 连接。
+
+        Returns:
+            表名 -> {列名 -> 列类型表达式} 的映射。
+        """
+        cursor = ref.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = [row[0] for row in cursor.fetchall()]
+        result = {}
+
+        for table_name in tables:
+            cursor = ref.execute(f"PRAGMA table_info({table_name})")
+            cols = cursor.fetchall()
+            col_map = {}
+
+            for col in cols:
+                # col: (cid, name, type, notnull, dflt_value, pk)
+                cid, name, col_type, notnull, dflt_value, pk = col
+                parts = [col_type or ""]
+                if notnull and not pk:
+                    parts.append("NOT NULL")
+                if dflt_value is not None:
+                    parts.append(f"DEFAULT {dflt_value}")
+                col_map[name] = " ".join(parts)
+
+            result[table_name] = col_map
+
+        return result
+
+    def _get_live_columns(self, table_name: str) -> dict[str, str]:
+        """获取实际数据库表的列。
+
+        Args:
+            table_name: 表名。
+
+        Returns:
+            列名 -> 列类型 的映射。
+        """
+        if self.conn is None:
+            return {}
+
+        cursor = self.conn.execute(f"PRAGMA table_info({table_name})")
+        cols = cursor.fetchall()
+        return {col[1]: col[2] for col in cols}
+
+    def _update_schema_version(self) -> None:
+        """更新 schema_version 表到当前版本。"""
+        if self.conn is None:
+            return
+        try:
+            self.conn.execute("DELETE FROM schema_version")
+            self.conn.execute("INSERT INTO schema_version (version) VALUES (1)")
+        except sqlite3.OperationalError:
+            pass
 
     def _execute_write(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
-        """执行写操作，带抖动重试。
+        """执行写操作，带 BEGIN IMMEDIATE + 抖动重试。
 
-        WAL 模式下写锁竞争时返回 SQLITE_BUSY，
-        通过抖动重试解决。
+        设计理由：
+        - BEGIN IMMEDIATE：在事务开始时就获取写锁，让锁竞争在最早时刻暴露
+        - 随机 jitter：20-150ms 的随机延迟打破 convoy effect
+        - 定期 checkpoint：每 50 次写入触发一次 WAL checkpoint
 
         Args:
             sql: SQL 语句。
@@ -143,22 +243,59 @@ class SessionDB:
         if self.conn is None:
             raise RuntimeError("数据库未连接")
 
-        max_retries = 5
-        for attempt in range(max_retries):
+        last_err: Exception | None = None
+
+        for attempt in range(MAX_RETRIES):
             try:
+                # 确保没有活跃事务
+                self.conn.rollback()
                 self.conn.execute("BEGIN IMMEDIATE")
                 cursor = self.conn.execute(sql, params)
                 self.conn.commit()
+
+                # 定期 checkpoint
+                self._write_count += 1
+                if self._write_count % CHECKPOINT_INTERVAL == 0:
+                    self._try_wal_checkpoint()
+
                 return cursor
             except sqlite3.OperationalError as e:
-                self.conn.rollback()
-                if "database is locked" in str(e).lower() and attempt < max_retries - 1:
-                    # 抖动重试：随机等待 10-100ms
-                    delay = random.uniform(0.01, 0.1) * (attempt + 1)
-                    time.sleep(delay)
+                try:
+                    self.conn.rollback()
+                except Exception:
+                    pass
+                if "locked" in str(e).lower() and attempt < MAX_RETRIES - 1:
+                    # 抖动重试：20-150ms 随机延迟
+                    jitter = random.uniform(RETRY_MIN_MS, RETRY_MAX_MS)
+                    time.sleep(jitter)
+                    last_err = e
                     continue
                 raise
-        raise sqlite3.OperationalError("写操作达到最大重试次数")
+            except BaseException:
+                try:
+                    self.conn.rollback()
+                except Exception:
+                    pass
+                raise
+
+        raise last_err or sqlite3.OperationalError("数据库锁定，达到最大重试次数")
+
+    def _try_wal_checkpoint(self) -> None:
+        """执行 PASSIVE WAL checkpoint。
+
+        将 WAL 帧回写到主数据库文件，防止 WAL 文件无限增长。
+        失败时不抛出异常（尽力而为）。
+        """
+        if self.conn is None:
+            return
+        try:
+            cursor = self.conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+            result = cursor.fetchone()
+            if result and result[0] > 0:
+                logger.debug(f"WAL checkpoint: {result[1]}/{result[0]} 页")
+        except Exception:
+            # 尽力而为，从不失败
+            pass
 
     # ========================================================================
     # 会话生命周期管理
@@ -173,6 +310,7 @@ class SessionDB:
         provider: str | None = None,
         source: str = "local",
         user_id: str | None = None,
+        system_prompt: str | None = None,
     ) -> str:
         """创建新会话。
 
@@ -184,6 +322,7 @@ class SessionDB:
             provider: 提供商 ID。
             source: 来源平台（local/telegram/discord 等）。
             user_id: 用户标识。
+            system_prompt: 系统提示快照。
 
         Returns:
             会话 ID。
@@ -191,10 +330,10 @@ class SessionDB:
         sid = session_id or str(uuid.uuid4())
         now = time.time()
         sql = """
-            INSERT INTO sessions (id, source, user_id, model, parent_session_id, title, started_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT OR IGNORE INTO sessions (id, source, user_id, model, parent_session_id, title, started_at, system_prompt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
-        self._execute_write(sql, (sid, source, user_id, model, parent_session_id, title, now))
+        self._execute_write(sql, (sid, source, user_id, model, parent_session_id, title, now, system_prompt))
         return sid
 
     def end_session(self, session_id: str, end_reason: str | None = None) -> None:
@@ -206,7 +345,7 @@ class SessionDB:
         """
         sql = """
             UPDATE sessions SET ended_at = ?, end_reason = ?
-            WHERE id = ?
+            WHERE id = ? AND ended_at IS NULL
         """
         self._execute_write(sql, (time.time(), end_reason, session_id))
 
@@ -262,6 +401,54 @@ class SessionDB:
             parent_session_id=parent_session_id,
             title=title,
         )
+
+    def update_system_prompt(self, session_id: str, system_prompt: str) -> None:
+        """更新会话的系统提示快照。
+
+        Args:
+            session_id: 会话 ID。
+            system_prompt: 系统提示内容。
+        """
+        sql = "UPDATE sessions SET system_prompt = ? WHERE id = ?"
+        self._execute_write(sql, (system_prompt, session_id))
+
+    def get_compression_tip(self, session_id: str) -> str:
+        """获取压缩延续链的最新会话 ID。
+
+        设计决策：通过 started_at >= ended_at 条件区分压缩延续和委托子 agent
+        或分支子节点，后者也可以在 parent_session_id 有值，但是在父节点还活着时创建的。
+
+        Args:
+            session_id: 起始会话 ID。
+
+        Returns:
+            压缩延续链的最新会话 ID。
+        """
+        if self.conn is None:
+            return session_id
+
+        current = session_id
+
+        # 限制 walk 深度（防御性）
+        for _ in range(100):
+            cursor = self.conn.execute(
+                """
+                SELECT id FROM sessions
+                WHERE parent_session_id = ?
+                    AND started_at >= (
+                        SELECT ended_at FROM sessions
+                        WHERE id = ? AND end_reason = 'compression'
+                    )
+                ORDER BY started_at DESC LIMIT 1
+                """,
+                (current, current),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return current
+            current = row[0]
+
+        return current
 
     # ========================================================================
     # 消息管理
@@ -378,8 +565,7 @@ class SessionDB:
             session_id: 会话 ID。
             title: 标题文本。
         """
-        # 清理标题：去除控制字符，限制长度
-        clean_title = _sanitize_title(title)
+        clean_title = sanitize_title(title)
         sql = "UPDATE sessions SET title = ? WHERE id = ?"
         self._execute_write(sql, (clean_title, session_id))
 
@@ -409,26 +595,66 @@ class SessionDB:
         if self.conn is None:
             return None
 
-        # 精确匹配
+        # 1. 精确匹配
         cursor = self.conn.execute(
-            "SELECT id FROM sessions WHERE title = ? AND ended_at IS NULL",
+            "SELECT id FROM sessions WHERE title = ? ORDER BY started_at DESC LIMIT 1",
             (title,),
         )
         row = cursor.fetchone()
         if row:
             return row[0]
 
-        # 编号变体匹配（"title #2"）
-        clean = _sanitize_title(title)
+        # 2. 搜索编号变体 "title #2", "title #3"
+        clean = sanitize_title(title)
+        escaped = clean.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         cursor = self.conn.execute(
-            "SELECT id FROM sessions WHERE title LIKE ? AND ended_at IS NULL",
-            (f"{clean} #%"),
+            f"SELECT id FROM sessions WHERE title LIKE ? ESCAPE '\\' ORDER BY started_at DESC",
+            (f"{escaped} #%",),
         )
         row = cursor.fetchone()
         if row:
             return row[0]
 
         return None
+
+    def get_next_title_in_lineage(self, base_title: str) -> str:
+        """生成 lineage 中的下一个标题。
+
+        剥离现有 #N 后缀，找到最大编号，生成下一个编号标题。
+
+        Args:
+            base_title: 基础标题（可能包含 #N 后缀）。
+
+        Returns:
+            下一个编号标题。
+        """
+        if self.conn is None:
+            return base_title
+
+        # 剥离现有 #N 后缀
+        match = re.match(r"^(.*?) #(\d+)$", base_title)
+        base = match.group(1) if match else base_title
+
+        # 查找现有编号变体
+        clean = sanitize_title(base)
+        escaped = clean.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        cursor = self.conn.execute(
+            f"SELECT title FROM sessions WHERE title = ? OR title LIKE ? ESCAPE '\\'",
+            (clean, f"{escaped} #%"),
+        )
+        existing = [row[0] for row in cursor.fetchall() if row[0]]
+
+        if not existing:
+            return clean
+
+        # 找到最大编号
+        max_num = 1
+        for t in existing:
+            m = re.match(r"^.* #(\d+)$", t)
+            if m:
+                max_num = max(max_num, int(m.group(1)))
+
+        return f"{clean} #{max_num + 1}"
 
     def list_sessions(self, limit: int = 100) -> list[dict[str, Any]]:
         """列出所有历史会话。
@@ -546,18 +772,30 @@ class SessionDB:
         self.close()
 
 
-def _sanitize_title(title: str) -> str:
+def sanitize_title(title: str) -> str:
     """清理标题：去除控制字符，折叠空白，限制长度。
 
     Args:
         title: 原始标题。
 
     Returns:
-        清理后的标题（最长 200 字符）。
+        清理后的标题（最长 100 字符）。
+
+    Raises:
+        ValueError: 标题为空或超过最大长度。
     """
-    # 去除控制字符（保留换行和制表符）
-    cleaned = "".join(c for c in title if c >= " " or c in "\n\t")
+    # 去除控制字符和 Unicode 格式字符（零宽字符等）
+    cleaned = "".join(
+        c for c in title
+        if (c >= " " and c not in "\u200b\u200c\u200d\u2060\ufeff") or c in "\n\t"
+    )
     # 折叠空白
     cleaned = " ".join(cleaned.split())
-    # 限制长度
-    return cleaned[:200]
+
+    if not cleaned:
+        raise ValueError("Title cannot be empty")
+
+    if len(cleaned) > MAX_TITLE_LENGTH:
+        raise ValueError(f"Title too long ({len(cleaned)} chars, max {MAX_TITLE_LENGTH})")
+
+    return cleaned
