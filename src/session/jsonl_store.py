@@ -1,10 +1,14 @@
 """JSONL 会话历史存储。
 
-使用 JSONL (JSON Lines) 格式保存完整的会话历史记录，支持：
-- 每条消息一行 JSON，便于追加和流式写入
-- 完整的消息元数据（role, content, tool_calls, timestamp, reasoning）
-- 会话恢复：从 JSONL 文件加载历史消息
-- 与 SessionDB 配合使用：SQLite 用于搜索和统计，JSONL 用于完整历史
+使用 JSONL (JSON Lines) 格式保存完整的会话历史记录。
+每条消息一行 JSON，增量追加，不重复存储历史消息。
+
+记录类型：
+- session_start: 会话元数据（model, session_id, tools_schema）
+- user: 用户消息
+- assistant: 助手回复（含 reasoning, usage）
+- tool_call: 工具调用（含 tool_name, arguments）
+- tool_result: 工具结果（含 tool_call_id, content）
 
 文件命名: {session_id}.jsonl
 存储路径: ~/.nanohermes/sessions/{session_id}.jsonl
@@ -21,7 +25,7 @@ from typing import Any
 class JsonlSessionStore:
     """JSONL 格式的会话历史存储。
 
-    每个会话一个 JSONL 文件，支持追加写入和完整恢复。
+    每个会话一个 JSONL 文件，增量追加消息记录，不重复存储历史。
 
     Attributes:
         base_dir: JSONL 文件存储的基础目录。
@@ -39,15 +43,37 @@ class JsonlSessionStore:
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_file_path(self, session_id: str) -> Path:
-        """获取会话的 JSONL 文件路径。
+        """获取会话的 JSONL 文件路径。"""
+        return self.base_dir / f"{session_id}.jsonl"
+
+    def _append_record(self, session_id: str, record: dict[str, Any]) -> None:
+        """追加一条记录到 JSONL 文件。"""
+        file_path = self._get_file_path(session_id)
+        with open(file_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    def start_session(
+        self,
+        session_id: str,
+        model: str,
+        tools_schema: list[dict[str, Any]] | None = None,
+    ) -> None:
+        """记录会话开始，写入元数据和工具 schema。
 
         Args:
             session_id: 会话 ID。
-
-        Returns:
-            JSONL 文件路径。
+            model: 使用的模型名称。
+            tools_schema: 工具 schema 列表（只存一次）。
         """
-        return self.base_dir / f"{session_id}.jsonl"
+        record = {
+            "type": "session_start",
+            "session_id": session_id,
+            "model": model,
+            "timestamp": time.time(),
+        }
+        if tools_schema:
+            record["tools"] = tools_schema
+        self._append_record(session_id, record)
 
     def append_message(
         self,
@@ -57,75 +83,40 @@ class JsonlSessionStore:
         tool_calls: list[dict[str, Any]] | None = None,
         tool_call_id: str | None = None,
         reasoning: str | None = None,
+        usage: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
         """追加一条消息到 JSONL 文件。
 
         Args:
             session_id: 会话 ID。
-            role: 消息角色（user/assistant/system/tool）。
+            role: 消息角色（user/assistant/tool_call/tool_result）。
             content: 消息内容。
             tool_calls: 工具调用列表。
-            tool_call_id: 工具调用 ID（tool 角色时设置）。
-            reasoning: 推理内容（如果模型支持）。
+            tool_call_id: 工具调用 ID（tool_result 时设置）。
+            reasoning: 推理内容。
+            usage: token 用量。
             metadata: 额外元数据。
         """
-        file_path = self._get_file_path(session_id)
-
         record = {
-            "role": role,
-            "content": content,
+            "type": role,
             "timestamp": time.time(),
         }
 
+        if content is not None:
+            record["content"] = content
         if tool_calls:
             record["tool_calls"] = tool_calls
         if tool_call_id:
             record["tool_call_id"] = tool_call_id
         if reasoning:
             record["reasoning"] = reasoning
+        if usage:
+            record["usage"] = usage
         if metadata:
             record["metadata"] = metadata
 
-        # 追加写入（JSONL 格式，每行一条 JSON）
-        with open(file_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
-
-    def append_turn(
-        self,
-        session_id: str,
-        request: dict[str, Any],
-        response: dict[str, Any],
-    ) -> None:
-        """追加一轮完整的请求/响应记录到 JSONL 文件。
-
-        保存完整的模型调用数据，包括发送的请求体和接收的响应体。
-
-        Args:
-            session_id: 会话 ID。
-            request: 请求数据，包含 messages 和 tools。
-            response: 响应数据，包含 content, tool_calls, usage, reasoning, raw_response。
-        """
-        file_path = self._get_file_path(session_id)
-
-        record = {
-            "type": "turn",
-            "timestamp": time.time(),
-            "request": {
-                "messages": request.get("messages", []),
-                "tools": request.get("tools"),
-            },
-            "response": {
-                "content": response.get("content"),
-                "tool_calls": response.get("tool_calls"),
-                "reasoning": response.get("reasoning"),
-                "usage": response.get("usage"),
-            },
-        }
-
-        # 追加写入（JSONL 格式，每行一条 JSON）
-        with open(file_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False, indent=2) + "\n")
+        self._append_record(session_id, record)
 
     def load_messages(self, session_id: str) -> list[dict[str, Any]]:
         """从 JSONL 文件加载完整的会话历史。
@@ -134,7 +125,7 @@ class JsonlSessionStore:
             session_id: 会话 ID。
 
         Returns:
-            消息列表，按时间顺序排列。
+            消息记录列表，按时间顺序排列。
         """
         file_path = self._get_file_path(session_id)
 
@@ -150,27 +141,16 @@ class JsonlSessionStore:
                         record = json.loads(line)
                         messages.append(record)
                     except json.JSONDecodeError:
-                        continue  # 跳过损坏的行
+                        continue
 
         return messages
 
     def session_exists(self, session_id: str) -> bool:
-        """检查会话的 JSONL 文件是否存在。
-
-        Args:
-            session_id: 会话 ID。
-
-        Returns:
-            True 表示文件存在。
-        """
+        """检查会话的 JSONL 文件是否存在。"""
         return self._get_file_path(session_id).exists()
 
     def list_sessions(self) -> list[str]:
-        """列出所有有 JSONL 文件的会话 ID。
-
-        Returns:
-            会话 ID 列表。
-        """
+        """列出所有有 JSONL 文件的会话 ID。"""
         if not self.base_dir.exists():
             return []
 
@@ -181,14 +161,7 @@ class JsonlSessionStore:
         ]
 
     def delete_session(self, session_id: str) -> bool:
-        """删除会话的 JSONL 文件。
-
-        Args:
-            session_id: 会话 ID。
-
-        Returns:
-            True 表示删除成功，False 表示文件不存在。
-        """
+        """删除会话的 JSONL 文件。"""
         file_path = self._get_file_path(session_id)
         if file_path.exists():
             file_path.unlink()
@@ -196,14 +169,7 @@ class JsonlSessionStore:
         return False
 
     def get_message_count(self, session_id: str) -> int:
-        """获取会话的消息数量。
-
-        Args:
-            session_id: 会话 ID。
-
-        Returns:
-            消息数量。
-        """
+        """获取会话的消息数量。"""
         file_path = self._get_file_path(session_id)
         if not file_path.exists():
             return 0

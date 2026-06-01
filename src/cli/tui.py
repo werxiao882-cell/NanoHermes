@@ -55,6 +55,7 @@ class TUIApp:
         config: dict[str, Any] | None = None,
         session_db=None,
         jsonl_store=None,
+        memory_manager=None,
         debug: bool = False,
     ):
         self.config = config or {}
@@ -63,6 +64,7 @@ class TUIApp:
         self.event_handler = TUIEventHandler(self.state)
         self.session_db = session_db
         self.jsonl_store = jsonl_store
+        self.memory_manager = memory_manager
 
         layout_config = LayoutConfig(
             show_tool_panel=self.config.get("show_tool_panel", True),
@@ -295,6 +297,7 @@ class TUIApp:
         """工具开始执行时的事件处理器。"""
         tool_name = data["tool_name"]
         tool_args = data["tool_args"]
+        tool_call = data.get("tool_call", {})
         
         try:
             args_dict = json.loads(tool_args) if isinstance(tool_args, str) else tool_args
@@ -307,33 +310,64 @@ class TUIApp:
             action = "exec"
 
         self.show_tool_start(tool_name, action)
-        # 保存 action 供 _on_tool_end_handler 使用
         self._current_tool_action = action
+
+        # 保存 tool_call 到 JSONL
+        self._save_to_jsonl("tool_call", tool_name=tool_name, tool_args=tool_args,
+                           tool_call_id=tool_call.get("id", ""))
 
     def _on_tool_end_handler(self, data: dict[str, Any]) -> None:
         """工具执行结束时的事件处理器。"""
         tool_name = data["tool_name"]
         result = data["result"]
         elapsed = data["elapsed"]
+        tool_call = data.get("tool_call", {})
         
         action = getattr(self, "_current_tool_action", "exec")
         self.show_tool_complete(tool_name, action, elapsed)
         self.show_tool_result_summary(tool_name, result)
 
+        # 保存 tool_result 到 JSONL
+        self._save_to_jsonl("tool_result", tool_call_id=tool_call.get("id", ""),
+                           tool_name=tool_name, content=result,
+                           metadata={"elapsed": elapsed})
+
     def _on_model_response_handler(self, data: dict[str, Any]) -> None:
-        """模型响应完成后的事件处理器，保存完整的请求/响应数据到 JSONL。"""
+        """模型响应完成后的事件处理器，保存助手回复到 JSONL。"""
         response = data["response"]
-        iteration = data["iteration"]
 
         if not self.session_id or self.session_id == "new_session":
             return
 
+        # 保存助手回复到 JSONL
+        content = response.get("content", "")
+        reasoning = response.get("reasoning")
+        usage = response.get("usage")
+        tool_calls = response.get("tool_calls")
+
         if self.jsonl_store:
             try:
-                request_data = {"messages": self.messages, "tools": self.tool_schemas}
-                self.jsonl_store.append_turn(self.session_id, request_data, response)
+                self.jsonl_store.append_message(
+                    self.session_id,
+                    role="assistant",
+                    content=content,
+                    tool_calls=tool_calls,
+                    reasoning=reasoning,
+                    usage=usage,
+                )
             except Exception as e:
-                logger.debug(f"Failed to save turn to JSONL: {e}")
+                logger.debug(f"Failed to save assistant message to JSONL: {e}")
+
+    def _save_to_jsonl(self, role: str, **kwargs) -> None:
+        """保存消息到 JSONL 的通用方法。"""
+        if not self.session_id or self.session_id == "new_session":
+            return
+        if not self.jsonl_store:
+            return
+        try:
+            self.jsonl_store.append_message(self.session_id, role=role, **kwargs)
+        except Exception as e:
+            logger.debug(f"Failed to save {role} to JSONL: {e}")
 
     async def _run_conversation_loop(self, user_input: str) -> None:
         """使用 ConversationLoop 运行对话循环。"""
@@ -362,11 +396,31 @@ class TUIApp:
         loop.events.on(EventType.TOOL_END, self._on_tool_end_handler)
         loop.events.on(EventType.MODEL_RESPONSE, self._on_model_response_handler)
 
+        # 注册 Memory 事件处理器
+        memory_handler = None
+        if self.memory_manager:
+            from src.memory.event_handler import MemoryEventHandler
+            memory_handler = MemoryEventHandler(self.memory_manager, self.session_id)
+            memory_handler.register(loop.events)
+
         # 运行对话循环
         result = loop.run(
             messages=self.messages,
             tools=self.tool_schemas if self.tool_schemas else None,
         )
+
+        # 注入记忆上下文到消息历史（如果有预取缓存）
+        if memory_handler and memory_handler.prefetch_cache:
+            memory_context = memory_handler.prefetch_cache
+            # 在用户消息之前插入记忆上下文（作为 system 消息）
+            # 找到最后一条用户消息的位置
+            for i in range(len(self.messages) - 1, -1, -1):
+                if self.messages[i].get("role") == "user":
+                    self.messages.insert(i, {
+                        "role": "system",
+                        "content": memory_context,
+                    })
+                    break
 
         # 处理结果
         final_response = result.get("final_response", "")
@@ -633,6 +687,7 @@ def create_tui(
     config: dict[str, Any] | None = None,
     session_db=None,
     jsonl_store=None,
+    memory_manager=None,
     debug: bool = False,
 ) -> TUIApp:
     return TUIApp(
@@ -648,5 +703,6 @@ def create_tui(
         config=config,
         session_db=session_db,
         jsonl_store=jsonl_store,
+        memory_manager=memory_manager,
         debug=debug,
     )
