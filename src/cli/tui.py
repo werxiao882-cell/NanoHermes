@@ -312,6 +312,17 @@ class TUIApp:
         self.show_tool_complete(tool_name, action, elapsed)
         self.show_tool_result_summary(tool_name, result)
 
+    def _on_turn_complete_callback(self, request: dict[str, Any], response: dict[str, Any]) -> None:
+        """每轮模型调用完成后的回调，保存完整的请求/响应数据到 JSONL。"""
+        if not self.session_id or self.session_id == "new_session":
+            return
+
+        if self.jsonl_store:
+            try:
+                self.jsonl_store.append_turn(self.session_id, request, response)
+            except Exception as e:
+                logger.debug(f"Failed to save turn to JSONL: {e}")
+
     async def _run_conversation_loop(self, user_input: str) -> None:
         """使用 ConversationLoop 运行对话循环。"""
         if not self.model_caller or not self.tool_dispatch:
@@ -334,6 +345,7 @@ class TUIApp:
             debug=self.debug,
             on_tool_start=self._on_tool_start_callback,
             on_tool_end=self._on_tool_end_callback,
+            on_turn_complete=self._on_turn_complete_callback,
         )
 
         # 运行对话循环
