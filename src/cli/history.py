@@ -42,6 +42,7 @@ class TUIHistory(History):
             HISTORY_DIR.mkdir(parents=True, exist_ok=True)
             data = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
             self._store = data.get("history", [])
+            logger.debug(f"已加载 {len(self._store)} 条历史记录")
         except Exception as e:
             logger.warning(f"加载历史记录失败: {e}")
             self._store = []
