@@ -48,6 +48,7 @@ class ConversationLoop:
         debug: bool = False,
         on_tool_start: Callable | None = None,
         on_tool_end: Callable | None = None,
+        on_turn_complete: Callable | None = None,
     ):
         """初始化对话循环。
 
@@ -58,6 +59,7 @@ class ConversationLoop:
             debug: 是否开启 debug 模式，输出请求/响应详情。
             on_tool_start: 工具开始执行时的回调 (tool_name, args)。
             on_tool_end: 工具结束执行时的回调 (tool_name, args, result, elapsed)。
+            on_turn_complete: 每轮模型调用完成后的回调 (request, response)。
         """
         self.max_iterations = max_iterations
         self._model_call = model_call
@@ -67,6 +69,7 @@ class ConversationLoop:
         self._on_message_append: Callable | None = None
         self._on_tool_start = on_tool_start
         self._on_tool_end = on_tool_end
+        self._on_turn_complete = on_turn_complete
         self._interrupted = False
         self.debug = debug
 
@@ -112,6 +115,11 @@ class ConversationLoop:
             # Debug: 输出响应体和 reasoning
             if self.debug:
                 self._debug_print_response(iteration, response)
+
+            # 回调：每轮模型调用完成
+            if self._on_turn_complete:
+                request_data = {"messages": messages.copy(), "tools": tools}
+                self._on_turn_complete(request_data, response)
 
             # 检查是否有工具调用
             if response.get("tool_calls"):

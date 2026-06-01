@@ -91,6 +91,42 @@ class JsonlSessionStore:
         with open(file_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
+    def append_turn(
+        self,
+        session_id: str,
+        request: dict[str, Any],
+        response: dict[str, Any],
+    ) -> None:
+        """追加一轮完整的请求/响应记录到 JSONL 文件。
+
+        保存完整的模型调用数据，包括发送的请求体和接收的响应体。
+
+        Args:
+            session_id: 会话 ID。
+            request: 请求数据，包含 messages 和 tools。
+            response: 响应数据，包含 content, tool_calls, usage, reasoning, raw_response。
+        """
+        file_path = self._get_file_path(session_id)
+
+        record = {
+            "type": "turn",
+            "timestamp": time.time(),
+            "request": {
+                "messages": request.get("messages", []),
+                "tools": request.get("tools"),
+            },
+            "response": {
+                "content": response.get("content"),
+                "tool_calls": response.get("tool_calls"),
+                "reasoning": response.get("reasoning"),
+                "usage": response.get("usage"),
+            },
+        }
+
+        # 追加写入（JSONL 格式，每行一条 JSON）
+        with open(file_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False, indent=2) + "\n")
+
     def load_messages(self, session_id: str) -> list[dict[str, Any]]:
         """从 JSONL 文件加载完整的会话历史。
 
