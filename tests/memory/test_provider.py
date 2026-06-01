@@ -1,134 +1,128 @@
-"""Tests for memory provider module."""
+"""MemoryProvider 抽象基类单元测试。"""
 
 import pytest
-from unittest.mock import MagicMock
-
 from src.memory.provider import MemoryProvider
 
 
-class ConcreteMemoryProvider(MemoryProvider):
-    """Concrete implementation for testing."""
+class ConcreteProvider(MemoryProvider):
+    """用于测试的具体提供者实现。"""
 
     @property
     def name(self) -> str:
-        return "test_provider"
+        return "test"
 
-    @property
-    def is_external(self) -> bool:
-        return False
+    def is_available(self) -> bool:
+        return True
 
+    def initialize(self, session_id: str, **kwargs) -> None:
+        pass
 
-class TestMemoryProvider:
-    """Tests for MemoryProvider abstract base class."""
-
-    def test_name_property(self):
-        """Test name property returns provider name."""
-        provider = ConcreteMemoryProvider()
-        assert provider.name == "test_provider"
-
-    def test_is_external_default(self):
-        """Test is_external returns False by default."""
-        provider = ConcreteMemoryProvider()
-        assert provider.is_external is False
-
-    def test_initialize_does_nothing(self):
-        """Test initialize does nothing by default."""
-        provider = ConcreteMemoryProvider()
-        # Should not raise
-        provider.initialize({})
-
-    def test_prefetch_returns_empty(self):
-        """Test prefetch returns empty string by default."""
-        provider = ConcreteMemoryProvider()
-        result = provider.prefetch("test query")
-        assert result == ""
-
-    def test_sync_turn_does_nothing(self):
-        """Test sync_turn does nothing by default."""
-        provider = ConcreteMemoryProvider()
-        # Should not raise
-        provider.sync_turn([{"role": "user", "content": "test"}])
-
-    def test_shutdown_does_nothing(self):
-        """Test shutdown does nothing by default."""
-        provider = ConcreteMemoryProvider()
-        # Should not raise
-        provider.shutdown()
-
-    def test_on_turn_start_does_nothing(self):
-        """Test on_turn_start does nothing by default."""
-        provider = ConcreteMemoryProvider()
-        # Should not raise
-        provider.on_turn_start([{"role": "user", "content": "test"}])
-
-    def test_on_session_end_does_nothing(self):
-        """Test on_session_end does nothing by default."""
-        provider = ConcreteMemoryProvider()
-        # Should not raise
-        provider.on_session_end("session_123")
-
-    def test_on_session_switch_does_nothing(self):
-        """Test on_session_switch does nothing by default."""
-        provider = ConcreteMemoryProvider()
-        # Should not raise
-        provider.on_session_switch("session_456")
-
-    def test_on_pre_compress_does_nothing(self):
-        """Test on_pre_compress does nothing by default."""
-        provider = ConcreteMemoryProvider()
-        # Should not raise
-        provider.on_pre_compress("session_123")
-
-    def test_on_delegation_returns_empty(self):
-        """Test on_delegation returns empty string by default."""
-        provider = ConcreteMemoryProvider()
-        result = provider.on_delegation("test task")
-        assert result == ""
-
-    def test_on_memory_write_does_nothing(self):
-        """Test on_memory_write does nothing by default."""
-        provider = ConcreteMemoryProvider()
-        # Should not raise
-        provider.on_memory_write("add", "test content")
+    def system_prompt_block(self) -> str:
+        return "Test memory block"
 
 
-class TestMemoryProviderSubclass:
-    """Tests for custom MemoryProvider subclass."""
+class TestMemoryProviderABC:
+    """测试 MemoryProvider 抽象基类。"""
 
-    def test_custom_provider_can_override_methods(self):
-        """Test that custom provider can override methods."""
+    def test_cannot_instantiate_abstract(self):
+        """测试无法实例化抽象类。"""
+        with pytest.raises(TypeError):
+            MemoryProvider()
 
-        class CustomProvider(MemoryProvider):
+    def test_concrete_implementation_works(self):
+        """测试具体实现可以实例化。"""
+        provider = ConcreteProvider()
+        assert provider.name == "test"
+        assert provider.is_available() is True
+
+    def test_default_prefetch_returns_empty(self):
+        """测试默认 prefetch 返回空字符串。"""
+        provider = ConcreteProvider()
+        assert provider.prefetch("query") == ""
+
+    def test_default_queue_prefetch_does_nothing(self):
+        """测试默认 queue_prefetch 不抛出异常。"""
+        provider = ConcreteProvider()
+        provider.queue_prefetch("query")  # 不应抛出异常
+
+    def test_default_sync_turn_does_nothing(self):
+        """测试默认 sync_turn 不抛出异常。"""
+        provider = ConcreteProvider()
+        provider.sync_turn("user", "assistant")  # 不应抛出异常
+
+    def test_default_shutdown_does_nothing(self):
+        """测试默认 shutdown 不抛出异常。"""
+        provider = ConcreteProvider()
+        provider.shutdown()  # 不应抛出异常
+
+    def test_default_on_turn_start_does_nothing(self):
+        """测试默认 on_turn_start 不抛出异常。"""
+        provider = ConcreteProvider()
+        provider.on_turn_start(1, "message")  # 不应抛出异常
+
+    def test_default_on_session_end_does_nothing(self):
+        """测试默认 on_session_end 不抛出异常。"""
+        provider = ConcreteProvider()
+        provider.on_session_end([])  # 不应抛出异常
+
+    def test_default_on_pre_compress_returns_empty(self):
+        """测试默认 on_pre_compress 返回空字符串。"""
+        provider = ConcreteProvider()
+        assert provider.on_pre_compress([]) == ""
+
+    def test_default_on_delegation_does_nothing(self):
+        """测试默认 on_delegation 不抛出异常。"""
+        provider = ConcreteProvider()
+        provider.on_delegation("task", "result")  # 不应抛出异常
+
+    def test_default_on_memory_write_does_nothing(self):
+        """测试默认 on_memory_write 不抛出异常。"""
+        provider = ConcreteProvider()
+        provider.on_memory_write("add", "memory", "content")  # 不应抛出异常
+
+    def test_default_get_tool_schemas_returns_empty(self):
+        """测试默认 get_tool_schemas 返回空列表。"""
+        provider = ConcreteProvider()
+        assert provider.get_tool_schemas() == []
+
+    def test_default_handle_tool_call_raises(self):
+        """测试默认 handle_tool_call 抛出 NotImplementedError。"""
+        provider = ConcreteProvider()
+        with pytest.raises(NotImplementedError):
+            provider.handle_tool_call("unknown", {})
+
+    def test_default_get_config_schema_returns_empty(self):
+        """测试默认 get_config_schema 返回空列表。"""
+        provider = ConcreteProvider()
+        assert provider.get_config_schema() == []
+
+    def test_default_save_config_does_nothing(self):
+        """测试默认 save_config 不抛出异常。"""
+        provider = ConcreteProvider()
+        provider.save_config({}, "/tmp")  # 不应抛出异常
+
+    def test_override_on_session_end(self):
+        """测试覆盖 on_session_end 钩子。"""
+        calls = []
+
+        class OverrideProvider(MemoryProvider):
             @property
             def name(self) -> str:
-                return "custom"
+                return "override"
 
-            @property
-            def is_external(self) -> bool:
+            def is_available(self) -> bool:
                 return True
 
-            def prefetch(self, query: str) -> str:
-                return f"Prefetched: {query}"
+            def initialize(self, session_id: str, **kwargs) -> None:
+                pass
 
-        provider = CustomProvider()
-        assert provider.name == "custom"
-        assert provider.is_external is True
-        assert provider.prefetch("test") == "Prefetched: test"
+            def system_prompt_block(self) -> str:
+                return ""
 
-    def test_custom_provider_inherits_optional_hooks(self):
-        """Test that custom provider inherits optional hooks."""
+            def on_session_end(self, messages):
+                calls.append(messages)
 
-        class MinimalProvider(MemoryProvider):
-            @property
-            def name(self) -> str:
-                return "minimal"
-
-        provider = MinimalProvider()
-        # All optional hooks should work without error
-        provider.on_turn_start([])
-        provider.on_session_end("test")
-        provider.on_session_switch("test")
-        provider.on_pre_compress("test")
-        result = provider.on_delegation("test")
-        assert result == ""
-        provider.on_memory_write("add", "test")
+        provider = OverrideProvider()
+        test_messages = [{"role": "user", "content": "test"}]
+        provider.on_session_end(test_messages)
+        assert calls == [test_messages]
