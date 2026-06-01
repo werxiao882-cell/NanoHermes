@@ -34,7 +34,7 @@
 - **WHEN** 查询 foreign_keys pragma
 - **THEN** 返回 1（启用）
 
-### Requirement: _executeWrite 方法 SHALL 处理写锁竞争
+### Requirement: _execute_write 方法 SHALL 处理写锁竞争
 测试 SHALL 验证写操作在锁竞争时使用抖动重试，并在非锁定错误时立即传播。
 
 #### Scenario: 成功写入无竞争
@@ -61,7 +61,7 @@
 - **THEN** 错误立即抛出，不进行重试
 - **AND** 事务被回滚
 
-### Requirement: _tryWalCheckpoint 方法 SHALL 定期执行 checkpoint
+### Requirement: _try_wal_checkpoint 方法 SHALL 定期执行 checkpoint
 测试 SHALL 验证每 50 次写操作后执行 PASSIVE checkpoint。
 
 #### Scenario: 定期 checkpoint
@@ -72,7 +72,7 @@
 
 #### Scenario: checkpoint 失败不抛出异常
 - **GIVEN** SessionDB 实例，checkpoint 操作失败
-- **WHEN** 执行 _tryWalCheckpoint
+- **WHEN** 执行 _try_wal_checkpoint
 - **THEN** 异常被捕获，不抛出
 
 ### Requirement: close 方法 SHALL 正确关闭数据库

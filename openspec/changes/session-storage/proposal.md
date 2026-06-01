@@ -2,6 +2,8 @@
 
 业界成熟的自进化 AI Agent 系统使用 SQLite 作为所有会话数据的持久化存储，支持跨会话记忆检索、全文搜索、会话 lineage 追踪等核心功能。NanoHermes 需要实现相同的存储层，作为所有其他功能的基础设施。
 
+**设计赌注：** SessionDB 直接服务于 **Personal Long-Term**（FTS5 让 Agent 可以搜索所有历史对话）和 **Run Anywhere**（WAL + jitter retry 让 SQLite 在多进程/多平台并发下稳定工作，不需要外部数据库服务）。
+
 ## 变更内容
 
 - 实现基于 SQLite 的会话数据库 (SessionDB)，支持 WAL 模式并发访问
@@ -34,6 +36,6 @@
 ## 影响
 
 - 新增 `src/session/` 目录，包含 SessionDB 类和 schema 定义
-- 依赖 better-sqlite3 作为 SQLite 绑定
+- 依赖 Python sqlite3 标准库作为 SQLite 绑定
 - 所有其他功能（记忆、压缩、委托等）都依赖此存储层
 - 无破坏性变更，从零开始构建

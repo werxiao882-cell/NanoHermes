@@ -25,6 +25,8 @@
 ### Requirement: 系统 SHALL 支持 parent_session_id lineage 追踪
 系统 SHALL 通过 parent_session_id 外键追踪会话 lineage。压缩延续、委托子 agent、分支子节点 SHALL 设置 parent_session_id。
 
+**设计理由：** parent_session_id 形成一条血缘链——当上下文压缩触发 session splitting 时，Hermes 创建一个新 session，将压缩后的消息写入新 session，并通过 parent_session_id 链接到旧 session。用户可以追溯一次长对话的完整历史。
+
 #### Scenario: 压缩延续 lineage
 - **WHEN** 会话被压缩并继续
 - **THEN** 新会话的 parent_session_id 指向原会话

@@ -9,8 +9,8 @@ SQLite 会话持久化存储，支持：
 - JSONL 格式完整历史存储
 """
 
-from src.session.session_db import SessionDB
+from src.session.session_db import SessionDB, sanitize_title
 from src.session.schema import SCHEMA_SQL, FTS_SQL, FTS_TRIGRAM_SQL
 from src.session.jsonl_store import JsonlSessionStore
 
-__all__ = ["SessionDB", "SCHEMA_SQL", "FTS_SQL", "FTS_TRIGRAM_SQL", "JsonlSessionStore"]
+__all__ = ["SessionDB", "sanitize_title", "SCHEMA_SQL", "FTS_SQL", "FTS_TRIGRAM_SQL", "JsonlSessionStore"]
