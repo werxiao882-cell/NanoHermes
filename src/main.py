@@ -314,31 +314,14 @@ def main_chat(debug: bool = False, resume: str | None = None, resume_title: str 
     model_caller = build_model_caller(client, model)
 
     # 初始化工具
-    from src.tools import terminal
-    from src.tools import file_tools
-    from src.tools import clarify_tools
-    from src.tools import code_execution_tools
-    from src.tools import cronjob_tools
-    from src.tools import delegation_tools
-    from src.tools import memory_tools
-    from src.tools import session_search_tools
-    from src.tools import skills_tools
-    from src.tools import process_tools
-    from src.tools import todo_tools
     from src.tools.registry import ToolRegistry
     from src.tools.dispatcher import dispatch as tool_dispatch_func
-    from src.tools.registry import get_tool_schemas
+
+    ToolRegistry.init_all_tools()
 
     tool_count = len(ToolRegistry.get_all_tools())
-    tool_schemas = get_tool_schemas()
-    
-    # 按工具集分类工具
-    tool_categories = {}
-    for tool in ToolRegistry.get_all_tools():
-        category = tool.toolset
-        if category not in tool_categories:
-            tool_categories[category] = []
-        tool_categories[category].append(tool.name)
+    tool_schemas = ToolRegistry.get_tool_schemas()
+    tool_categories = ToolRegistry.get_tool_categories()
 
     # 获取技能数量
     from src.skills.manager import SkillManager
