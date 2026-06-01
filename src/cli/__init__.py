@@ -11,8 +11,9 @@ from src.cli.history import TUIHistory
 from src.cli.streaming import TypewriterEffect, StreamingMarkdown, StreamingStatusIndicator
 from src.cli.layout import LayoutManager, LayoutConfig, DynamicPanelManager
 from src.cli.widgets import (
-    StatusBar, Panel, Spinner, ProgressBar,
+    StatusBar, Panel, Spinner, KawaiiSpinner, ProgressBar,
     ToolCallDisplay, ToolCallHistoryPanel, ToolCallResultSummary,
+    ActivityFeed,
     styled_text, get_terminal_size, clear_screen, clear_line,
     set_color, set_bg_color, move_cursor,
     ANSI_RESET, ANSI_COLORS,
@@ -26,8 +27,9 @@ __all__ = [
     "TUIHistory",
     "TypewriterEffect", "StreamingMarkdown", "StreamingStatusIndicator",
     "LayoutManager", "LayoutConfig", "DynamicPanelManager",
-    "StatusBar", "Panel", "Spinner", "ProgressBar",
+    "StatusBar", "Panel", "Spinner", "KawaiiSpinner", "ProgressBar",
     "ToolCallDisplay", "ToolCallHistoryPanel", "ToolCallResultSummary",
+    "ActivityFeed",
     "styled_text", "get_terminal_size", "clear_screen", "clear_line",
     "set_color", "set_bg_color", "move_cursor",
     "ANSI_RESET", "ANSI_COLORS",
