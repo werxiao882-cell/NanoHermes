@@ -10,8 +10,8 @@
 
 事件系统：
 - 使用 EventBus 解耦循环逻辑与外部处理器
-- 支持的事件：turn_start, tool_start, tool_end, message_append, turn_complete, post_turn, interrupt
-- 外部功能通过订阅事件接入，无需修改循环内部逻辑
+- 支持 16 种事件类型，覆盖完整生命周期
+- 外部功能通过 loop.events.on() 订阅事件接入
 
 Debug 模式：
 - 输出发送到模型的完整请求体（JSON）
@@ -51,11 +51,6 @@ class ConversationLoop:
         model_call: Callable | None = None,
         tool_dispatch: Callable | None = None,
         debug: bool = False,
-        # 向后兼容的回调参数（会自动订阅到 EventBus）
-        on_tool_start: Callable | None = None,
-        on_tool_end: Callable | None = None,
-        on_turn_complete: Callable | None = None,
-        on_message_append: Callable | None = None,
     ):
         """初始化对话循环。
 
@@ -64,10 +59,6 @@ class ConversationLoop:
             model_call: 模型调用函数。
             tool_dispatch: 工具分发函数。
             debug: 是否开启 debug 模式，输出请求/响应详情。
-            on_tool_start: 工具开始执行时的回调（向后兼容）。
-            on_tool_end: 工具结束执行时的回调（向后兼容）。
-            on_turn_complete: 每轮模型调用完成后的回调（向后兼容）。
-            on_message_append: 消息追加时的回调（向后兼容）。
         """
         self.max_iterations = max_iterations
         self._model_call = model_call
@@ -76,18 +67,7 @@ class ConversationLoop:
         self._interrupted = False
         self.debug = debug
 
-        # 事件总线
         self.events = EventBus()
-
-        # 向后兼容：将回调参数订阅到 EventBus
-        if on_tool_start:
-            self.events.on(EventType.TOOL_START, lambda data: on_tool_start(data["tool_name"], data["tool_args"]))
-        if on_tool_end:
-            self.events.on(EventType.TOOL_END, lambda data: on_tool_end(data["tool_name"], data["tool_args"], data["result"], data["elapsed"]))
-        if on_turn_complete:
-            self.events.on(EventType.TURN_COMPLETE, lambda data: on_turn_complete(data["request"], data["response"]))
-        if on_message_append:
-            self.events.on(EventType.MESSAGE_APPEND, lambda data: on_message_append(data["message"]))
 
     def run(
         self,
@@ -104,6 +84,13 @@ class ConversationLoop:
             包含最终响应和元数据的字典。
         """
         iteration = 0
+        start_time = time.time()
+
+        self.events.emit(EventType.LOOP_START, {
+            "messages": messages,
+            "tools": tools,
+            "max_iterations": self.max_iterations,
+        })
 
         while iteration < self.max_iterations:
             if self._interrupted:
@@ -112,23 +99,50 @@ class ConversationLoop:
 
             iteration += 1
 
-            # 事件：轮次开始
-            self.events.emit(EventType.TURN_START, {"iteration": iteration, "messages": messages, "tools": tools})
+            self.events.emit(EventType.ITERATION_START, {
+                "iteration": iteration,
+                "messages": messages,
+            })
 
             # Debug: 输出请求体
             if self.debug:
                 self._debug_print_request(iteration, messages, tools)
 
             # 调用模型
+            model_start = time.time()
             try:
+                self.events.emit(EventType.MODEL_REQUEST, {
+                    "messages": messages,
+                    "tools": tools,
+                    "iteration": iteration,
+                })
                 response = self._call_model(messages, tools)
+                model_elapsed = time.time() - model_start
+
+                self.events.emit(EventType.MODEL_RESPONSE, {
+                    "response": response,
+                    "iteration": iteration,
+                    "elapsed": model_elapsed,
+                })
             except Exception as e:
+                model_elapsed = time.time() - model_start
                 classified = self._error_classifier.classify(
                     getattr(e, "status_code", None),
                     str(e),
                 )
+                self.events.emit(EventType.MODEL_ERROR, {
+                    "error": e,
+                    "classified": classified,
+                    "iteration": iteration,
+                    "elapsed": model_elapsed,
+                })
                 if classified.retryable and iteration < self.max_iterations:
                     logger.warning(f"可重试错误，重试中: {classified.message}")
+                    self.events.emit(EventType.MODEL_RETRY, {
+                        "error": e,
+                        "attempt": iteration,
+                        "iteration": iteration,
+                    })
                     continue
                 raise
 
@@ -136,9 +150,10 @@ class ConversationLoop:
             if self.debug:
                 self._debug_print_response(iteration, response)
 
-            # 事件：每轮模型调用完成
-            request_data = {"messages": messages.copy(), "tools": tools}
-            self.events.emit(EventType.TURN_COMPLETE, {"request": request_data, "response": response, "iteration": iteration})
+            self.events.emit(EventType.ITERATION_END, {
+                "iteration": iteration,
+                "response": response,
+            })
 
             # 检查是否有工具调用
             if response.get("tool_calls"):
@@ -147,21 +162,36 @@ class ConversationLoop:
                     tool_name = func.get("name", "unknown")
                     tool_args = func.get("arguments", "{}")
 
-                    # 记录开始时间
-                    start_time = time.time()
+                    tool_start = time.time()
 
-                    # 事件：工具开始
-                    self.events.emit(EventType.TOOL_START, {"tool_name": tool_name, "tool_args": tool_args, "tool_call": tool_call})
+                    self.events.emit(EventType.TOOL_START, {
+                        "tool_name": tool_name,
+                        "tool_args": tool_args,
+                        "tool_call": tool_call,
+                    })
 
-                    result = self._dispatch_tool(tool_call)
+                    try:
+                        result = self._dispatch_tool(tool_call)
+                    except Exception as e:
+                        tool_elapsed = time.time() - tool_start
+                        self.events.emit(EventType.TOOL_ERROR, {
+                            "tool_name": tool_name,
+                            "error": e,
+                            "tool_call": tool_call,
+                            "elapsed": tool_elapsed,
+                        })
+                        result = json.dumps({"error": str(e)})
 
-                    # 计算耗时
-                    elapsed = time.time() - start_time
+                    tool_elapsed = time.time() - tool_start
 
-                    # 事件：工具结束
-                    self.events.emit(EventType.TOOL_END, {"tool_name": tool_name, "tool_args": tool_args, "result": result, "elapsed": elapsed, "tool_call": tool_call})
+                    self.events.emit(EventType.TOOL_END, {
+                        "tool_name": tool_name,
+                        "tool_args": tool_args,
+                        "result": result,
+                        "elapsed": tool_elapsed,
+                        "tool_call": tool_call,
+                    })
 
-                    # 追加工具结果消息
                     tool_message = {
                         "role": "tool",
                         "tool_call_id": tool_call.get("id", ""),
@@ -169,15 +199,15 @@ class ConversationLoop:
                     }
                     messages.append(tool_message)
 
-                    # 事件：消息追加
-                    self.events.emit(EventType.MESSAGE_APPEND, {"message": tool_message, "messages": messages})
+                    self.events.emit(EventType.MESSAGE_APPEND, {
+                        "message": tool_message,
+                        "messages": messages,
+                    })
                 continue
 
             # 文本响应，结束循环
-            # 事件：后轮次钩子
-            self.events.emit(EventType.POST_TURN, {"response": response, "iteration": iteration})
-
-            return {
+            total_elapsed = time.time() - start_time
+            result = {
                 "final_response": response.get("content", ""),
                 "reasoning": response.get("reasoning"),
                 "iterations": iteration,
@@ -185,8 +215,19 @@ class ConversationLoop:
                 "raw_response": response.get("raw_response"),
             }
 
+            self.events.emit(EventType.LOOP_END, {
+                "result": result,
+                "iterations": iteration,
+                "total_elapsed": total_elapsed,
+            })
+
+            return result
+
         # 达到最大迭代
-        return {
+        total_elapsed = time.time() - start_time
+        self.events.emit(EventType.MAX_ITERATIONS, {"iterations": iteration})
+
+        result = {
             "final_response": "[达到最大迭代次数]",
             "reasoning": None,
             "iterations": iteration,
@@ -194,22 +235,26 @@ class ConversationLoop:
             "raw_response": None,
         }
 
+        self.events.emit(EventType.LOOP_END, {
+            "result": result,
+            "iterations": iteration,
+            "total_elapsed": total_elapsed,
+        })
+
+        return result
+
+    # ========================================================================
+    # Debug 输出
+    # ========================================================================
+
     def _debug_print_request(
         self,
         iteration: int,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
     ) -> None:
-        """Debug: 打印发送到模型的完整请求体（JSON）。
-
-        Args:
-            iteration: 当前迭代次数。
-            messages: 消息列表。
-            tools: 工具 schema 列表。
-        """
-        request_body = {
-            "messages": messages,
-        }
+        """Debug: 打印发送到模型的完整请求体（JSON）。"""
+        request_body = {"messages": messages}
         if tools:
             request_body["tools"] = tools
 
@@ -220,13 +265,7 @@ class ConversationLoop:
         print(f"{'='*70}\n")
 
     def _debug_print_response(self, iteration: int, response: dict[str, Any]) -> None:
-        """Debug: 打印模型返回的完整响应体（JSON）和思考内容。
-
-        Args:
-            iteration: 当前迭代次数。
-            response: 模型响应。
-        """
-        # 打印 reasoning（思考内容）
+        """Debug: 打印模型返回的完整响应体（JSON）和思考内容。"""
         reasoning = response.get("reasoning")
         if reasoning:
             print(f"\n{'='*70}")
@@ -235,7 +274,6 @@ class ConversationLoop:
             print(reasoning)
             print(f"{'='*70}\n")
 
-        # 打印完整响应体
         raw_response = response.get("raw_response")
         if raw_response:
             print(f"\n{'='*70}")
@@ -247,7 +285,6 @@ class ConversationLoop:
                 print(raw_response)
             print(f"{'='*70}\n")
         else:
-            # 如果没有 raw_response，打印摘要
             print(f"\n{'='*70}")
             print(f"[DEBUG] <<< 第 {iteration} 轮 - 响应摘要")
             print(f"{'='*70}")
@@ -270,53 +307,22 @@ class ConversationLoop:
                 print(f"\nToken 用量: 输入 {usage.get('input_tokens', 0)}, 输出 {usage.get('output_tokens', 0)}")
             print()
 
-    def _debug_print_tool(self, tool_call: dict[str, Any], result: str) -> None:
-        """Debug: 打印工具执行结果。
-
-        Args:
-            tool_call: 工具调用信息。
-            result: 工具执行结果。
-        """
-        func = tool_call.get("function", {})
-        name = func.get("name", "unknown")
-
-        # 截断长结果
-        display_result = result
-        if len(display_result) > 300:
-            display_result = display_result[:300] + "..."
-
-        print(f"[DEBUG] 工具执行: {name}")
-        print(f"  参数: {func.get('arguments', '')}")
-        print(f"  结果: {display_result}")
-        print()
+    # ========================================================================
+    # 内部方法
+    # ========================================================================
 
     def _call_model(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
     ) -> dict[str, Any]:
-        """调用模型。
-
-        Args:
-            messages: 消息列表。
-            tools: 工具 schema。
-
-        Returns:
-            模型响应。
-        """
+        """调用模型。"""
         if self._model_call:
             return self._model_call(messages, tools)
         raise NotImplementedError("未设置 model_call 函数")
 
     def _dispatch_tool(self, tool_call: dict[str, Any]) -> str:
-        """分发工具调用。
-
-        Args:
-            tool_call: 工具调用信息。
-
-        Returns:
-            工具执行结果。
-        """
+        """分发工具调用。"""
         if self._tool_dispatch:
             func = tool_call.get("function", {})
             return self._tool_dispatch(
@@ -328,20 +334,3 @@ class ConversationLoop:
     def interrupt(self) -> None:
         """中断对话循环。"""
         self._interrupted = True
-
-    # 向后兼容的方法（已废弃，推荐使用 events.on()）
-    def set_post_turn_hook(self, hook: Callable) -> None:
-        """设置后轮次钩子（已废弃，请使用 events.on(EventType.POST_TURN, handler)）。
-
-        Args:
-            hook: 钩子函数。
-        """
-        self.events.on(EventType.POST_TURN, lambda data: hook(data))
-
-    def set_on_message_append(self, callback: Callable) -> None:
-        """设置消息追加回调（已废弃，请使用 events.on(EventType.MESSAGE_APPEND, handler)）。
-
-        Args:
-            callback: 回调函数，接收追加的消息 dict。
-        """
-        self.events.on(EventType.MESSAGE_APPEND, lambda data: callback(data["message"]))

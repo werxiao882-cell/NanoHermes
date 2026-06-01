@@ -320,17 +320,18 @@ class TUIApp:
         self.show_tool_complete(tool_name, action, elapsed)
         self.show_tool_result_summary(tool_name, result)
 
-    def _on_turn_complete_handler(self, data: dict[str, Any]) -> None:
-        """每轮模型调用完成后的事件处理器，保存完整的请求/响应数据到 JSONL。"""
-        request = data["request"]
+    def _on_model_response_handler(self, data: dict[str, Any]) -> None:
+        """模型响应完成后的事件处理器，保存完整的请求/响应数据到 JSONL。"""
         response = data["response"]
-        
+        iteration = data["iteration"]
+
         if not self.session_id or self.session_id == "new_session":
             return
 
         if self.jsonl_store:
             try:
-                self.jsonl_store.append_turn(self.session_id, request, response)
+                request_data = {"messages": self.messages, "tools": self.tool_schemas}
+                self.jsonl_store.append_turn(self.session_id, request_data, response)
             except Exception as e:
                 logger.debug(f"Failed to save turn to JSONL: {e}")
 
@@ -359,7 +360,7 @@ class TUIApp:
         # 订阅事件
         loop.events.on(EventType.TOOL_START, self._on_tool_start_handler)
         loop.events.on(EventType.TOOL_END, self._on_tool_end_handler)
-        loop.events.on(EventType.TURN_COMPLETE, self._on_turn_complete_handler)
+        loop.events.on(EventType.MODEL_RESPONSE, self._on_model_response_handler)
 
         # 运行对话循环
         result = loop.run(
