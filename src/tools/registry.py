@@ -115,6 +115,52 @@ class ToolRegistry:
         """清除所有注册。仅用于测试。"""
         cls._tools.clear()
 
+    @classmethod
+    def init_all_tools(cls) -> None:
+        """初始化所有工具模块。
+
+        显式导入所有工具模块，触发自动注册。
+        包括 terminal（需要特殊处理，因为注册在函数内）。
+        """
+        import importlib
+
+        # 所有工具模块列表
+        tool_modules = [
+            "src.tools.terminal",
+            "src.tools.file_tools",
+            "src.tools.clarify_tools",
+            "src.tools.code_execution_tools",
+            "src.tools.cronjob_tools",
+            "src.tools.delegation_tools",
+            "src.tools.memory_tools",
+            "src.tools.session_search_tools",
+            "src.tools.skills_tools",
+            "src.tools.process_tools",
+            "src.tools.todo_tools",
+        ]
+
+        for module_name in tool_modules:
+            try:
+                importlib.import_module(module_name)
+                logger.debug(f"已初始化工具模块: {module_name}")
+            except Exception as e:
+                logger.warning(f"初始化工具模块失败 {module_name}: {e}")
+
+    @classmethod
+    def get_tool_categories(cls) -> dict[str, list[str]]:
+        """按工具集分类所有已注册的工具。
+
+        Returns:
+            工具集名称到工具名称列表的映射。
+        """
+        categories: dict[str, list[str]] = {}
+        for tool in cls._tools.values():
+            category = tool.toolset
+            if category not in categories:
+                categories[category] = []
+            categories[category].append(tool.name)
+        return categories
+
 
 def register_tool(
     name: str,
