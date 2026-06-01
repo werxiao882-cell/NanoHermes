@@ -3,6 +3,8 @@
 ### Requirement: 记忆上下文 SHALL 使用标签隔离
 注入到系统提示的记忆上下文 SHALL 包裹在 `<memory-context>` 标签内。标签 SHALL 包含提供者名称属性。系统注释 SHALL 指示这是参考数据而非新用户输入。
 
+**设计理由：** 防止 Agent 将注入的记忆上下文误认为新的用户输入。通过明确的标签和系统注释，让模型区分"回忆的记忆"和"当前对话"。
+
 #### Scenario: 包裹记忆上下文
 - **WHEN** 记忆上下文被注入
 - **THEN** 使用 `<memory-context provider="builtin">...</memory-context>` 包裹
@@ -12,18 +14,25 @@
 - **THEN** 包含 "[System note: ... NOT new user input ...]" 注释
 
 ### Requirement: 系统 SHALL 提供 sanitize_context 函数
-系统 SHALL 提供 sanitize_context 函数，使用正则表达式移除 `<memory-context>` 标签块、系统注释和孤立的标签。
+系统 SHALL 提供 `sanitize_context` 函数，使用正则表达式移除 `<memory-context>` 标签块、系统注释和孤立的标签。
 
 #### Scenario: 移除上下文块
-- **WHEN** sanitize_context 被调用
+- **WHEN** `sanitize_context` 被调用
 - **THEN** 所有 `<memory-context>...</memory-context>` 块被移除
 
 #### Scenario: 移除系统注释
-- **WHEN** sanitize_context 被调用
+- **WHEN** `sanitize_context` 被调用
 - **THEN** 所有 "[System note: ...]" 注释被移除
 
 ### Requirement: 系统 SHALL 提供 StreamingContextScrubber 类
 StreamingContextScrubber SHALL 处理可能被分割跨 chunk 的标签。它 SHALL 使用状态机保留部分标签并丢弃 span 内的内容。
+
+**状态机设计：**
+- 两个状态：`in_span` / `not_in_span`
+- 一个缓冲区：`buf`，保留可能的部分标签
+- 在 span 内时，丢弃所有内容直到找到关闭标签
+- 在 span 外时，输出所有内容直到找到打开标签
+- flush 时，如果仍在 span 内，丢弃剩余内容（比泄露部分记忆上下文更安全）
 
 #### Scenario: 处理标签分割
 - **WHEN** `<memory-context` 出现在一个 chunk，`>` 出现在下一个 chunk
@@ -32,3 +41,7 @@ StreamingContextScrubber SHALL 处理可能被分割跨 chunk 的标签。它 SH
 #### Scenario: 丢弃未关闭的 span
 - **WHEN** flush 时仍在 span 内
 - **THEN** 丢弃剩余内容（比泄露部分记忆上下文更安全）
+
+#### Scenario: 块边界检查
+- **WHEN** 标签出现在行中间（非空白后）
+- **THEN** 不识别为记忆上下文标签，正常输出
