@@ -150,15 +150,19 @@ class ConversationLoop:
             # 文本响应，结束循环
             return {
                 "final_response": response.get("content", ""),
+                "reasoning": response.get("reasoning"),
                 "iterations": iteration,
                 "usage": response.get("usage"),
+                "raw_response": response.get("raw_response"),
             }
 
         # 达到最大迭代
         return {
             "final_response": "[达到最大迭代次数]",
+            "reasoning": None,
             "iterations": iteration,
             "usage": None,
+            "raw_response": None,
         }
 
     def _debug_print_request(

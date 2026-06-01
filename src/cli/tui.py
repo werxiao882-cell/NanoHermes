@@ -26,6 +26,7 @@ from src.cli.completers import ContextAwareCompleter
 from src.cli.history import TUIHistory
 from src.cli.streaming import TypewriterEffect, StreamingMarkdown, StreamingStatusIndicator
 from src.cli.widgets import StatusBar, ActivityFeed
+from src.conversation.loop import ConversationLoop
 
 logger = logging.getLogger(__name__)
 
@@ -263,7 +264,54 @@ class TUIApp:
     # 对话循环
     # ========================================================================
 
+    def _create_model_caller_wrapper(self):
+        """创建模型调用包装器，添加状态指示器和计时。"""
+        call_start_time = [0]
+
+        def wrapped_caller(messages, tools):
+            call_start_time[0] = time.time()
+            self.status_indicator.start()
+            try:
+                response = self.model_caller(messages, tools)
+                return response
+            finally:
+                elapsed = time.time() - call_start_time[0]
+                self.status_indicator.complete()
+
+                # 更新状态栏
+                if isinstance(response, dict):
+                    usage = response.get("usage", {})
+                    input_tokens = usage.get("input_tokens", 0)
+                    output_tokens = usage.get("output_tokens", 0)
+                    self.status_bar.update_tokens(input_tokens, output_tokens)
+                    self.status_bar.update_time(elapsed)
+
+        return wrapped_caller
+
+    def _on_tool_start_callback(self, tool_name: str, tool_args: str) -> None:
+        """工具开始执行时的回调。"""
+        try:
+            args_dict = json.loads(tool_args) if isinstance(tool_args, str) else tool_args
+            action = next(iter(args_dict.values())) if args_dict else "exec"
+            if isinstance(action, dict):
+                action = "exec"
+            elif len(str(action)) > 20:
+                action = str(action)[:20] + "..."
+        except (json.JSONDecodeError, StopIteration, TypeError):
+            action = "exec"
+
+        self.show_tool_start(tool_name, action)
+        # 保存 action 供 _on_tool_end_callback 使用
+        self._current_tool_action = action
+
+    def _on_tool_end_callback(self, tool_name: str, tool_args: str, result: str, elapsed: float) -> None:
+        """工具执行结束时的回调。"""
+        action = getattr(self, "_current_tool_action", "exec")
+        self.show_tool_complete(tool_name, action, elapsed)
+        self.show_tool_result_summary(tool_name, result)
+
     async def _run_conversation_loop(self, user_input: str) -> None:
+        """使用 ConversationLoop 运行对话循环。"""
         if not self.model_caller or not self.tool_dispatch:
             self.add_message("assistant", "This is a simulated response.", is_tool=False)
             return
@@ -276,66 +324,35 @@ class TUIApp:
         self.messages.append({"role": "user", "content": user_input})
         self._save_message_to_storage("user", user_input)
 
-        max_iterations = 10
-        for iteration in range(max_iterations):
-            start_time = time.time()
-            self.status_indicator.start()
-            response = self.model_caller(self.messages, self.tool_schemas if self.tool_schemas else None)
-            elapsed = time.time() - start_time
-            self.status_indicator.complete()
+        # 创建 ConversationLoop 实例
+        wrapped_model_caller = self._create_model_caller_wrapper()
+        loop = ConversationLoop(
+            model_call=wrapped_model_caller,
+            tool_dispatch=self.tool_dispatch,
+            debug=False,  # TUI 有自己的显示逻辑
+            on_tool_start=self._on_tool_start_callback,
+            on_tool_end=self._on_tool_end_callback,
+        )
 
-            usage = response.get("usage", {})
-            input_tokens = usage.get("input_tokens", 0)
-            output_tokens = usage.get("output_tokens", 0)
-            self.status_bar.update_tokens(input_tokens, output_tokens)
-            self.status_bar.update_time(elapsed)
+        # 运行对话循环
+        result = loop.run(
+            messages=self.messages,
+            tools=self.tool_schemas if self.tool_schemas else None,
+        )
 
-            content = response.get("content", "")
-            tool_calls = response.get("tool_calls")
-            reasoning = response.get("reasoning")
+        # 处理结果
+        final_response = result.get("final_response", "")
+        reasoning = result.get("reasoning")
 
-            if reasoning:
-                self.show_reasoning(reasoning)
+        if reasoning:
+            self.show_reasoning(reasoning)
 
-            if tool_calls:
-                for tool_call in tool_calls:
-                    func = tool_call.get("function", {})
-                    tool_name = func.get("name", "unknown")
-                    tool_args = func.get("arguments", "{}")
-
-                    try:
-                        args_dict = json.loads(tool_args)
-                        action = next(iter(args_dict.values())) if args_dict else "exec"
-                        if isinstance(action, dict):
-                            action = "exec"
-                        elif len(str(action)) > 20:
-                            action = str(action)[:20] + "..."
-                    except (json.JSONDecodeError, StopIteration):
-                        action = "exec"
-
-                    self.show_tool_start(tool_name, action)
-
-                    tool_start = time.time()
-                    result = self.tool_dispatch(tool_name, tool_args)
-                    tool_elapsed = time.time() - tool_start
-
-                    self.show_tool_complete(tool_name, action, tool_elapsed)
-                    self.show_tool_result_summary(tool_name, result)
-
-                    self.messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.get("id", ""),
-                        "content": result,
-                    })
-                continue
-
-            if content:
-                self.show_separator()
-                self.console.print(content)
-                self.console.print()
-                self.messages.append({"role": "assistant", "content": content})
-                self._save_message_to_storage("assistant", content)
-            break
+        if final_response:
+            self.show_separator()
+            self.console.print(final_response)
+            self.console.print()
+            self.messages.append({"role": "assistant", "content": final_response})
+            self._save_message_to_storage("assistant", final_response)
 
     async def _handle_command(self, command: str) -> bool:
         cmd = command.lower().strip()
