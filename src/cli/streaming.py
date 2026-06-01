@@ -13,7 +13,7 @@ from typing import Callable
 from rich.console import Console
 from rich.markdown import Markdown
 
-from src.cli.widgets import styled_text
+from src.cli.widgets import styled_text, KawaiiSpinner
 
 
 class TypewriterEffect:
@@ -88,20 +88,23 @@ class StreamingOutputBuffer:
 class StreamingStatusIndicator:
     def __init__(self):
         self._is_streaming = False
+        self._spinner = KawaiiSpinner(message="思考中...", color="cyan")
 
     def start(self) -> None:
         self._is_streaming = True
-        sys.stdout.write(styled_text("⏳ 输出中...", "yellow"))
+        self._spinner.set_state("working")
+        sys.stdout.write(self._spinner.render())
         sys.stdout.flush()
 
     def update(self) -> None:
         if self._is_streaming:
-            sys.stdout.write("\r" + " " * 20 + "\r")
-            sys.stdout.write(styled_text("⏳ 输出中...", "yellow"))
+            sys.stdout.write("\r" + " " * 40 + "\r")
+            self._spinner._face_index += 1
+            sys.stdout.write(self._spinner.render())
             sys.stdout.flush()
 
     def complete(self) -> None:
         self._is_streaming = False
-        sys.stdout.write("\r" + " " * 20 + "\r")
-        sys.stdout.write(styled_text("✅ 完成", "green") + "\n")
+        sys.stdout.write("\r" + " " * 40 + "\r")
+        sys.stdout.write(self._spinner.show_success() + "\n")
         sys.stdout.flush()

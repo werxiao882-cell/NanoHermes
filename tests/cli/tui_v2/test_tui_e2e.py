@@ -269,12 +269,12 @@ class TestStreamingE2E:
         
         indicator.start()
         captured1 = capsys.readouterr()
-        assert "输出中" in captured1.out
+        assert "思考中" in captured1.out
         assert indicator._is_streaming is True
         
         indicator.complete()
         captured2 = capsys.readouterr()
-        assert "完成" in captured2.out
+        assert "完成" in captured2.out or "✅" in captured2.out
         assert indicator._is_streaming is False
 
 

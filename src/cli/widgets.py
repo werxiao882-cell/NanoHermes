@@ -104,6 +104,45 @@ def get_terminal_size() -> tuple[int, int]:
 
 SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"]
 
+# Kawaii 表情动画帧
+KAWAII_FACES = [
+    "(◕‿◕)",  # 正常
+    "(◕‿◕✿)",  # 开心
+    "(◠‿◠✿)",  # 微笑
+    "(◕ᴗ◕✿)",  # 可爱
+    "(◕‿◕)♡",  # 爱心
+    "(◠ᴗ◠✿)",  # 期待
+    "(◕‿◕)✨",  # 闪亮
+    "(◠‿◠)💫",  # 星星
+]
+
+KAWAII_WAITING = [
+    "(◕‿◕) ...",
+    "(◕_◕)  ...",
+    "(◕‿◕)  ...",
+    "(◕._.◕)...",
+    "(◕‿◕) ...",
+]
+
+KAWAII_WORKING = [
+    "(◕‿◕)⊃━☆ﾟ.*",
+    "(◕‿◕)つ━☆・*。",
+    "(◠‿◠)つ━☆・*。",
+    "(◕ᴗ◕)⊃━☆ﾟ.*",
+]
+
+KAWAII_SUCCESS = [
+    "(◕‿◕)✨ 完成!",
+    "(◠‿◠✿) ✅",
+    "(◕ᴗ◕✿) 🎉",
+]
+
+KAWAII_ERROR = [
+    "(◕﹏◕) ❌",
+    "(◕︵◕) 💥",
+    "(◕︿◕) ⚠️",
+]
+
 
 class Panel:
     def __init__(self, title: str = "", border_color: str = "bright_black", title_color: str = "bright_blue"):
@@ -161,6 +200,99 @@ class Spinner:
         sys.stdout.write("\r" + " " * (len(self.message) + 2) + "\r")
         sys.stdout.flush()
         self._running = False
+
+
+class KawaiiSpinner:
+    """带动画表情的可爱 spinner，用于 API 调用时显示。"""
+
+    def __init__(self, message: str = "思考中...", color: str = "cyan"):
+        self.message = message
+        self.color = color
+        self._face_index = 0
+        self._state = "waiting"  # waiting, working, success, error
+
+    def _get_face(self) -> str:
+        if self._state == "waiting":
+            faces = KAWAII_WAITING
+        elif self._state == "working":
+            faces = KAWAII_WORKING
+        elif self._state == "success":
+            faces = KAWAII_SUCCESS
+        elif self._state == "error":
+            faces = KAWAII_ERROR
+        else:
+            faces = KAWAII_WAITING
+
+        face = faces[self._face_index % len(faces)]
+        self._face_index += 1
+        return styled_text(face, self.color)
+
+    def render(self) -> str:
+        face = self._get_face()
+        return f"{face} {self.message}"
+
+    def animate(self, duration: float = 1.0, fps: int = 8) -> None:
+        """动画显示指定时长。"""
+        start_time = time.time()
+        while time.time() - start_time < duration:
+            sys.stdout.write("\r" + self.render())
+            sys.stdout.flush()
+            time.sleep(1.0 / fps)
+        sys.stdout.write("\r" + " " * (len(self.message) + 20) + "\r")
+        sys.stdout.flush()
+
+    def set_state(self, state: str) -> None:
+        """设置状态：waiting, working, success, error"""
+        self._state = state
+        self._face_index = 0
+
+    def show_success(self) -> str:
+        self._state = "success"
+        face = self._get_face()
+        return f"{face}"
+
+    def show_error(self) -> str:
+        self._state = "error"
+        face = self._get_face()
+        return f"{face}"
+
+
+class ActivityFeed:
+    """使用 ┊ 分隔符的活动流，显示工具调用状态。"""
+
+    PREFIX = "┊"
+
+    @staticmethod
+    def format_start(tool_name: str, action: str = "") -> str:
+        icon = styled_text("🟦", "blue")
+        action_text = f" {action}" if action else ""
+        return f"{ActivityFeed.PREFIX} {icon} preparing {tool_name}{action_text}..."
+
+    @staticmethod
+    def format_complete(tool_name: str, action: str = "", elapsed: float = 0.0) -> str:
+        icon = styled_text("🟩", "green")
+        action_text = f" {action}" if action else ""
+        time_text = f" {elapsed:.1f}s" if elapsed > 0 else ""
+        return f"{ActivityFeed.PREFIX} {icon} {tool_name}{action_text}{time_text}"
+
+    @staticmethod
+    def format_result(tool_name: str, summary: str) -> str:
+        icons = {
+            "read_file": "📄",
+            "write_file": "📝",
+            "search_files": "🔍",
+            "terminal": "💻",
+            "glob": "📁",
+            "grep": "🔎",
+        }
+        icon = icons.get(tool_name, "✅")
+        return f"{ActivityFeed.PREFIX} {icon} {summary}"
+
+    @staticmethod
+    def format_error(tool_name: str, error: str = "") -> str:
+        icon = styled_text("🟥", "red")
+        error_text = f" - {error[:50]}" if error else ""
+        return f"{ActivityFeed.PREFIX} {icon} {tool_name}{error_text}"
 
 
 class ProgressBar:
