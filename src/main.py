@@ -288,10 +288,9 @@ def main_chat(debug: bool = False, resume: str | None = None, resume_title: str 
         resume: 恢复会话 ID。
         resume_title: 通过标题恢复会话。
     """
-    # 配置日志级别
-    log_level = logging.DEBUG if debug else logging.WARNING
+    # 配置日志级别（仅对 src 命名空间启用 DEBUG，不影响第三方库）
     logging.basicConfig(
-        level=log_level,
+        level=logging.WARNING,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%H:%M:%S",
     )
