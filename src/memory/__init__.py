@@ -5,12 +5,14 @@
 - MemoryManager 编排器（Fan-out 容错）
 - 内置文件记忆提供者（MEMORY.md/USER.md）
 - 上下文隔离和流式清洗
+- MemoryEventHandler（订阅 Loop 事件总线）
 """
 
 from src.memory.provider import MemoryProvider
 from src.memory.manager import MemoryManager
 from src.memory.file_provider import FileMemoryProvider
 from src.memory.context_fencing import sanitize_context, StreamingContextScrubber
+from src.memory.event_handler import MemoryEventHandler
 
 __all__ = [
     "MemoryProvider",
@@ -18,4 +20,5 @@ __all__ = [
     "FileMemoryProvider",
     "sanitize_context",
     "StreamingContextScrubber",
+    "MemoryEventHandler",
 ]

@@ -356,6 +356,13 @@ def main_chat(debug: bool = False, resume: str | None = None, resume_title: str 
     session_db = SessionDB(db_path)
     jsonl_store = JsonlSessionStore()
 
+    # 初始化 MemoryManager
+    from src.memory import MemoryManager, FileMemoryProvider
+    memory_manager = MemoryManager()
+    hermes_home = str(Path.home() / ".nanohermes")
+    file_provider = FileMemoryProvider(hermes_home)
+    memory_manager.add_provider(file_provider)
+
     # 使用 TUI
     from src.cli.tui import create_tui
     app = create_tui(
@@ -375,6 +382,7 @@ def main_chat(debug: bool = False, resume: str | None = None, resume_title: str 
         },
         session_db=session_db,
         jsonl_store=jsonl_store,
+        memory_manager=memory_manager,
         debug=debug,
     )
     
