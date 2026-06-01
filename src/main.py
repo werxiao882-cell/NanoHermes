@@ -3,6 +3,7 @@
 启动方式:
     python -m src.main              # 交互模式
     python -m src.main --test-api   # 测试 API 连接
+    python -m src.main --debug      # debug 模式，输出 DEBUG 级别日志
 
 本入口将各核心模块耦合到一起:
 - Provider Runtime: 凭证解析 + 客户端构建
@@ -15,6 +16,7 @@
 
 import argparse
 import json
+import logging
 import os
 import sys
 import threading
@@ -286,6 +288,16 @@ def main_chat(debug: bool = False, resume: str | None = None, resume_title: str 
         resume: 恢复会话 ID。
         resume_title: 通过标题恢复会话。
     """
+    # 配置日志级别
+    log_level = logging.DEBUG if debug else logging.WARNING
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    if debug:
+        logging.getLogger("src").setLevel(logging.DEBUG)
+
     from src.config import load_config, get_api_key, get_base_url
 
     config = load_config()
