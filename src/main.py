@@ -376,6 +376,7 @@ def main_chat(debug: bool = False, resume: str | None = None, resume_title: str 
         },
         session_db=session_db,
         jsonl_store=jsonl_store,
+        debug=debug,
     )
     
     # 运行 TUI（异步）
