@@ -1,13 +1,25 @@
 """上下文压缩模块。
 
-对齐 hermes-agent-ref 的 ContextCompressor 实现，提供：
-- 5 阶段压缩算法（修剪、边界、摘要、组装、清理）
-- 结构化摘要模板
-- Head/Tail 边界保护
-- 辅助模型回退
-- 会话分裂
+可插拔的上下文管理系统，支持：
+- ContextEngine 抽象基类（可插拔扩展点）
+- ContextCompressor 分层压缩引擎
+- 辅助 LLM 客户端（后台任务，配置来自 nanohermes.json）
+- 工具输出剪枝
+- Session Splitting + parent_session_id 血缘链
 """
 
+from src.compression.engine import ContextEngine
 from src.compression.compressor import ContextCompressor
+from src.compression.auxiliary import CompressionAuxiliaryClient, get_model_context_length
+from src.compression.pruning import prune_tool_outputs, truncate_tool_call_args
+from src.compression.feasibility import check_compression_model_feasibility
 
-__all__ = ["ContextCompressor"]
+__all__ = [
+    "ContextEngine",
+    "ContextCompressor",
+    "CompressionAuxiliaryClient",
+    "get_model_context_length",
+    "prune_tool_outputs",
+    "truncate_tool_call_args",
+    "check_compression_model_feasibility",
+]
