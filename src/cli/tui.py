@@ -54,8 +54,10 @@ class TUIApp:
         config: dict[str, Any] | None = None,
         session_db=None,
         jsonl_store=None,
+        debug: bool = False,
     ):
         self.config = config or {}
+        self.debug = debug
         self.state = TUIState()
         self.event_handler = TUIEventHandler(self.state)
         self.session_db = session_db
@@ -329,7 +331,7 @@ class TUIApp:
         loop = ConversationLoop(
             model_call=wrapped_model_caller,
             tool_dispatch=self.tool_dispatch,
-            debug=False,  # TUI 有自己的显示逻辑
+            debug=self.debug,
             on_tool_start=self._on_tool_start_callback,
             on_tool_end=self._on_tool_end_callback,
         )
@@ -605,6 +607,7 @@ def create_tui(
     config: dict[str, Any] | None = None,
     session_db=None,
     jsonl_store=None,
+    debug: bool = False,
 ) -> TUIApp:
     return TUIApp(
         model_caller=model_caller,
@@ -619,4 +622,5 @@ def create_tui(
         config=config,
         session_db=session_db,
         jsonl_store=jsonl_store,
+        debug=debug,
     )
