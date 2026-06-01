@@ -8,6 +8,11 @@
 5. 后轮次钩子
 6. 压缩触发检查
 
+事件系统：
+- 使用 EventBus 解耦循环逻辑与外部处理器
+- 支持的事件：turn_start, tool_start, tool_end, message_append, turn_complete, post_turn, interrupt
+- 外部功能通过订阅事件接入，无需修改循环内部逻辑
+
 Debug 模式：
 - 输出发送到模型的完整请求体（JSON）
 - 输出模型返回的完整响应体（JSON）
@@ -19,9 +24,11 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any, Callable
 
 from src.conversation.error_classifier import ErrorClassifier, ErrorCategory
+from src.conversation.events import EventBus, EventType
 
 logger = logging.getLogger(__name__)
 
@@ -30,13 +37,11 @@ class ConversationLoop:
     """核心对话循环。
 
     管理模型调用、工具分发、重试、压缩触发的完整循环。
+    通过 EventBus 与外部功能解耦。
 
     Attributes:
         max_iterations: 最大迭代次数。
-        model_call: 模型调用函数。
-        tool_dispatch: 工具分发函数。
-        error_classifier: 错误分类器。
-        on_post_turn: 后轮次钩子。
+        events: 事件总线，用于订阅和触发事件。
         debug: 是否开启 debug 模式。
     """
 
@@ -46,9 +51,11 @@ class ConversationLoop:
         model_call: Callable | None = None,
         tool_dispatch: Callable | None = None,
         debug: bool = False,
+        # 向后兼容的回调参数（会自动订阅到 EventBus）
         on_tool_start: Callable | None = None,
         on_tool_end: Callable | None = None,
         on_turn_complete: Callable | None = None,
+        on_message_append: Callable | None = None,
     ):
         """初始化对话循环。
 
@@ -57,21 +64,30 @@ class ConversationLoop:
             model_call: 模型调用函数。
             tool_dispatch: 工具分发函数。
             debug: 是否开启 debug 模式，输出请求/响应详情。
-            on_tool_start: 工具开始执行时的回调 (tool_name, args)。
-            on_tool_end: 工具结束执行时的回调 (tool_name, args, result, elapsed)。
-            on_turn_complete: 每轮模型调用完成后的回调 (request, response)。
+            on_tool_start: 工具开始执行时的回调（向后兼容）。
+            on_tool_end: 工具结束执行时的回调（向后兼容）。
+            on_turn_complete: 每轮模型调用完成后的回调（向后兼容）。
+            on_message_append: 消息追加时的回调（向后兼容）。
         """
         self.max_iterations = max_iterations
         self._model_call = model_call
         self._tool_dispatch = tool_dispatch
         self._error_classifier = ErrorClassifier()
-        self._on_post_turn: Callable | None = None
-        self._on_message_append: Callable | None = None
-        self._on_tool_start = on_tool_start
-        self._on_tool_end = on_tool_end
-        self._on_turn_complete = on_turn_complete
         self._interrupted = False
         self.debug = debug
+
+        # 事件总线
+        self.events = EventBus()
+
+        # 向后兼容：将回调参数订阅到 EventBus
+        if on_tool_start:
+            self.events.on(EventType.TOOL_START, lambda data: on_tool_start(data["tool_name"], data["tool_args"]))
+        if on_tool_end:
+            self.events.on(EventType.TOOL_END, lambda data: on_tool_end(data["tool_name"], data["tool_args"], data["result"], data["elapsed"]))
+        if on_turn_complete:
+            self.events.on(EventType.TURN_COMPLETE, lambda data: on_turn_complete(data["request"], data["response"]))
+        if on_message_append:
+            self.events.on(EventType.MESSAGE_APPEND, lambda data: on_message_append(data["message"]))
 
     def run(
         self,
@@ -91,9 +107,13 @@ class ConversationLoop:
 
         while iteration < self.max_iterations:
             if self._interrupted:
+                self.events.emit(EventType.INTERRUPT, {"iteration": iteration})
                 break
 
             iteration += 1
+
+            # 事件：轮次开始
+            self.events.emit(EventType.TURN_START, {"iteration": iteration, "messages": messages, "tools": tools})
 
             # Debug: 输出请求体
             if self.debug:
@@ -116,10 +136,9 @@ class ConversationLoop:
             if self.debug:
                 self._debug_print_response(iteration, response)
 
-            # 回调：每轮模型调用完成
-            if self._on_turn_complete:
-                request_data = {"messages": messages.copy(), "tools": tools}
-                self._on_turn_complete(request_data, response)
+            # 事件：每轮模型调用完成
+            request_data = {"messages": messages.copy(), "tools": tools}
+            self.events.emit(EventType.TURN_COMPLETE, {"request": request_data, "response": response, "iteration": iteration})
 
             # 检查是否有工具调用
             if response.get("tool_calls"):
@@ -129,33 +148,35 @@ class ConversationLoop:
                     tool_args = func.get("arguments", "{}")
 
                     # 记录开始时间
-                    import time
                     start_time = time.time()
 
-                    # 回调：工具开始
-                    if self._on_tool_start:
-                        self._on_tool_start(tool_name, tool_args)
+                    # 事件：工具开始
+                    self.events.emit(EventType.TOOL_START, {"tool_name": tool_name, "tool_args": tool_args, "tool_call": tool_call})
 
                     result = self._dispatch_tool(tool_call)
 
                     # 计算耗时
                     elapsed = time.time() - start_time
 
-                    # 回调：工具结束
-                    if self._on_tool_end:
-                        self._on_tool_end(tool_name, tool_args, result, elapsed)
+                    # 事件：工具结束
+                    self.events.emit(EventType.TOOL_END, {"tool_name": tool_name, "tool_args": tool_args, "result": result, "elapsed": elapsed, "tool_call": tool_call})
 
-                    messages.append({
+                    # 追加工具结果消息
+                    tool_message = {
                         "role": "tool",
                         "tool_call_id": tool_call.get("id", ""),
                         "content": result,
-                    })
-                    # 通知调用方消息已追加
-                    if self._on_message_append:
-                        self._on_message_append(messages[-1])
+                    }
+                    messages.append(tool_message)
+
+                    # 事件：消息追加
+                    self.events.emit(EventType.MESSAGE_APPEND, {"message": tool_message, "messages": messages})
                 continue
 
             # 文本响应，结束循环
+            # 事件：后轮次钩子
+            self.events.emit(EventType.POST_TURN, {"response": response, "iteration": iteration})
+
             return {
                 "final_response": response.get("content", ""),
                 "reasoning": response.get("reasoning"),
@@ -308,21 +329,19 @@ class ConversationLoop:
         """中断对话循环。"""
         self._interrupted = True
 
+    # 向后兼容的方法（已废弃，推荐使用 events.on()）
     def set_post_turn_hook(self, hook: Callable) -> None:
-        """设置后轮次钩子。
+        """设置后轮次钩子（已废弃，请使用 events.on(EventType.POST_TURN, handler)）。
 
         Args:
             hook: 钩子函数。
         """
-        self._on_post_turn = hook
+        self.events.on(EventType.POST_TURN, lambda data: hook(data))
 
     def set_on_message_append(self, callback: Callable) -> None:
-        """设置消息追加回调。
-
-        每次消息被追加到 messages 列表时调用（包括 tool 消息）。
-        用于实时保存到 JSONL 等持久化存储。
+        """设置消息追加回调（已废弃，请使用 events.on(EventType.MESSAGE_APPEND, handler)）。
 
         Args:
             callback: 回调函数，接收追加的消息 dict。
         """
-        self._on_message_append = callback
+        self.events.on(EventType.MESSAGE_APPEND, lambda data: callback(data["message"]))

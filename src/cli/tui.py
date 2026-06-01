@@ -27,6 +27,7 @@ from src.cli.history import TUIHistory
 from src.cli.streaming import TypewriterEffect, StreamingMarkdown, StreamingStatusIndicator
 from src.cli.widgets import StatusBar, ActivityFeed
 from src.conversation.loop import ConversationLoop
+from src.conversation.events import EventType
 
 logger = logging.getLogger(__name__)
 
@@ -290,8 +291,11 @@ class TUIApp:
 
         return wrapped_caller
 
-    def _on_tool_start_callback(self, tool_name: str, tool_args: str) -> None:
-        """工具开始执行时的回调。"""
+    def _on_tool_start_handler(self, data: dict[str, Any]) -> None:
+        """工具开始执行时的事件处理器。"""
+        tool_name = data["tool_name"]
+        tool_args = data["tool_args"]
+        
         try:
             args_dict = json.loads(tool_args) if isinstance(tool_args, str) else tool_args
             action = next(iter(args_dict.values())) if args_dict else "exec"
@@ -303,17 +307,24 @@ class TUIApp:
             action = "exec"
 
         self.show_tool_start(tool_name, action)
-        # 保存 action 供 _on_tool_end_callback 使用
+        # 保存 action 供 _on_tool_end_handler 使用
         self._current_tool_action = action
 
-    def _on_tool_end_callback(self, tool_name: str, tool_args: str, result: str, elapsed: float) -> None:
-        """工具执行结束时的回调。"""
+    def _on_tool_end_handler(self, data: dict[str, Any]) -> None:
+        """工具执行结束时的事件处理器。"""
+        tool_name = data["tool_name"]
+        result = data["result"]
+        elapsed = data["elapsed"]
+        
         action = getattr(self, "_current_tool_action", "exec")
         self.show_tool_complete(tool_name, action, elapsed)
         self.show_tool_result_summary(tool_name, result)
 
-    def _on_turn_complete_callback(self, request: dict[str, Any], response: dict[str, Any]) -> None:
-        """每轮模型调用完成后的回调，保存完整的请求/响应数据到 JSONL。"""
+    def _on_turn_complete_handler(self, data: dict[str, Any]) -> None:
+        """每轮模型调用完成后的事件处理器，保存完整的请求/响应数据到 JSONL。"""
+        request = data["request"]
+        response = data["response"]
+        
         if not self.session_id or self.session_id == "new_session":
             return
 
@@ -343,10 +354,12 @@ class TUIApp:
             model_call=wrapped_model_caller,
             tool_dispatch=self.tool_dispatch,
             debug=self.debug,
-            on_tool_start=self._on_tool_start_callback,
-            on_tool_end=self._on_tool_end_callback,
-            on_turn_complete=self._on_turn_complete_callback,
         )
+        
+        # 订阅事件
+        loop.events.on(EventType.TOOL_START, self._on_tool_start_handler)
+        loop.events.on(EventType.TOOL_END, self._on_tool_end_handler)
+        loop.events.on(EventType.TURN_COMPLETE, self._on_turn_complete_handler)
 
         # 运行对话循环
         result = loop.run(
