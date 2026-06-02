@@ -29,3 +29,8 @@ msprof_mcp/
 
 # 日志
 *.log
+
+# 本地工作状态文件
+.hermes/
+.nano_progress_state.json
+nul
