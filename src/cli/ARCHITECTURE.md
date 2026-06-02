@@ -39,6 +39,33 @@ typing_speed = config.tui.typing_speed
 show_panel = config.tui.show_tool_panel
 ```
 
+### 配置优先级
+
+配置加载遵循以下优先级（从高到低）：
+
+1. **显式参数**：命令行传入的 `--model`, `--provider` 等
+2. **项目配置**：`./nanohermes.json`（项目根目录）
+3. **全局配置**：`~/.nanohermes/config.json`
+4. **环境变量**：`.env` 文件（`OPENAI_API_KEY`, `MODEL_NAME` 等）
+5. **默认值**：Pydantic 模型定义的默认值
+
+### 配置数据模型
+
+所有配置使用 Pydantic 模型定义（`src/config/models.py`）：
+
+- `ModelConfig`：主模型配置（provider, name, context_length）
+- `ProviderConfig`：提供商配置（base_url, api_key_env）
+- `TuiConfig`：TUI 配置（typing_speed, show_tool_panel, tool_panel_position）
+- `AuxiliaryConfig`：辅助 LLM 配置（provider, model, max_tokens, temperature）
+- `McpConfig`：MCP 服务器配置
+
+### Provider 注册表集成
+
+配置模块与 `src/provider/builtins.py` 注册表集成：
+
+- 当 `base_url` 未在配置中指定时，从 ProviderProfile 获取默认值
+- 支持 OpenAI、Anthropic、OpenRouter、Custom 等内置提供商
+
 ## 启动方式
 
 ```bash
@@ -47,4 +74,7 @@ python -m src.main
 
 # 测试 API 连接
 python -m src.main --test-api
+
+# 指定模型和提供商
+python -m src.main --model gpt-4o --provider openai
 ```

@@ -11,13 +11,15 @@
 1. 复用 ProviderResolver：不独立实现凭证逻辑，保持与主对话一致
 2. "main" provider 回退：如果辅助配置指定 provider="main"，复用主对话模型
 3. max_tokens 保护：强制默认最大 token 数，防止后台任务消耗过多资源
+4. 从 Config 对象读取配置：统一使用 src.config 模块的配置模型
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import os
 from typing import Any
 
+from src.config.models import AuxiliaryConfig as ConfigAuxiliaryConfig
 from src.provider.api_mode import ApiMode, resolve_api_mode
 from src.provider.client_factory import build_client
 from src.provider.credentials import resolve_credentials, CredentialResult
@@ -29,22 +31,6 @@ from src.provider.anthropic_adapter import AnthropicAdapter
 # 辅助任务默认最大 token 数
 # 后台任务通常不需要很长的输出，限制 token 数可防止资源浪费
 _DEFAULT_AUX_MAX_TOKENS = 4000
-
-
-@dataclass
-class AuxiliaryConfig:
-    """辅助 LLM 配置。
-
-    Attributes:
-        provider: 提供商 ID。"main" 表示复用主对话模型。
-        model: 模型名称。
-        max_tokens: 最大输出 token 数。None 时使用默认值。
-        temperature: 温度参数。None 时使用默认值。
-    """
-    provider: str = "main"
-    model: str = ""
-    max_tokens: int | None = None
-    temperature: float | None = None
 
 
 class AuxiliaryClient:
@@ -59,30 +45,45 @@ class AuxiliaryClient:
     4. 构建对应的客户端（OpenAI 或 Anthropic）
 
     Attributes:
-        _config: 辅助配置。
+        _config: 辅助配置（来自 src.config.models.AuxiliaryConfig）。
         _main_credentials: 主对话的凭证（用于 "main" provider 回退）。
         _main_api_mode: 主对话的 API Mode（用于 "main" provider 回退）。
+        _main_model: 主对话的模型名称（用于 "main" provider 回退）。
         _client: 懒加载的底层客户端。
     """
 
     def __init__(
         self,
-        config: AuxiliaryConfig | None = None,
+        config: ConfigAuxiliaryConfig | None = None,
         main_credentials: CredentialResult | None = None,
         main_api_mode: ApiMode | None = None,
+        main_model: str | None = None,
     ):
         """初始化辅助客户端。
 
         Args:
-            config: 辅助配置。None 时使用默认配置。
+            config: 辅助配置（来自 Config 对象的 auxiliary 字段）。
+                    None 时使用默认配置（provider="main"）。
             main_credentials: 主对话的凭证（用于 "main" provider 回退）。
             main_api_mode: 主对话的 API Mode（用于 "main" provider 回退）。
+            main_model: 主对话的模型名称（用于 "main" provider 回退）。
         """
-        self._config = config or AuxiliaryConfig()
+        self._config = config or ConfigAuxiliaryConfig()
         self._main_credentials = main_credentials
         self._main_api_mode = main_api_mode
+        self._main_model = main_model
         self._client: OpenAIClient | AnthropicAdapter | None = None
         self._model: str = ""
+
+    @property
+    def provider(self) -> str:
+        """当前配置的提供商。"""
+        return self._config.provider
+
+    @property
+    def model(self) -> str:
+        """当前配置的模型名称。"""
+        return self._config.model
 
     def _ensure_client(self) -> None:
         """确保客户端已初始化（懒加载）。
@@ -101,7 +102,12 @@ class AuxiliaryClient:
                     "辅助配置指定 provider='main'，但未提供主对话凭证"
                 )
             credentials = self._main_credentials
-            model = self._config.model or self._resolve_main_model()
+            # 使用配置中的模型，如果未配置则使用主对话模型
+            model = self._config.model or self._main_model or ""
+            if not model:
+                raise ValueError(
+                    "辅助配置未指定模型，且主对话模型也未提供"
+                )
             api_mode = self._main_api_mode or ApiMode.CHAT_COMPLETIONS
         else:
             # 独立的辅助提供商
@@ -116,6 +122,10 @@ class AuxiliaryClient:
                 base_url=profile.base_url,
             )
             model = self._config.model
+            if not model:
+                raise ValueError(
+                    f"辅助提供商 {self._config.provider} 未配置模型名称"
+                )
             api_mode = resolve_api_mode(
                 profile=profile,
                 base_url=credentials.base_url,
@@ -171,14 +181,3 @@ class AuxiliaryClient:
             temperature=self._config.temperature,
             **kwargs,
         )
-
-    def _resolve_main_model(self) -> str:
-        """解析主对话模型名称。
-
-        这是一个占位实现，实际使用时需要从主对话配置中获取。
-
-        Returns:
-            主对话模型名称。
-        """
-        # TODO: 从主对话配置中获取模型名称
-        return "gpt-4o"

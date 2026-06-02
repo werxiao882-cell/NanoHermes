@@ -263,8 +263,8 @@ def get_base_url(config: Config) -> str | None:
 
     # 回退到 provider 注册表
     try:
-        from src.provider.builtins import get_provider
-        profile = get_provider(provider_id)
+        from src.provider.profile import get_provider_profile
+        profile = get_provider_profile(provider_id)
         if profile and profile.base_url:
             return profile.base_url
     except Exception:
