@@ -63,8 +63,10 @@ class FileMemoryProvider(MemoryProvider):
             hermes_home: NanoHermes 主目录路径。
         """
         self._hermes_home = Path(hermes_home)
-        self._memory_path = self._hermes_home / "MEMORY.md"
-        self._user_path = self._hermes_home / "USER.md"
+        self._memory_dir = self._hermes_home / "memory"
+        self._memory_dir.mkdir(parents=True, exist_ok=True)
+        self._memory_path = self._memory_dir / "MEMORY.md"
+        self._user_path = self._memory_dir / "USER.md"
 
     @property
     def name(self) -> str:

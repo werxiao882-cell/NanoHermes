@@ -29,12 +29,12 @@ class TestFileMemoryProviderInit:
         """测试创建 MEMORY.md 和 USER.md。"""
         provider.initialize("session-1")
 
-        assert (hermes_home / "MEMORY.md").exists()
-        assert (hermes_home / "USER.md").exists()
+        assert (hermes_home / "memory" / "MEMORY.md").exists()
+        assert (hermes_home / "memory" / "USER.md").exists()
 
     def test_not_overwrite_existing_files(self, provider, hermes_home):
         """测试不覆盖已存在的文件。"""
-        memory_path = hermes_home / "MEMORY.md"
+        memory_path = hermes_home / "memory" / "MEMORY.md"
         memory_path.write_text("# Existing Memory\n\n- Existing fact\n", encoding="utf-8")
 
         provider.initialize("session-1")
@@ -48,7 +48,7 @@ class TestFileMemoryProviderPrefetch:
 
     def test_return_full_memory_content(self, provider, hermes_home):
         """测试返回完整记忆内容。"""
-        memory_path = hermes_home / "MEMORY.md"
+        memory_path = hermes_home / "memory" / "MEMORY.md"
         memory_path.write_text("- User prefers Python\n", encoding="utf-8")
 
         provider.initialize("session-1")
@@ -59,24 +59,20 @@ class TestFileMemoryProviderPrefetch:
 
     def test_empty_files_return_empty(self, provider, hermes_home):
         """测试空文件返回空字符串。"""
-        memory_path = hermes_home / "MEMORY.md"
-        user_path = hermes_home / "USER.md"
-        memory_path.write_text("", encoding="utf-8")
-        user_path.write_text("", encoding="utf-8")
-
         provider.initialize("session-1")
-        result = provider.prefetch("")
 
+        result = provider.prefetch("")
         assert result == ""
 
     def test_system_prompt_block_returns_prefetch(self, provider, hermes_home):
         """测试 system_prompt_block 返回 prefetch 内容。"""
-        memory_path = hermes_home / "MEMORY.md"
+        memory_path = hermes_home / "memory" / "MEMORY.md"
         memory_path.write_text("- Test memory\n", encoding="utf-8")
 
         provider.initialize("session-1")
         result = provider.system_prompt_block()
 
+        assert "## Memory" in result
         assert "Test memory" in result
 
 
