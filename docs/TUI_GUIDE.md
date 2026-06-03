@@ -103,17 +103,67 @@ TUI 自动适应终端尺寸：
 
 ## 配置
 
-在 `~/.nanohermes/tui/state.json` 中保存配置：
+TUI 使用统一的配置系统（`src/config/`），支持多种配置来源。
+
+### 配置优先级
+
+配置按以下优先级加载（从高到低）：
+
+1. **显式参数**：命令行参数 `--model`, `--provider`
+2. **项目配置**：`./nanohermes.json`（项目根目录）
+3. **全局配置**：`~/.nanohermes/config.json`
+4. **环境变量**：`.env` 文件
+5. **默认值**：内置默认配置
+
+### 配置文件示例
+
+**项目配置** (`nanohermes.json`)：
 
 ```json
 {
-  "layout": {
+  "model": {
+    "provider": "openai",
+    "name": "gpt-4o",
+    "context_length": 128000
+  },
+  "tui": {
+    "typing_speed": 15,
     "show_tool_panel": true,
-    "tool_panel_position": "right",
-    "typing_speed": 10
+    "tool_panel_position": "right"
+  },
+  "auxiliary": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "max_tokens": 2000
   }
 }
 ```
+
+**环境变量** (`.env`)：
+
+```bash
+OPENAI_API_KEY=sk-xxx
+OPENAI_BASE_URL=https://api.openai.com/v1
+MODEL_NAME=gpt-4o
+```
+
+### TUI 配置选项
+
+| 选项 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `typing_speed` | int | 10 | 打字机效果速度（字符/秒） |
+| `show_tool_panel` | bool | true | 显示工具面板 |
+| `tool_panel_position` | str | "right" | 工具面板位置（left/right/bottom） |
+
+### 配置模型
+
+所有配置使用 Pydantic 模型定义，详见 `src/config/models.py`：
+
+- `ModelConfig`：主模型配置
+- `ProviderConfig`：提供商配置
+- `TuiConfig`：TUI 配置
+- `AuxiliaryConfig`：辅助 LLM 配置
+- `McpConfig`：MCP 服务器配置
 
 ## 故障排除
 
