@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import random
@@ -311,6 +312,7 @@ class SessionDB:
         source: str = "local",
         user_id: str | None = None,
         system_prompt: str | None = None,
+        model_config: dict[str, Any] | None = None,
     ) -> str:
         """创建新会话。
 
@@ -323,17 +325,19 @@ class SessionDB:
             source: 来源平台（local/telegram/discord 等）。
             user_id: 用户标识。
             system_prompt: 系统提示快照。
+            model_config: 模型配置（如 temperature、max_tokens 等）。
 
         Returns:
             会话 ID。
         """
         sid = session_id or str(uuid.uuid4())
         now = time.time()
+        model_config_json = json.dumps(model_config) if model_config else None
         sql = """
-            INSERT OR IGNORE INTO sessions (id, source, user_id, model, parent_session_id, title, started_at, system_prompt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR IGNORE INTO sessions (id, source, user_id, model, parent_session_id, title, started_at, system_prompt, model_config, billing_provider)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
-        self._execute_write(sql, (sid, source, user_id, model, parent_session_id, title, now, system_prompt))
+        self._execute_write(sql, (sid, source, user_id, model, parent_session_id, title, now, system_prompt, model_config_json, provider))
         return sid
 
     def end_session(self, session_id: str, end_reason: str | None = None) -> None:
@@ -467,6 +471,10 @@ class SessionDB:
         reasoning_details: str | None = None,
         token_count: int | None = None,
         finish_reason: str | None = None,
+        codex_reasoning_items: str | None = None,
+        codex_message_items: str | None = None,
+        platform_message_id: str | None = None,
+        observed: bool = False,
     ) -> int:
         """插入一条消息。
 
@@ -482,18 +490,23 @@ class SessionDB:
             reasoning_details: 思考详情（JSON）。
             token_count: Token 数量。
             finish_reason: 完成原因。
+            codex_reasoning_items: Codex 推理项（JSON）。
+            codex_message_items: Codex 消息项（JSON）。
+            platform_message_id: 平台消息 ID。
+            observed: 是否已观察。
 
         Returns:
             消息 ID（自增）。
         """
         sql = """
-            INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, tool_name, timestamp, reasoning, reasoning_content, reasoning_details, token_count, finish_reason)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, tool_name, timestamp, reasoning, reasoning_content, reasoning_details, token_count, finish_reason, codex_reasoning_items, codex_message_items, platform_message_id, observed)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         cursor = self._execute_write(sql, (
             session_id, role, content, tool_calls, tool_call_id, tool_name,
             time.time(), reasoning, reasoning_content, reasoning_details,
-            token_count, finish_reason,
+            token_count, finish_reason, codex_reasoning_items, codex_message_items,
+            platform_message_id, 1 if observed else 0,
         ))
         return cursor.lastrowid
 
@@ -742,6 +755,114 @@ class SessionDB:
             sql,
             (input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, session_id),
         )
+
+    def increment_message_count(self, session_id: str) -> None:
+        """消息计数 +1。
+
+        Args:
+            session_id: 会话 ID。
+        """
+        sql = "UPDATE sessions SET message_count = message_count + 1 WHERE id = ?"
+        self._execute_write(sql, (session_id,))
+
+    def increment_tool_call_count(self, session_id: str) -> None:
+        """工具调用计数 +1。
+
+        Args:
+            session_id: 会话 ID。
+        """
+        sql = "UPDATE sessions SET tool_call_count = tool_call_count + 1 WHERE id = ?"
+        self._execute_write(sql, (session_id,))
+
+    def increment_api_call_count(self, session_id: str) -> None:
+        """API 调用计数 +1。
+
+        Args:
+            session_id: 会话 ID。
+        """
+        sql = "UPDATE sessions SET api_call_count = api_call_count + 1 WHERE id = ?"
+        self._execute_write(sql, (session_id,))
+
+    def update_billing_info(
+        self,
+        session_id: str,
+        billing_provider: str | None = None,
+        billing_base_url: str | None = None,
+        billing_mode: str | None = None,
+    ) -> None:
+        """更新会话计费信息。
+
+        Args:
+            session_id: 会话 ID。
+            billing_provider: 计费提供商。
+            billing_base_url: 计费基础 URL。
+            billing_mode: 计费模式（如 "pay-as-you-go"）。
+        """
+        sql = """
+            UPDATE sessions SET
+                billing_provider = COALESCE(?, billing_provider),
+                billing_base_url = COALESCE(?, billing_base_url),
+                billing_mode = COALESCE(?, billing_mode)
+            WHERE id = ?
+        """
+        self._execute_write(sql, (billing_provider, billing_base_url, billing_mode, session_id))
+
+    def update_cost_info(
+        self,
+        session_id: str,
+        estimated_cost_usd: float | None = None,
+        actual_cost_usd: float | None = None,
+        cost_status: str | None = None,
+        cost_source: str | None = None,
+        pricing_version: str | None = None,
+    ) -> None:
+        """更新会话成本信息。
+
+        Args:
+            session_id: 会话 ID。
+            estimated_cost_usd: 预估成本（USD）。
+            actual_cost_usd: 实际成本（USD）。
+            cost_status: 成本状态（如 "estimated", "actual"）。
+            cost_source: 成本来源（如 "provider", "calculator"）。
+            pricing_version: 定价版本。
+        """
+        sql = """
+            UPDATE sessions SET
+                estimated_cost_usd = COALESCE(?, estimated_cost_usd),
+                actual_cost_usd = COALESCE(?, actual_cost_usd),
+                cost_status = COALESCE(?, cost_status),
+                cost_source = COALESCE(?, cost_source),
+                pricing_version = COALESCE(?, pricing_version)
+            WHERE id = ?
+        """
+        self._execute_write(
+            sql,
+            (estimated_cost_usd, actual_cost_usd, cost_status, cost_source, pricing_version, session_id),
+        )
+
+    def update_handoff_info(
+        self,
+        session_id: str,
+        handoff_state: str | None = None,
+        handoff_platform: str | None = None,
+        handoff_error: str | None = None,
+    ) -> None:
+        """更新会话交接信息。
+
+        Args:
+            session_id: 会话 ID。
+            handoff_state: 交接状态（如 "success", "failed"）。
+            handoff_platform: 交接平台。
+            handoff_error: 交接错误信息。
+        """
+        sql = """
+            UPDATE sessions SET
+                handoff_state = COALESCE(?, handoff_state),
+                handoff_platform = COALESCE(?, handoff_platform),
+                handoff_error = COALESCE(?, handoff_error)
+            WHERE id = ?
+        """
+        self._execute_write(sql, (handoff_state, handoff_platform, handoff_error, session_id))
 
     # ========================================================================
     # 关闭

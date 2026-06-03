@@ -63,6 +63,42 @@ class ModelInfo:
 # 定价数据来源：各提供商官方定价页面（截至 2025 年 5 月）
 # ============================================================================
 _MODEL_REGISTRY: dict[str, ModelInfo] = {
+    # --- DashScope (通义千问) 模型 ---
+    "qwen3.6-plus": ModelInfo(
+        id="qwen3.6-plus",
+        context_length=131_072,
+        pricing=ModelPricing(
+            input_price=0.004,
+            output_price=0.012,
+            cache_read_price=0.002,
+            cache_write_price=0.006,
+        ),
+    ),
+    "qwen-max": ModelInfo(
+        id="qwen-max",
+        context_length=32_768,
+        pricing=ModelPricing(
+            input_price=0.04,
+            output_price=0.12,
+        ),
+    ),
+    "qwen-plus": ModelInfo(
+        id="qwen-plus",
+        context_length=131_072,
+        pricing=ModelPricing(
+            input_price=0.004,
+            output_price=0.012,
+        ),
+    ),
+    "qwen-turbo": ModelInfo(
+        id="qwen-turbo",
+        context_length=131_072,
+        pricing=ModelPricing(
+            input_price=0.002,
+            output_price=0.006,
+        ),
+    ),
+
     # --- OpenAI 模型 ---
     "gpt-4o": ModelInfo(
         id="gpt-4o",
