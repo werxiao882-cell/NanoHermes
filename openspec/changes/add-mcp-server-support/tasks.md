@@ -13,7 +13,7 @@
 - [x] 2.4 实现 Streamable HTTP 传输启动逻辑（`--transport streamable-http --host --port`）
 - [x] 2.5 实现 HTTP+SSE 传输启动逻辑（`--transport sse --host --port`，旧版兼容）
 - [x] 2.6 实现日志配置函数 `configure_logging()`，支持环境变量控制日志级别
-- [ ] 2.7 验证 3 种传输模式均可正常启动
+- [x] 2.7 验证 3 种传输模式均可正常启动
 
 ## 3. 工具桥接层
 

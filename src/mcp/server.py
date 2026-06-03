@@ -83,22 +83,20 @@ def run_stdio(mcp: FastMCP) -> None:
 
 def run_streamable_http(mcp: FastMCP, config: TransportConfig) -> None:
     """Streamable HTTP 传输启动逻辑"""
+    # 设置 host 和 port 在 settings 中
+    mcp.settings.host = config.host
+    mcp.settings.port = config.port
     logger.info(f"Starting MCP server in streamable-http mode at {config.get_server_url()}")
-    mcp.run(
-        transport="streamable-http",
-        host=config.host,
-        port=config.port,
-    )
+    mcp.run(transport="streamable-http")
 
 
 def run_sse(mcp: FastMCP, config: TransportConfig) -> None:
     """HTTP+SSE 传输启动逻辑（旧版兼容）"""
+    # 设置 host 和 port 在 settings 中
+    mcp.settings.host = config.host
+    mcp.settings.port = config.port
     logger.info(f"Starting MCP server in SSE mode at {config.get_server_url()} (deprecated)")
-    mcp.run(
-        transport="sse",
-        host=config.host,
-        port=config.port,
-    )
+    mcp.run(transport="sse")
 
 
 def main():

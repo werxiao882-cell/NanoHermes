@@ -41,22 +41,22 @@
 
 ## 7. Auxiliary 模块迁移
 
-- [ ] 7.1 修改 `src/auxiliary/client.py` 从 Config 对象读取辅助 LLM 配置
-- [ ] 7.2 移除硬编码的默认值回退逻辑
+- [x] 7.1 修改 `src/auxiliary/client.py` 从 Config 对象读取辅助 LLM 配置
+- [x] 7.2 移除硬编码的默认值回退逻辑
 
 ## 8. Provider 模块集成
 
-- [ ] 8.1 确保配置模块与 `src/provider/builtins.py` 注册表集成
-- [ ] 8.2 配置模块通过 provider ID 查找 ProviderProfile 获取 base_url 默认值
+- [x] 8.1 确保配置模块与 `src/provider/builtins.py` 注册表集成
+- [x] 8.2 配置模块通过 provider ID 查找 ProviderProfile 获取 base_url 默认值
 
 ## 9. 测试
 
-- [ ] 9.1 编写 `tests/config/test_models.py` - 数据模型验证测试
-- [ ] 9.2 编写 `tests/config/test_loader.py` - 配置加载和优先级测试
-- [ ] 9.3 编写 `tests/config/test_integration.py` - 集成测试（完整加载流程）
-- [ ] 9.4 运行全部测试确保通过
+- [x] 9.1 编写 `tests/config/test_models.py` - 数据模型验证测试
+- [x] 9.2 编写 `tests/config/test_loader.py` - 配置加载和优先级测试
+- [x] 9.3 编写 `tests/config/test_integration.py` - 集成测试（完整加载流程）
+- [x] 9.4 运行全部测试确保通过
 
 ## 10. 文档
 
-- [ ] 10.1 更新 `src/cli/ARCHITECTURE.md` 反映配置模块
-- [ ] 10.2 更新 `docs/TUI_V2_GUIDE.md` 中的配置说明
+- [x] 10.1 更新 `src/cli/ARCHITECTURE.md` 反映配置模块
+- [x] 10.2 更新 `docs/TUI_V2_GUIDE.md` 中的配置说明
