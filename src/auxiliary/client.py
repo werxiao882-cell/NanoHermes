@@ -20,6 +20,9 @@ import os
 from typing import Any
 
 from src.config.models import AuxiliaryConfig as ConfigAuxiliaryConfig
+
+# Re-export for convenience (tests and other modules import from here)
+AuxiliaryConfig = ConfigAuxiliaryConfig
 from src.provider.api_mode import ApiMode, resolve_api_mode
 from src.provider.client_factory import build_client
 from src.provider.credentials import resolve_credentials, CredentialResult
@@ -84,6 +87,14 @@ class AuxiliaryClient:
     def model(self) -> str:
         """当前配置的模型名称。"""
         return self._config.model
+
+    def _resolve_main_model(self) -> str:
+        """解析主对话模型名称。
+
+        Returns:
+            默认返回 "gpt-4o"。子类可覆盖此方法以提供不同的默认值。
+        """
+        return "gpt-4o"
 
     def _ensure_client(self) -> None:
         """确保客户端已初始化（懒加载）。

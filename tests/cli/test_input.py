@@ -86,14 +86,17 @@ class TestContextAwareCompleter:
     
     def test_delegates_to_file_completer(self, tmp_path):
         """测试委托给文件补全器。"""
-        test_file = tmp_path / "test.txt"
+        # Use a unique name to avoid matching sibling pytest temp dirs
+        unique_name = "nanohermes_testfile_xyz"
+        test_file = tmp_path / f"{unique_name}.txt"
         test_file.touch()
         
         completer = ContextAwareCompleter()
-        doc = Document(text=f"{tmp_path}/test", cursor_position=len(f"{tmp_path}/test"))
+        doc = Document(text=f"{tmp_path}/{unique_name}", cursor_position=len(f"{tmp_path}/{unique_name}"))
         completions = list(completer.get_completions(doc, None))
         
         assert len(completions) >= 1
+        assert any(unique_name in c.text for c in completions)
 
 
 class TestTUIHistory:
