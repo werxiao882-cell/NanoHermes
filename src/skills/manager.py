@@ -180,6 +180,32 @@ class SkillManager:
 
         return skills
 
+    def get_skills_by_category(self) -> dict[str, list[str]]:
+        """按类别分类技能。
+
+        从技能路径推断类别，返回类别到技能名称列表的映射。
+
+        Returns:
+            类别字典，键为类别名，值为该类别下的技能名称列表。
+        """
+        skill_categories: dict[str, list[str]] = {}
+        for entry in self.list_skills():
+            path = entry.skill.path
+            if "/skills/" in path:
+                parts = path.split("/skills/")[1].split("/")
+                if len(parts) >= 2:
+                    category = parts[0]
+                else:
+                    category = "other"
+            else:
+                category = "other"
+
+            if category not in skill_categories:
+                skill_categories[category] = []
+            skill_categories[category].append(entry.skill.name)
+
+        return skill_categories
+
     def get_skill_details(self, name: str) -> dict[str, Any] | None:
         """获取技能详情，包括元数据和支持文件列表。
 
