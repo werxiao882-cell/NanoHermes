@@ -56,6 +56,7 @@ class TUIApp:
         session_db=None,
         jsonl_store=None,
         memory_manager=None,
+        skill_manager=None,
         debug: bool = False,
     ):
         self.config = config or {}
@@ -65,6 +66,7 @@ class TUIApp:
         self.session_db = session_db
         self.jsonl_store = jsonl_store
         self.memory_manager = memory_manager
+        self.skill_manager = skill_manager
 
         layout_config = LayoutConfig(
             show_tool_panel=self.config.get("show_tool_panel", True),
@@ -98,6 +100,7 @@ class TUIApp:
         self.console = Console()
         self.conversation_lines: list[Text] = []
         self.messages: list[dict[str, Any]] = []
+        self._last_reasoning: str = ""
         self.status_bar = StatusBar(model=model, context_window=1_000_000)
         self.typewriter = TypewriterEffect(speed_ms=self.config.get("typing_speed", 10))
         self.streaming_md = StreamingMarkdown()
@@ -148,7 +151,7 @@ class TUIApp:
         banner_text.append("NANOHERMES AGENT", style="bold yellow")
         banner_text.append("\n\n")
         banner_text.append(f"Model: {self.model}\n", style="dim")
-        banner_text.append(f"Session: {self.session_id[:16]}...\n\n", style="dim")
+        banner_text.append(f"Session: {self.session_id}\n\n", style="dim")
 
         if self.tool_categories:
             banner_text.append("Tools:\n", style="bold cyan")
@@ -222,10 +225,8 @@ class TUIApp:
             time_str = f"{elapsed_ms:.0f}ms"
         else:
             time_str = f"{elapsed_ms / 1000:.1f}s"
-        self.console.print(f"[bold orange]+ Thought: {time_str}[/bold orange]")
-        preview = reasoning[:50] + "..." if len(reasoning) > 50 else reasoning
-        self.console.print(f"[dim]  {preview}[/dim]")
-        self.console.print("[dim]  (点击 + 展开完整思考内容)[/dim]")
+        self.console.print(f"[bold orange]Thought ({time_str}):[/bold orange]")
+        self.console.print(f"[dim]{reasoning}[/dim]")
         self.console.print()
 
     def show_tool_start(self, tool_name: str, action: str) -> None:
@@ -260,6 +261,7 @@ class TUIApp:
     def clear_conversation(self) -> None:
         self.conversation_lines.clear()
         self.messages = [m for m in self.messages if m.get("role") == "system"]
+        self._last_reasoning = ""
 
     def _print_status_bar(self) -> None:
         self.console.print(self.status_bar.render())
@@ -375,11 +377,6 @@ class TUIApp:
             self.add_message("assistant", "This is a simulated response.", is_tool=False)
             return
 
-        # 如果是新会话，创建会话记录
-        if self.session_id == "new_session" and self.session_db:
-            self.session_id = self.session_db.create_session(title=f"会话 {user_input[:30]}", model=self.model)
-            self.console.print(f"[dim]新会话已创建: {self.session_id[:8]}[/dim]\n")
-
         self.messages.append({"role": "user", "content": user_input})
         self._save_message_to_storage("user", user_input)
 
@@ -482,6 +479,24 @@ class TUIApp:
             await self._cmd_compress(focus_topic)
             return True
 
+        if cmd.startswith("/title"):
+            parts = command.strip().split(None, 1)
+            title = parts[1] if len(parts) > 1 else None
+            await self._cmd_title(title)
+            return True
+
+        if cmd == "/skills" or cmd.startswith("/skills "):
+            await self._cmd_skills(command)
+            return True
+
+        if cmd == "/tools":
+            await self._cmd_tools()
+            return True
+
+        if cmd == "/reasoning":
+            await self._cmd_reasoning()
+            return True
+
         return False
 
     async def process_message(self, message: str) -> None:
@@ -501,6 +516,13 @@ class TUIApp:
     async def run(self) -> None:
         self.state.running = True
         logger.info("TUI 主循环启动")
+
+        # 如果是新会话，立即创建会话记录
+        if self.session_id == "new_session" and self.session_db:
+            self.session_id = self.session_db.create_session(title="新会话", model=self.model)
+            self.state.session_id = self.session_id
+            self.console.print(f"[dim]新会话已创建: {self.session_id}[/dim]\n")
+
         self.print_banner()
 
         try:
@@ -666,6 +688,99 @@ class TUIApp:
             self.console.print(f"[red]压缩失败: {e}[/red]")
             logger.error(f"Compression failed: {e}", exc_info=True)
 
+    async def _cmd_title(self, title: str | None) -> None:
+        """处理 /title 命令，设置会话标题。"""
+        if not title:
+            self.console.print("[yellow]用法: /title <会话标题>[/yellow]")
+            return
+
+        if not self.session_db or self.session_id == "new_session":
+            self.console.print("[yellow]会话数据库不可用或未创建会话[/yellow]")
+            return
+
+        try:
+            self.session_db.set_session_title(self.session_id, title)
+            self.console.print(f"[green]会话标题已更新: {title}[/green]")
+        except Exception as e:
+            self.console.print(f"[red]更新标题失败: {e}[/red]")
+            logger.error(f"Failed to update title: {e}", exc_info=True)
+
+    async def _cmd_skills(self, command: str) -> None:
+        """处理 /skills 命令，列出或管理技能。"""
+        if not self.skill_manager:
+            self.console.print("[yellow]技能管理器不可用[/yellow]")
+            return
+
+        parts = command.strip().split()
+
+        # /skills - 列出所有技能
+        if len(parts) == 1:
+            skills = self.skill_manager.list_skills()
+            if not skills:
+                self.console.print("[dim]暂无已安装的技能[/dim]")
+                return
+
+            self.console.print("\n[cyan]已安装的技能:[/cyan]")
+            for entry in skills:
+                status = "[green]✓[/green]" if entry.enabled else "[dim]✗[/dim]"
+                name = entry.skill.name
+                desc = entry.skill.description
+                uses = f"(使用 {entry.use_count} 次)" if entry.use_count > 0 else ""
+                self.console.print(f"  {status} [bold]{name}[/bold] {uses}")
+                self.console.print(f"     [dim]{desc}[/dim]")
+            self.console.print()
+            self.console.print("[dim]用法: /skills enable <name> | /skills disable <name>[/dim]")
+            return
+
+        # /skills enable <name> 或 /skills disable <name>
+        if len(parts) >= 3:
+            action = parts[1].lower()
+            skill_name = parts[2]
+
+            if action == "enable":
+                success = self.skill_manager.enable_skill(skill_name)
+                if success:
+                    self.console.print(f"[green]已启用技能: {skill_name}[/green]")
+                else:
+                    self.console.print(f"[yellow]技能不存在: {skill_name}[/yellow]")
+            elif action == "disable":
+                success = self.skill_manager.disable_skill(skill_name)
+                if success:
+                    self.console.print(f"[green]已禁用技能: {skill_name}[/green]")
+                else:
+                    self.console.print(f"[yellow]技能不存在: {skill_name}[/yellow]")
+            else:
+                self.console.print(f"[yellow]未知操作: {action}[/yellow]")
+                self.console.print("[dim]用法: /skills enable <name> | /skills disable <name>[/dim]")
+            return
+
+        self.console.print("[yellow]用法: /skills | /skills enable <name> | /skills disable <name>[/yellow]")
+
+    async def _cmd_tools(self) -> None:
+        """处理 /tools 命令，列出所有可用工具。"""
+        from src.tools.registry import ToolRegistry
+
+        tools = ToolRegistry.get_all_tools()
+        if not tools:
+            self.console.print("[dim]暂无已注册的工具[/dim]")
+            return
+
+        # 按 toolset 分组
+        toolsets: dict[str, list] = {}
+        for tool in tools:
+            if tool.toolset not in toolsets:
+                toolsets[tool.toolset] = []
+            toolsets[tool.toolset].append(tool)
+
+        self.console.print("\n[cyan]已注册的工具:[/cyan]")
+        for toolset_name, tool_list in sorted(toolsets.items()):
+            self.console.print(f"\n  [bold]{toolset_name}:[/bold]")
+            for tool in tool_list:
+                available = tool.check_fn() if tool.check_fn else True
+                status = "[green]✓[/green]" if available else "[dim]✗[/dim]"
+                self.console.print(f"    {status} [bold]{tool.name}[/bold] - [dim]{tool.description}[/dim]")
+        self.console.print()
+
     async def shutdown(self) -> None:
         logger.info("TUI 正在关闭...")
         self.state.running = False
@@ -688,6 +803,7 @@ def create_tui(
     session_db=None,
     jsonl_store=None,
     memory_manager=None,
+    skill_manager=None,
     debug: bool = False,
 ) -> TUIApp:
     return TUIApp(
@@ -704,5 +820,6 @@ def create_tui(
         session_db=session_db,
         jsonl_store=jsonl_store,
         memory_manager=memory_manager,
+        skill_manager=skill_manager,
         debug=debug,
     )

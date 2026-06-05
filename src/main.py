@@ -214,6 +214,7 @@ def build_model_caller(client, model: str):
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": messages,
+            "stream": True,
         }
         if tools:
             # OpenAI API 要求 tools 格式为 [{"type": "function", "function": {...}}]
@@ -221,45 +222,60 @@ def build_model_caller(client, model: str):
                 {"type": "function", "function": t} for t in tools
             ]
 
-        response = client.chat.completions.create(**kwargs)
+        # 流式调用
+        full_content = ""
+        reasoning = ""
+        tool_calls = []
+        usage = None
 
-        choice = response.choices[0] if response.choices else None
-        if not choice:
-            return {"content": None, "tool_calls": None, "reasoning": None, "raw_response": None, "request_body": kwargs}
+        stream = client.chat.completions.create(**kwargs)
+        for chunk in stream:
+            delta = chunk.choices[0].delta if chunk.choices else None
+            if delta is None:
+                continue
 
-        message = choice.message
-        content = message.content
-        tool_calls = None
-        reasoning = None
+            # 提取增量文本
+            if delta.content:
+                full_content += delta.content
 
-        if message.tool_calls:
-            tool_calls = [
+            # 提取 reasoning
+            if hasattr(delta, 'reasoning') and delta.reasoning:
+                reasoning += delta.reasoning
+            elif hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                reasoning += delta.reasoning_content
+
+            # 提取工具调用
+            if delta.tool_calls:
+                for tc in delta.tool_calls:
+                    tool_calls.append(tc.model_dump())
+
+            # 提取 usage
+            if hasattr(chunk, 'usage') and chunk.usage:
+                usage = chunk.usage
+
+        # 构建 tool_calls 返回格式
+        formatted_tool_calls = None
+        if tool_calls:
+            formatted_tool_calls = [
                 {
-                    "id": tc.id,
-                    "type": tc.type,
+                    "id": tc.get("id", ""),
+                    "type": tc.get("type", "function"),
                     "function": {
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments,
+                        "name": tc.get("function", {}).get("name", ""),
+                        "arguments": tc.get("function", {}).get("arguments", ""),
                     },
                 }
-                for tc in message.tool_calls
+                for tc in tool_calls
             ]
 
-        # 提取 reasoning 内容（Qwen 等模型的思考过程）
-        if hasattr(message, 'reasoning') and message.reasoning:
-            reasoning = message.reasoning
-        elif hasattr(message, 'reasoning_content') and message.reasoning_content:
-            reasoning = message.reasoning_content
-
         return {
-            "content": content,
-            "tool_calls": tool_calls,
-            "reasoning": reasoning,
+            "content": full_content,
+            "tool_calls": formatted_tool_calls,
+            "reasoning": reasoning if reasoning else None,
             "usage": {
-                "input_tokens": response.usage.prompt_tokens if response.usage else 0,
-                "output_tokens": response.usage.completion_tokens if response.usage else 0,
+                "input_tokens": usage.prompt_tokens if usage else 0,
+                "output_tokens": usage.completion_tokens if usage else 0,
             },
-            "raw_response": response.model_dump() if hasattr(response, 'model_dump') else str(response),
             "request_body": kwargs,
         }
 
@@ -383,6 +399,7 @@ def main_chat(debug: bool = False, resume: str | None = None, resume_title: str 
         session_db=session_db,
         jsonl_store=jsonl_store,
         memory_manager=memory_manager,
+        skill_manager=skill_manager,
         debug=debug,
     )
     

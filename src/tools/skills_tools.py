@@ -79,7 +79,7 @@ def skill_view(name: str = "", task_id: str = None) -> str:
     }, ensure_ascii=False)
 
 
-def skills_list(query: str = "", task_id: str = None) -> str:
+def skills_list(query: str = "", task_id: str = None, **kwargs) -> str:
     """列出可用技能。"""
     skills = _skill_manager.list_skills_with_query(query)
     return json.dumps({
