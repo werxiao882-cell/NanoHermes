@@ -283,6 +283,6 @@ register_tool(
     name="todo",
     toolset="todo",
     schema=TODO_SCHEMA,
-    handler=lambda todos=None, merge=False, task_id=None: todo_tool(todos=todos, merge=merge),
+    handler=lambda todos=None, merge=False, task_id=None, **kwargs: todo_tool(todos=todos, merge=merge),
     description="Manage your task list for the current session",
 )
