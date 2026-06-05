@@ -136,9 +136,10 @@ def test_e2e_conversation_with_tools():
 
 
 def test_main_entry_build_model_caller():
-    """Test main.py build_model_caller function and entry point."""
+    """Test OpenAIClient.build_caller method and entry point."""
     from unittest.mock import MagicMock
-    from src.main import build_model_caller
+    from openai import OpenAI
+    from src.provider.openai_client import OpenAIClient as ProviderOpenAIClient
 
     # Create mock client
     mock_client = MagicMock()
@@ -155,8 +156,9 @@ def test_main_entry_build_model_caller():
     mock_stream = [mock_chunk]
     mock_client.chat.completions.create.return_value = iter(mock_stream)
 
-    # Test build_model_caller
-    model_caller = build_model_caller(mock_client, "test-model")
+    # Test OpenAIClient.build_caller
+    provider_client = ProviderOpenAIClient(mock_client, "test-model")
+    model_caller = provider_client.build_caller()
     result = model_caller([{"role": "user", "content": "Hi"}], None)
 
     assert result["content"] == "Hello"
@@ -165,7 +167,7 @@ def test_main_entry_build_model_caller():
     assert "stream" in result["request_body"]
     assert result["request_body"]["stream"] is True
 
-    print("\n[5] Testing build_model_caller...")
+    print("\n[5] Testing OpenAIClient.build_caller...")
     print(f"    Content: {result['content']}")
     print(f"    Usage: {result['usage']}")
-    print("    build_model_caller works correctly!")
+    print("    OpenAIClient.build_caller works correctly!")
