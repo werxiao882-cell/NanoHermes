@@ -31,27 +31,27 @@ class TestClarifyTool:
         assert result["allow_custom"] is True
 
     def test_clarify_with_options(self):
-        """Test clarify with preset options."""
+        """Test clarify with preset choices."""
         result = json.loads(clarify(
             question="Which option?",
-            options=["Option A", "Option B", "Option C"],
+            choices=["Option A", "Option B", "Option C"],
         ))
-        assert len(result["options"]) == 3
-        assert result["options"][0] == "Option A"
+        assert len(result["choices"]) == 3
+        assert result["choices"][0] == "Option A"
 
     def test_clarify_limits_options_to_4(self):
-        """Test clarify limits options to 4."""
+        """Test clarify limits choices to 4."""
         result = json.loads(clarify(
             question="Which option?",
-            options=["A", "B", "C", "D", "E", "F"],
+            choices=["A", "B", "C", "D", "E", "F"],
         ))
-        assert len(result["options"]) == 4
+        assert len(result["choices"]) == 4
 
     def test_clarify_disable_custom(self):
         """Test clarify with custom input disabled."""
         result = json.loads(clarify(
             question="Choose one:",
-            options=["Yes", "No"],
+            choices=["Yes", "No"],
             allow_custom=False,
         ))
         assert result["allow_custom"] is False
@@ -105,15 +105,16 @@ class TestClarifyIntegration:
     def test_clarify_via_dispatcher(self):
         """Test clarify tool via dispatcher."""
         from src.tools.registry import ToolRegistry
-        from src.tools import clarify_tools
+        from src.tools import clarify_tool
         import importlib
         from src.tools.dispatcher import dispatch
 
         ToolRegistry.clear()
-        importlib.reload(clarify_tools)
+        importlib.reload(clarify_tool)
 
         result = dispatch("clarify", {"question": "What do you mean?"})
         data = json.loads(result)
         assert data["status"] == "clarification_requested"
         assert data["question"] == "What do you mean?"
+
 
