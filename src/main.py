@@ -29,82 +29,6 @@ def _bold(text: str) -> str:
     return f"\033[1m{text}\033[0m"
 
 
-def build_model_caller(client, model: str):
-    """构建模型调用函数，适配 ConversationLoop 接口。
-
-    Args:
-        client: OpenAI SDK 客户端实例。
-        model: 模型名称。
-
-    Returns:
-        调用函数: (messages, tools) -> dict
-        返回包含 content, tool_calls, usage, reasoning, request_body
-    """
-    def call_model(messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None) -> dict[str, Any]:
-        kwargs: dict[str, Any] = {
-            "model": model,
-            "messages": messages,
-            "stream": True,
-        }
-        if tools:
-            kwargs["tools"] = [
-                {"type": "function", "function": t} for t in tools
-            ]
-
-        full_content = ""
-        reasoning = ""
-        tool_calls = []
-        usage = None
-
-        stream = client.chat.completions.create(**kwargs)
-        for chunk in stream:
-            delta = chunk.choices[0].delta if chunk.choices else None
-            if delta is None:
-                continue
-
-            if delta.content:
-                full_content += delta.content
-
-            if hasattr(delta, 'reasoning') and delta.reasoning:
-                reasoning += delta.reasoning
-            elif hasattr(delta, 'reasoning_content') and delta.reasoning_content:
-                reasoning += delta.reasoning_content
-
-            if delta.tool_calls:
-                for tc in delta.tool_calls:
-                    tool_calls.append(tc.model_dump())
-
-            if hasattr(chunk, 'usage') and chunk.usage:
-                usage = chunk.usage
-
-        formatted_tool_calls = None
-        if tool_calls:
-            formatted_tool_calls = [
-                {
-                    "id": tc.get("id", ""),
-                    "type": tc.get("type", "function"),
-                    "function": {
-                        "name": tc.get("function", {}).get("name", ""),
-                        "arguments": tc.get("function", {}).get("arguments", ""),
-                    },
-                }
-                for tc in tool_calls
-            ]
-
-        return {
-            "content": full_content,
-            "tool_calls": formatted_tool_calls,
-            "reasoning": reasoning if reasoning else None,
-            "usage": {
-                "input_tokens": usage.prompt_tokens if usage else 0,
-                "output_tokens": usage.completion_tokens if usage else 0,
-            },
-            "request_body": kwargs,
-        }
-
-    return call_model
-
-
 def list_sessions_command():
     """列出所有历史会话。"""
     from src.session.session_db import get_sessions_list_for_display
@@ -161,7 +85,10 @@ def main_chat(debug: bool = False, resume: str | None = None, resume_title: str 
 
     from openai import OpenAI
     client = OpenAI(api_key=api_key, base_url=base_url)
-    model_caller = build_model_caller(client, model)
+
+    from src.provider.openai_client import OpenAIClient as ProviderOpenAIClient
+    provider_client = ProviderOpenAIClient(client, model)
+    model_caller = provider_client.build_caller()
 
     # 初始化工具
     from src.tools.registry import ToolRegistry

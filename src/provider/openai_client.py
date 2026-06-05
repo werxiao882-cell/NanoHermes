@@ -243,6 +243,78 @@ class OpenAIClient:
         except Exception as e:
             raise classify_error(e)
 
+    def build_caller(self):
+        """构建适配 ConversationLoop 接口的模型调用函数。
+
+        使用流式调用，返回包含 content, tool_calls, usage, reasoning, request_body 的字典。
+
+        Returns:
+            调用函数: (messages, tools) -> dict
+        """
+        def call_model(messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None) -> dict[str, Any]:
+            kwargs: dict[str, Any] = {
+                "model": self._model,
+                "messages": messages,
+                "stream": True,
+            }
+            if tools:
+                kwargs["tools"] = [
+                    {"type": "function", "function": t} for t in tools
+                ]
+
+            full_content = ""
+            reasoning = ""
+            tool_calls = []
+            usage = None
+
+            stream = self._client.chat.completions.create(**kwargs)
+            for chunk in stream:
+                delta = chunk.choices[0].delta if chunk.choices else None
+                if delta is None:
+                    continue
+
+                if delta.content:
+                    full_content += delta.content
+
+                if hasattr(delta, 'reasoning') and delta.reasoning:
+                    reasoning += delta.reasoning
+                elif hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                    reasoning += delta.reasoning_content
+
+                if delta.tool_calls:
+                    for tc in delta.tool_calls:
+                        tool_calls.append(tc.model_dump())
+
+                if hasattr(chunk, 'usage') and chunk.usage:
+                    usage = chunk.usage
+
+            formatted_tool_calls = None
+            if tool_calls:
+                formatted_tool_calls = [
+                    {
+                        "id": tc.get("id", ""),
+                        "type": tc.get("type", "function"),
+                        "function": {
+                            "name": tc.get("function", {}).get("name", ""),
+                            "arguments": tc.get("function", {}).get("arguments", ""),
+                        },
+                    }
+                    for tc in tool_calls
+                ]
+
+            return {
+                "content": full_content,
+                "tool_calls": formatted_tool_calls,
+                "reasoning": reasoning if reasoning else None,
+                "usage": {
+                    "input_tokens": usage.prompt_tokens if usage else 0,
+                    "output_tokens": usage.completion_tokens if usage else 0,
+                },
+                "request_body": kwargs,
+            }
+
+        return call_model
+
     def interruptible_completion(
         self,
         messages: list[dict[str, Any]],
