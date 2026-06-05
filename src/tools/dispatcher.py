@@ -6,19 +6,26 @@
 3. 参数解析（JSON 字符串 → dict）
 4. task_id 传播
 5. 错误包装（所有异常转为 JSON 错误字符串）
+6. 异步桥接（在同步上下文中执行异步 handler）
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import threading
 from typing import Any
 
 from src.tools.registry import ToolRegistry
 from src.tools.availability import check_tool_availability
-from src.tools.async_bridge import async_bridge
 
 logger = logging.getLogger(__name__)
+
+# 持久事件循环（CLI 路径复用）
+_persistent_loop: asyncio.AbstractEventLoop | None = None
+_persistent_loop_thread: threading.Thread | None = None
+_persistent_loop_lock = threading.Lock()
 
 
 def dispatch(
@@ -32,7 +39,7 @@ def dispatch(
     1. 按名称查找 ToolEntry
     2. 检查工具可用性（check_fn）
     3. 解析参数（如果是 JSON 字符串则解析为 dict）
-    4. 执行 handler（同步直接调用，异步通过 async_bridge）
+    4. 执行 handler（同步直接调用，异步通过内部桥接）
     5. 返回结果字符串
     6. 任何异常包装为 JSON 错误字符串
 
@@ -66,7 +73,7 @@ def dispatch(
     try:
         if entry.is_async:
             # 异步工具通过桥接执行
-            result = async_bridge(entry.handler, call_args, task_id)
+            result = _async_bridge(entry.handler, call_args, task_id)
         else:
             # 同步工具直接调用
             result = entry.handler(**call_args, task_id=task_id)
@@ -81,19 +88,89 @@ def dispatch(
         })
 
 
+def _async_bridge(
+    async_fn,
+    args: dict[str, Any],
+    task_id: str | None = None,
+) -> str:
+    """在同步上下文中执行异步函数。"""
+    if task_id is not None:
+        args = {**args, "task_id": task_id}
+
+    try:
+        loop = asyncio.get_running_loop()
+        return _run_in_new_thread(async_fn, args)
+    except RuntimeError:
+        return _run_in_persistent_loop(async_fn, args)
+
+
+def _run_in_persistent_loop(
+    async_fn,
+    args: dict[str, Any],
+) -> str:
+    """在持久事件循环中执行异步函数。"""
+    global _persistent_loop
+
+    with _persistent_loop_lock:
+        if _persistent_loop is None:
+            _persistent_loop = asyncio.new_event_loop()
+
+            def _run_loop():
+                asyncio.set_event_loop(_persistent_loop)
+                _persistent_loop.run_forever()
+
+            _persistent_loop_thread = threading.Thread(
+                target=_run_loop,
+                daemon=True,
+            )
+            _persistent_loop_thread.start()
+
+    future = asyncio.run_coroutine_threadsafe(async_fn(**args), _persistent_loop)
+    try:
+        result = future.result(timeout=300)
+        return str(result)
+    except Exception as e:
+        return json.dumps({
+            "error": f"异步执行失败: {type(e).__name__}: {e}"
+        })
+
+
+def _run_in_new_thread(
+    async_fn,
+    args: dict[str, Any],
+) -> str:
+    """在新线程中创建事件循环执行异步函数。"""
+    result: list[str | Exception] = []
+
+    def _target():
+        try:
+            coro = async_fn(**args)
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            outcome = loop.run_until_complete(coro)
+            result.append(str(outcome))
+        except Exception as e:
+            result.append(e)
+        finally:
+            loop.close()
+
+    thread = threading.Thread(target=_target, daemon=True)
+    thread.start()
+    thread.join(timeout=300)
+
+    if not result:
+        return json.dumps({"error": "异步执行超时"})
+
+    outcome = result[0]
+    if isinstance(outcome, Exception):
+        return json.dumps({
+            "error": f"异步执行失败: {type(outcome).__name__}: {outcome}"
+        })
+    return outcome
+
+
 def _parse_args(args: dict[str, Any] | str | None) -> dict[str, Any]:
-    """解析工具参数。
-
-    LLM 返回的 arguments 字段是 JSON 字符串，需要解析为 dict。
-    如果已经是 dict 则直接返回。
-    如果是 None 则返回空 dict。
-
-    Args:
-        args: 参数字典或 JSON 字符串。
-
-    Returns:
-        解析后的参数字典。
-    """
+    """解析工具参数。"""
     if args is None:
         return {}
     if isinstance(args, dict):
