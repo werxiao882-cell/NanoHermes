@@ -29,14 +29,21 @@ class TestSessionSearch:
     def test_session_search_via_dispatcher(self):
         """Test session_search tool via dispatcher."""
         from src.tools.registry import ToolRegistry
-        from src.tools import session_search_tools
+        from src.tools import session_search_tool
         import importlib
         from src.tools.dispatcher import dispatch
 
         ToolRegistry.clear()
-        importlib.reload(session_search_tools)
+        importlib.reload(session_search_tool)
 
         result = dispatch("session_search", {"query": "test"})
         data = json.loads(result)
-        assert data["status"] in ("search_requested", "success", "error")
-
+        # 当 check_fn 返回 False 时，dispatcher 返回 {"error": "..."} 格式
+        # 当 check_fn 通过时，返回 {"status": "..."} 格式
+        if "status" in data:
+            assert data["status"] in ("search_requested", "success", "error")
+        elif "error" in data:
+            # 工具不可用时返回 error 字段
+            assert "session_search" in data["error"] or "不可用" in data["error"]
+        else:
+            pytest.fail(f"Unexpected response format: {data}")

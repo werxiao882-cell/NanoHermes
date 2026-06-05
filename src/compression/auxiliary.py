@@ -23,7 +23,7 @@ from typing import Any, Dict, Optional
 
 from src.config import AuxiliaryConfig
 from src.auxiliary.client import AuxiliaryClient as BaseAuxiliaryClient
-from src.auxiliary.client import AuxiliaryConfig as BaseAuxiliaryConfig
+from src.config.models import AuxiliaryConfig as BaseAuxiliaryConfig
 
 logger = logging.getLogger(__name__)
 

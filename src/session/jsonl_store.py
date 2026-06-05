@@ -133,7 +133,7 @@ class JsonlSessionStore:
             session_id: 会话 ID。
 
         Returns:
-            消息记录列表，按时间顺序排列。
+            消息记录列表，按时间顺序排列（内部格式，含 type 字段）。
         """
         file_path = self._get_file_path(session_id)
 
