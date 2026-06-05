@@ -42,6 +42,7 @@ def process(
     process_id: str = "",
     cwd: str = "",
     task_id: str = None,
+    **kwargs,
 ) -> str:
     """管理后台进程。
     
@@ -62,41 +63,48 @@ def process(
     try:
         if action == "list":
             return _list_processes()
-        elif action == "start":
+        elif action == "start" or action == "poll":
             if not command:
                 return json.dumps({
                     "status": "error",
                     "message": "Command is required for 'start' action."
                 }, ensure_ascii=False)
             return _start_process(command, cwd)
-        elif action == "stop":
-            if not process_id:
-                return json.dumps({
-                    "status": "error",
-                    "message": "Process ID is required for 'stop' action."
-                }, ensure_ascii=False)
-            return _stop_process(process_id)
-        elif action == "kill":
+        elif action == "stop" or action == "kill":
             if not process_id:
                 return json.dumps({
                     "status": "error",
                     "message": "Process ID is required for 'kill' action."
                 }, ensure_ascii=False)
             return _kill_process(process_id)
-        elif action == "output":
+        elif action == "output" or action == "log":
             if not process_id:
                 return json.dumps({
                     "status": "error",
-                    "message": "Process ID is required for 'output' action."
+                    "message": "Process ID is required for 'log' action."
                 }, ensure_ascii=False)
             return _get_process_output(process_id)
-        elif action == "status":
+        elif action == "status" or action == "wait":
             if not process_id:
                 return json.dumps({
                     "status": "error",
                     "message": "Process ID is required for 'status' action."
                 }, ensure_ascii=False)
             return _get_process_status(process_id)
+        elif action == "write" or action == "submit":
+            if not process_id or not command:
+                return json.dumps({
+                    "status": "error",
+                    "message": "Process ID and data are required for 'write' action."
+                }, ensure_ascii=False)
+            return _write_to_process(process_id, command, action == "submit")
+        elif action == "close":
+            if not process_id:
+                return json.dumps({
+                    "status": "error",
+                    "message": "Process ID is required for 'close' action."
+                }, ensure_ascii=False)
+            return _close_process(process_id)
         else:
             return json.dumps({
                 "status": "error",
@@ -336,35 +344,40 @@ register_tool(
     schema={
         "name": "process",
         "description": (
-            "管理后台进程。支持启动、停止、终止和监控后台进程。\n\n"
-            "操作：\n"
-            "- list: 列出所有活跃进程\n"
-            "- start: 启动后台进程（需要 command）\n"
-            "- stop: 优雅停止进程\n"
-            "- kill: 强制终止进程\n"
-            "- output: 获取进程输出\n"
-            "- status: 查看进程状态\n\n"
-            "使用场景：长时间运行的任务、监控任务、后台服务。"
+            "Manage background processes started with terminal(background=true). "
+            "Actions: 'list' (show all), 'poll' (check status + new output), 'log' (full output with pagination), "
+            "'wait' (block until done or timeout), 'kill' (terminate), 'write' (send raw stdin data without newline), "
+            "'submit' (send data + Enter, for answering prompts), 'close' (close stdin/send EOF)."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["list", "start", "stop", "kill", "output", "status"],
-                    "description": "要执行的操作。",
+                    "enum": ["list", "poll", "log", "wait", "kill", "write", "submit", "close"],
+                    "description": "Action to perform on background processes"
                 },
-                "command": {
+                "session_id": {
                     "type": "string",
-                    "description": "要执行的命令（start 操作需要）。",
+                    "description": "Process session ID (from terminal background output). Required for all actions except 'list'."
                 },
-                "process_id": {
+                "data": {
                     "type": "string",
-                    "description": "进程 ID（stop/kill/output/status 操作需要）。",
+                    "description": "Text to send to process stdin (for 'write' and 'submit' actions)"
                 },
-                "cwd": {
-                    "type": "string",
-                    "description": "工作目录（start 操作可选）。",
+                "timeout": {
+                    "type": "integer",
+                    "description": "Max seconds to block for 'wait' action. Returns partial output on timeout.",
+                    "minimum": 1
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Line offset for 'log' action (default: last 200 lines)"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max lines to return for 'log' action",
+                    "minimum": 1
                 },
             },
             "required": ["action"],

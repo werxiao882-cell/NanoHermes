@@ -135,6 +135,7 @@ def cronjob(
     prompt: str = "",
     name: str = "",
     task_id: str = None,
+    **kwargs,
 ) -> str:
     """管理定时任务。
     
@@ -156,14 +157,14 @@ def cronjob(
     try:
         if action == "list":
             return _list_jobs()
-        elif action == "add":
+        elif action == "add" or action == "create":
             if not schedule or not prompt:
                 return json.dumps({
                     "status": "error",
                     "message": "Schedule and prompt are required for 'add' action."
                 }, ensure_ascii=False)
             return _add_job(schedule, prompt, name)
-        elif action == "edit":
+        elif action == "edit" or action == "update":
             if not job_id:
                 return json.dumps({
                     "status": "error",
@@ -404,42 +405,41 @@ register_tool(
     schema={
         "name": "cronjob",
         "description": (
-            "管理定时任务。支持多种调度格式：\n"
-            "- 持续时间：'30m', '2h', '1d'\n"
-            "- 周期性：'every 2h', 'every monday 9am'\n"
-            "- Cron 表达式：'0 9 * * *'\n"
-            "- ISO 时间戳（一次性）：'2026-06-01T09:00:00Z'\n\n"
-            "操作：\n"
-            "- list: 列出所有任务\n"
-            "- add: 添加新任务\n"
-            "- edit: 编辑任务\n"
-            "- pause/resume: 暂停/恢复任务\n"
-            "- run: 立即运行任务\n"
-            "- remove: 删除任务"
+            "Manage scheduled cron jobs with a single compressed tool.\n\n"
+            "Use action='create' to schedule a new job from a prompt or one or more skills.\n"
+            "Use action='list' to inspect jobs.\n"
+            "Use action='update', 'pause', 'resume', 'remove', or 'run' to manage an existing job.\n\n"
+            "To stop a job the user no longer wants: first action='list' to find the job_id, then action='remove' with that job_id. Never guess job IDs — always list first.\n\n"
+            "Jobs run in a fresh session with no current-chat context, so prompts must be self-contained.\n"
+            "If skills are provided on create, the future cron run loads those skills in order, then follows the prompt as the task instruction.\n"
+            "On update, passing skills=[] clears attached skills.\n\n"
+            "NOTE: The agent's final response is auto-delivered to the target. Put the primary\n"
+            "user-facing content in the final response. Cron jobs run autonomously with no user\n"
+            "present — they cannot ask questions or request clarification.\n\n"
+            "Important safety rule: cron-run sessions should not recursively schedule more cron jobs."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["list", "add", "edit", "pause", "resume", "run", "remove"],
-                    "description": "要执行的操作。",
+                    "description": "One of: create, list, update, pause, resume, remove, run"
                 },
                 "job_id": {
                     "type": "string",
-                    "description": "任务 ID（edit/pause/resume/run/remove 操作需要）。",
-                },
-                "schedule": {
-                    "type": "string",
-                    "description": "调度表达式（add/edit 操作需要）。",
+                    "description": "Required for update/pause/resume/remove/run"
                 },
                 "prompt": {
                     "type": "string",
-                    "description": "任务提示/指令（add/edit 操作需要）。",
+                    "description": "For create: the full self-contained prompt. If skills are also provided, this becomes the task instruction paired with those skills."
+                },
+                "schedule": {
+                    "type": "string",
+                    "description": "For create/update: '30m', 'every 2h', '0 9 * * *', or ISO timestamp"
                 },
                 "name": {
                     "type": "string",
-                    "description": "任务名称（可选）。",
+                    "description": "Optional human-friendly name"
                 },
             },
             "required": ["action"],

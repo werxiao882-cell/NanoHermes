@@ -19,7 +19,7 @@ from src.tools.registry import register_tool
 # ============================================================================
 # read_file - 读取文件
 # ============================================================================
-def read_file(path: str, offset: int = 1, limit: int = 500, task_id: str = None) -> str:
+def read_file(path: str, offset: int = 1, limit: int = 500, task_id: str = None, **kwargs) -> str:
     """读取文件内容，支持分页和行号。
 
     Args:
@@ -90,7 +90,7 @@ def read_file(path: str, offset: int = 1, limit: int = 500, task_id: str = None)
 # ============================================================================
 # write_file - 写入文件
 # ============================================================================
-def write_file(path: str, content: str, task_id: str = None) -> str:
+def write_file(path: str, content: str, task_id: str = None, **kwargs) -> str:
     """写入文件内容。如果文件不存在则创建，存在则覆盖。
 
     Args:
@@ -135,49 +135,77 @@ def write_file(path: str, content: str, task_id: str = None) -> str:
 # search_files - 搜索文件
 # ============================================================================
 def search_files(
-    path: str = ".",
     pattern: str = "*",
+    target: str = "content",
+    path: str = ".",
+    file_glob: str = None,
+    limit: int = 50,
+    offset: int = 0,
+    output_mode: str = "content",
+    context: int = 0,
     recursive: bool = False,
     max_results: int = 50,
     task_id: str = None,
+    **kwargs,
 ) -> str:
-    """搜索文件。
-
-    Args:
-        path: 搜索起始目录。
-        pattern: 文件名模式（支持通配符，如 "*.py"）。
-        recursive: 是否递归搜索子目录。
-        max_results: 最大返回结果数。
-        task_id: 任务 ID。
-
-    Returns:
-        JSON 字符串，包含匹配的文件列表。
-    """
+    """搜索文件。"""
     try:
         search_path = Path(path)
         if not search_path.is_dir():
             return json.dumps({"error": f"目录不存在: {path}"}, ensure_ascii=False)
 
+        # File search mode
+        if target == "files":
+            results = []
+            if recursive:
+                for f in search_path.rglob(pattern):
+                    if f.is_file():
+                        results.append(str(f))
+                        if len(results) >= limit:
+                            break
+            else:
+                for f in search_path.glob(pattern):
+                    if f.is_file():
+                        results.append(str(f))
+                        if len(results) >= limit:
+                            break
+
+            return json.dumps({
+                "path": str(search_path),
+                "pattern": pattern,
+                "total_found": len(results),
+                "files": results,
+            }, ensure_ascii=False)
+        
+        # Content search mode (simple implementation)
         results = []
-        if recursive:
-            for f in search_path.rglob(pattern):
-                if f.is_file():
-                    results.append(str(f))
-                    if len(results) >= max_results:
-                        break
-        else:
-            for f in search_path.glob(pattern):
-                if f.is_file():
-                    results.append(str(f))
-                    if len(results) >= max_results:
-                        break
+        for f in search_path.rglob(file_glob or "*"):
+            if f.is_file():
+                try:
+                    content = f.read_text(encoding="utf-8", errors="ignore")
+                    import re
+                    matches = list(re.finditer(pattern, content, re.IGNORECASE))
+                    for m in matches:
+                        start = max(0, m.start() - 50)
+                        end = min(len(content), m.end() + 50)
+                        line_num = content[:m.start()].count("\n") + 1
+                        results.append({
+                            "file": str(f),
+                            "line": line_num,
+                            "match": content[start:end],
+                        })
+                        if len(results) >= limit:
+                            break
+                except Exception:
+                    pass
+            if len(results) >= limit:
+                break
 
         return json.dumps({
             "path": str(search_path),
             "pattern": pattern,
-            "recursive": recursive,
             "total_found": len(results),
-            "files": results,
+            "matches": results,
         }, ensure_ascii=False)
 
     except Exception as e:
@@ -195,21 +223,31 @@ def _register_file_tools() -> None:
         toolset="file",
         schema={
             "name": "read_file",
-            "description": "读取文件内容，支持分页和行号。适合查看代码、配置文件等文本文件。",
+            "description": (
+                "Read a text file with line numbers and pagination. Use this instead of cat/head/tail in terminal. "
+                "Output format: 'LINE_NUM|CONTENT'. Suggests similar filenames if not found. "
+                "Use offset and limit for large files. Reads exceeding ~100K characters are rejected; "
+                "use offset and limit to read specific sections of large files. "
+                "NOTE: Cannot read images or binary files — use vision_analyze for images."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "文件路径（绝对或相对路径）。",
+                        "description": "Path to the file to read (absolute, relative, or ~/path)",
                     },
                     "offset": {
                         "type": "integer",
-                        "description": "起始行号（从 1 开始），默认 1。",
+                        "description": "Line number to start reading from (1-indexed, default: 1)",
+                        "default": 1,
+                        "minimum": 1,
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "最大读取行数，默认 500。",
+                        "description": "Maximum number of lines to read (default: 500, max: 2000)",
+                        "default": 500,
+                        "maximum": 2000,
                     },
                 },
                 "required": ["path"],
@@ -225,17 +263,24 @@ def _register_file_tools() -> None:
         toolset="file",
         schema={
             "name": "write_file",
-            "description": "写入文件内容。如果文件不存在则创建，存在则覆盖。",
+            "description": (
+                "Write content to a file, completely replacing existing content. "
+                "Use this instead of echo/cat heredoc in terminal. "
+                "Creates parent directories automatically. "
+                "OVERWRITES the entire file — use 'patch' for targeted edits. "
+                "Auto-runs syntax checks on .py/.json/.yaml/.toml and other linted languages; "
+                "only NEW errors introduced by this write are surfaced (pre-existing errors are filtered out)."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "文件路径。",
+                        "description": "Path to the file to write (will be created if it doesn't exist, overwritten if it does)",
                     },
                     "content": {
                         "type": "string",
-                        "description": "要写入的内容。",
+                        "description": "Complete content to write to the file",
                     },
                 },
                 "required": ["path", "content"],
@@ -251,25 +296,56 @@ def _register_file_tools() -> None:
         toolset="file",
         schema={
             "name": "search_files",
-            "description": "搜索匹配模式的文件。支持通配符和递归搜索。",
+            "description": (
+                "Search file contents or find files by name. Use this instead of grep/rg/find/ls in terminal. "
+                "Ripgrep-backed, faster than shell equivalents.\n\n"
+                "Content search (target='content'): Regex search inside files. "
+                "Output modes: full matches with line numbers, file paths only, or match counts.\n\n"
+                "File search (target='files'): Find files by glob pattern (e.g., '*.py', '*config*'). "
+                "Also use this instead of ls — results sorted by modification time."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "搜索起始目录，默认当前目录。",
-                    },
                     "pattern": {
                         "type": "string",
-                        "description": "文件名模式（支持通配符，如 '*.py'）。",
+                        "description": "Regex pattern for content search, or glob pattern (e.g., '*.py') for file search"
                     },
-                    "recursive": {
-                        "type": "boolean",
-                        "description": "是否递归搜索子目录，默认 false。",
+                    "target": {
+                        "type": "string",
+                        "enum": ["content", "files"],
+                        "description": "'content' searches inside file contents, 'files' searches for files by name",
+                        "default": "content"
                     },
-                    "max_results": {
+                    "path": {
+                        "type": "string",
+                        "description": "Directory or file to search in (default: current working directory)",
+                        "default": ".",
+                    },
+                    "file_glob": {
+                        "type": "string",
+                        "description": "Filter files by pattern in grep mode (e.g., '*.py' to only search Python files)"
+                    },
+                    "limit": {
                         "type": "integer",
-                        "description": "最大返回结果数，默认 50。",
+                        "description": "Maximum number of results to return (default: 50)",
+                        "default": 50,
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "Skip first N results for pagination (default: 0)",
+                        "default": 0,
+                    },
+                    "output_mode": {
+                        "type": "string",
+                        "enum": ["content", "files_only", "count"],
+                        "description": "Output format for grep mode: 'content' shows matching lines with line numbers, 'files_only' lists file paths, 'count' shows match counts per file",
+                        "default": "content"
+                    },
+                    "context": {
+                        "type": "integer",
+                        "description": "Number of context lines before and after each match (grep mode only)",
+                        "default": 0,
                     },
                 },
                 "required": ["pattern"],
@@ -285,15 +361,47 @@ def _register_file_tools() -> None:
         toolset="file",
         schema={
             "name": "patch",
-            "description": "文件查找替换编辑。",
+            "description": (
+                "Targeted find-and-replace edits in files. Use this instead of sed/awk in terminal. "
+                "Uses fuzzy matching (9 strategies) so minor whitespace/indentation differences won't break it. "
+                "Returns a unified diff. Auto-runs syntax checks after editing.\n\n"
+                "REPLACE MODE (mode='replace', default): find a unique string and replace it. "
+                "REQUIRED PARAMETERS: mode, path, old_string, new_string.\n"
+                "PATCH MODE (mode='patch'): apply V4A multi-file patches for bulk changes. "
+                "REQUIRED PARAMETERS: mode, patch."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "文件路径。"},
-                    "old_str": {"type": "string", "description": "要查找的字符串。"},
-                    "new_str": {"type": "string", "description": "替换后的字符串。"},
+                    "mode": {
+                        "type": "string",
+                        "enum": ["replace", "patch"],
+                        "description": "Edit mode. 'replace' (default): requires path + old_string + new_string. 'patch': requires patch content only.",
+                        "default": "replace"
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "REQUIRED when mode='replace'. File path to edit."
+                    },
+                    "old_string": {
+                        "type": "string",
+                        "description": "REQUIRED when mode='replace'. Exact text to find and replace. Must be unique in the file unless replace_all=true. Include surrounding context lines to ensure uniqueness."
+                    },
+                    "new_string": {
+                        "type": "string",
+                        "description": "REQUIRED when mode='replace'. Replacement text. Pass empty string '' to delete the matched text."
+                    },
+                    "replace_all": {
+                        "type": "boolean",
+                        "description": "Replace all occurrences instead of requiring a unique match (default: false)",
+                        "default": False
+                    },
+                    "patch": {
+                        "type": "string",
+                        "description": "REQUIRED when mode='patch'. V4A format patch content."
+                    },
                 },
-                "required": ["path", "old_str", "new_str"],
+                "required": ["mode"],
             },
         },
         handler=patch,
@@ -304,18 +412,40 @@ def _register_file_tools() -> None:
 # ============================================================================
 # patch - 查找替换编辑
 # ============================================================================
-def patch(path: str = "", old_str: str = "", new_str: str = "", task_id: str = None) -> str:
+def patch(
+    mode: str = "replace",
+    path: str = "",
+    old_string: str = "",
+    new_string: str = "",
+    replace_all: bool = False,
+    patch: str = "",
+    task_id: str = None,
+    **kwargs,
+) -> str:
     """文件查找替换编辑。"""
     try:
+        # For backward compatibility
+        if mode == "patch" and patch:
+            return json.dumps({
+                "status": "error",
+                "message": "V4A patch mode not yet implemented. Use mode='replace' instead."
+            }, ensure_ascii=False)
+        
         file_path = Path(path)
         if not file_path.exists():
             return json.dumps({"error": f"File not found: {path}"}, ensure_ascii=False)
 
         content = file_path.read_text(encoding="utf-8")
-        if old_str not in content:
-            return json.dumps({"error": f"String not found: {old_str[:50]}..."}, ensure_ascii=False)
+        if old_string not in content:
+            return json.dumps({"error": f"String not found: {old_string[:50]}..."}, ensure_ascii=False)
 
-        new_content = content.replace(old_str, new_str, 1)
+        count = content.count(old_string)
+        if count > 1 and not replace_all:
+            return json.dumps({
+                "error": f"String found {count} times. Use replace_all=true or provide more context.",
+            }, ensure_ascii=False)
+
+        new_content = content.replace(old_string, new_string, 1 if not replace_all else -1)
         file_path.write_text(new_content, encoding="utf-8")
 
         return json.dumps({

@@ -238,27 +238,66 @@ def _register_terminal_tool() -> None:
         toolset="terminal",
         schema={
             "name": "terminal",
-            "description": "在本地终端中执行 shell 命令。支持管道、重定向等 shell 特性。",
+            "description": (
+                "Execute shell commands on a Linux environment. Filesystem usually persists between calls.\n\n"
+                "Do NOT use cat/head/tail to read files — use read_file instead.\n"
+                "Do NOT use grep/rg/find to search — use search_files instead.\n"
+                "Do NOT use ls to list directories — use search_files(target='files') instead.\n"
+                "Do NOT use sed/awk to edit files — use patch instead.\n"
+                "Do NOT use echo/cat heredoc to create files — use write_file instead.\n"
+                "Reserve terminal for: builds, installs, git, processes, scripts, network, package managers, and anything that needs a shell.\n\n"
+                "Foreground (default): Commands return INSTANTLY when done, even if the timeout is high. "
+                "Set timeout=300 for long builds/scripts — you'll still get the result in seconds if it's fast. "
+                "Prefer foreground for short commands.\n"
+                "Background: Set background=true to get a session_id. "
+                "Almost always pair with notify_on_complete=true — bg without notify runs SILENTLY and you have no way to learn it finished "
+                "short of calling process(action='poll') yourself. "
+                "For servers/watchers, do NOT use shell-level background wrappers (nohup/disown/setsid/trailing '&') in foreground mode. "
+                "Use background=true so Hermes can track lifecycle and output.\n"
+                "After starting a server, verify readiness with a health check or log signal, then run tests in a separate terminal() call. "
+                "Avoid blind sleep loops.\n"
+                "Use process(action=\"poll\") for progress checks, process(action=\"wait\") to block until done.\n"
+                "Working directory: Use 'workdir' for per-command cwd.\n"
+                "PTY mode: Set pty=true for interactive CLI tools (Codex, Claude Code, Python REPL).\n\n"
+                "Do NOT use vim/nano/interactive tools without pty=true — they hang without a pseudo-terminal. "
+                "Pipe git output to cat if it might page."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "command": {
                         "type": "string",
-                        "description": "要执行的 shell 命令。",
+                        "description": "The command to execute on the VM"
                     },
-                    "cwd": {
-                        "type": "string",
-                        "description": "工作目录（可选）。",
+                    "background": {
+                        "type": "boolean",
+                        "description": "Run the command in the background. Almost always pair with notify_on_complete=true.",
+                        "default": False
                     },
                     "timeout": {
-                        "type": "number",
-                        "description": "超时时间（秒），默认 300。",
+                        "type": "integer",
+                        "description": "Max seconds to wait (default: 180, foreground max: 600). Returns INSTANTLY when command finishes.",
+                        "minimum": 1
+                    },
+                    "workdir": {
+                        "type": "string",
+                        "description": "Working directory for this command (absolute path). Defaults to the session working directory."
+                    },
+                    "pty": {
+                        "type": "boolean",
+                        "description": "Run in pseudo-terminal (PTY) mode for interactive CLI tools like Codex, Claude Code, or Python REPL. Default: false.",
+                        "default": False
+                    },
+                    "notify_on_complete": {
+                        "type": "boolean",
+                        "description": "When true (and background=true), you'll be automatically notified exactly once when the process finishes.",
+                        "default": False
                     },
                 },
                 "required": ["command"],
             },
         },
-        handler=lambda command="", cwd=None, timeout=300.0, task_id=None: execute_command(
+        handler=lambda command="", cwd=None, timeout=300.0, task_id=None, **kwargs: execute_command(
             command=command,
             cwd=cwd,
             timeout=timeout,

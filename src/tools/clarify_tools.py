@@ -11,13 +11,12 @@ from src.tools.registry import register_tool
 _pending_clarification: dict[str, Any] | None = None
 
 
-def clarify(question: str = "", options: list = None, allow_custom: bool = True, task_id: str = None) -> str:
+def clarify(question: str = "", choices: list = None, task_id: str = None, **kwargs) -> str:
     """向用户提问，支持预设选项和自定义输入。
 
     Args:
         question: 要问的问题。
-        options: 预设选项列表（最多 4 个）。
-        allow_custom: 是否允许用户自定义输入。
+        choices: 预设选项列表（最多 4 个）。
         task_id: 任务 ID。
 
     Returns:
@@ -25,21 +24,21 @@ def clarify(question: str = "", options: list = None, allow_custom: bool = True,
     """
     global _pending_clarification
 
-    if options:
-        options = options[:4]
+    if choices:
+        choices = choices[:4]
 
     _pending_clarification = {
         "question": question,
-        "options": options or [],
-        "allow_custom": allow_custom,
+        "options": choices or [],
+        "allow_custom": True,
         "status": "pending",
     }
 
     return json.dumps({
         "status": "clarification_requested",
         "question": question,
-        "options": options or [],
-        "allow_custom": allow_custom,
+        "options": choices or [],
+        "allow_custom": True,
         "message": "Waiting for user response..."
     }, ensure_ascii=False)
 
@@ -78,20 +77,32 @@ register_tool(
     toolset="clarify",
     schema={
         "name": "clarify",
-        "description": "向用户提问，支持预设选项和自定义输入。",
+        "description": (
+            "Ask the user a question when you need clarification, feedback, or a decision before proceeding. "
+            "Supports two modes:\n\n"
+            "1. **Multiple choice** — provide up to 4 choices. The user picks one or types their own answer via a 5th 'Other' option.\n"
+            "2. **Open-ended** — omit choices entirely. The user types a free-form response.\n\n"
+            "Use this tool when:\n"
+            "- The task is ambiguous and you need the user to choose an approach\n"
+            "- You want post-task feedback ('How did that work out?')\n"
+            "- You want to offer to save a skill or update memory\n"
+            "- A decision has meaningful trade-offs the user should weigh in on\n\n"
+            "Do NOT use this tool for simple yes/no confirmation of dangerous commands (the terminal tool handles that). "
+            "Prefer making a reasonable default choice yourself when the decision is low-stakes."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
-                "question": {"type": "string", "description": "要问的问题。"},
-                "options": {
+                "question": {
+                    "type": "string",
+                    "description": "The question to present to the user."
+                },
+                "choices": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "预设选项列表（最多 4 个）。",
-                },
-                "allow_custom": {
-                    "type": "boolean",
-                    "description": "是否允许用户自定义输入（默认 true）。",
-                },
+                    "maxItems": 4,
+                    "description": "Up to 4 answer choices. Omit this parameter entirely to ask an open-ended question. When provided, the UI automatically appends an 'Other (type your answer)' option."
+                }
             },
             "required": ["question"],
         },
