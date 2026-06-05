@@ -267,26 +267,29 @@ class OpenAIClient:
             tool_calls = []
             usage = None
 
-            stream = self._client.chat.completions.create(**kwargs)
-            for chunk in stream:
-                delta = chunk.choices[0].delta if chunk.choices else None
-                if delta is None:
-                    continue
+            try:
+                stream = self._client.chat.completions.create(**kwargs)
+                for chunk in stream:
+                    delta = chunk.choices[0].delta if chunk.choices else None
+                    if delta is None:
+                        continue
 
-                if delta.content:
-                    full_content += delta.content
+                    if delta.content:
+                        full_content += delta.content
 
-                if hasattr(delta, 'reasoning') and delta.reasoning:
-                    reasoning += delta.reasoning
-                elif hasattr(delta, 'reasoning_content') and delta.reasoning_content:
-                    reasoning += delta.reasoning_content
+                    if hasattr(delta, 'reasoning') and delta.reasoning:
+                        reasoning += delta.reasoning
+                    elif hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                        reasoning += delta.reasoning_content
 
-                if delta.tool_calls:
-                    for tc in delta.tool_calls:
-                        tool_calls.append(tc.model_dump())
+                    if delta.tool_calls:
+                        for tc in delta.tool_calls:
+                            tool_calls.append(tc.model_dump())
 
-                if hasattr(chunk, 'usage') and chunk.usage:
-                    usage = chunk.usage
+                    if hasattr(chunk, 'usage') and chunk.usage:
+                        usage = chunk.usage
+            except Exception as e:
+                raise classify_error(e)
 
             formatted_tool_calls = None
             if tool_calls:
