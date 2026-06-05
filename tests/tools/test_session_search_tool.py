@@ -3,7 +3,7 @@
 import pytest
 import json
 
-from src.tools.session_search_tools import session_search
+from src.tools.session_search_tool import session_search
 
 
 class TestSessionSearch:
@@ -39,3 +39,4 @@ class TestSessionSearch:
         result = dispatch("session_search", {"query": "test"})
         data = json.loads(result)
         assert data["status"] in ("search_requested", "success", "error")
+

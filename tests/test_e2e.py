@@ -15,7 +15,7 @@ def _setup_tools():
 
     # Import modules to trigger auto-registration
     from src.tools.terminal import _register_terminal_tool
-    from src.tools.file_tools import _register_file_tools
+    from src.tools.file_tool import _register_file_tools
 
     _register_terminal_tool()
     _register_file_tools()
@@ -171,3 +171,4 @@ def test_main_entry_build_model_caller():
     print(f"    Content: {result['content']}")
     print(f"    Usage: {result['usage']}")
     print("    OpenAIClient.build_caller works correctly!")
+

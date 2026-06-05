@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from src.tools.cronjob_tools import cronjob
+from src.tools.cronjob_tool import cronjob
 
 
 class TestCronjobTool:
@@ -57,3 +57,4 @@ class TestCronjobTool:
         result = dispatch("cronjob", {"action": "list"})
         data = json.loads(result)
         assert data["status"] in ("success", "error")
+

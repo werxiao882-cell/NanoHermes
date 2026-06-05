@@ -9,7 +9,7 @@ import pytest
 def _setup_todo_tool():
     """Setup and register todo tool before each test."""
     from src.tools.registry import ToolRegistry
-    from src.tools.todo_tools import reset_todo_store
+    from src.tools.todo_tool import reset_todo_store
 
     ToolRegistry.clear()
     reset_todo_store()
@@ -185,7 +185,7 @@ def test_todo_tool_deduplication():
 
 def test_todo_tool_format_for_display():
     """Test formatting todos for display."""
-    from src.tools.todo_tools import get_todo_store
+    from src.tools.todo_tool import get_todo_store
 
     store = get_todo_store()
     store.write([
@@ -332,3 +332,4 @@ def test_todo_tool_integration_with_conversation_loop():
     print(f"    Conversation completed in {result['iterations']} iterations")
     print(f"    Todo list has {store_data['summary']['total']} tasks")
     print("    PASSED")
+

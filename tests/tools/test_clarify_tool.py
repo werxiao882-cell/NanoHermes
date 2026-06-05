@@ -4,7 +4,7 @@ import pytest
 import json
 from unittest.mock import patch
 
-from src.tools.clarify_tools import (
+from src.tools.clarify_tool import (
     clarify,
     get_pending_clarification,
     respond_to_clarification,
@@ -116,3 +116,4 @@ class TestClarifyIntegration:
         data = json.loads(result)
         assert data["status"] == "clarification_requested"
         assert data["question"] == "What do you mean?"
+

@@ -127,16 +127,16 @@ class ToolRegistry:
         # 所有工具模块列表
         tool_modules = [
             "src.tools.terminal",
-            "src.tools.file_tools",
-            "src.tools.clarify_tools",
-            "src.tools.code_execution_tools",
-            "src.tools.cronjob_tools",
-            "src.tools.delegation_tools",
-            "src.tools.memory_tools",
-            "src.tools.session_search_tools",
-            "src.tools.skills_tools",
-            "src.tools.process_tools",
-            "src.tools.todo_tools",
+            "src.tools.file_tool",
+            "src.tools.clarify_tool",
+            "src.tools.code_execution_tool",
+            "src.tools.cronjob_tool",
+            "src.tools.delegation_tool",
+            "src.tools.memory_tool",
+            "src.tools.session_search_tool",
+            "src.tools.skills_tool",
+            "src.tools.process_tool",
+            "src.tools.todo_tool",
         ]
 
         for module_name in tool_modules:
