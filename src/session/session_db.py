@@ -920,3 +920,67 @@ def sanitize_title(title: str) -> str:
         raise ValueError(f"Title too long ({len(cleaned)} chars, max {MAX_TITLE_LENGTH})")
 
     return cleaned
+
+
+def get_sessions_list_for_display() -> list[dict[str, Any]]:
+    """获取会话列表用于显示。
+
+    结合 JSONL store 和 SessionDB 的数据，返回按修改时间排序的会话列表。
+
+    Returns:
+        会话列表，每个会话包含 session_id, title, time_str, msg_count。
+    """
+    from datetime import datetime
+
+    from src.session.jsonl_store import JsonlSessionStore
+
+    jsonl_store = JsonlSessionStore()
+    session_ids = jsonl_store.list_sessions()
+
+    if not session_ids:
+        return []
+
+    # 按修改时间排序
+    session_files = []
+    for sid in session_ids:
+        file_path = jsonl_store._get_file_path(sid)
+        mtime = file_path.stat().st_mtime
+        msg_count = jsonl_store.get_message_count(sid)
+        session_files.append((sid, mtime, msg_count))
+
+    session_files.sort(key=lambda x: x[1], reverse=True)
+
+    # 尝试从 SQLite 获取标题
+    db_path = Path.home() / ".nanohermes" / "sessions.db"
+    db = None
+    if db_path.exists():
+        try:
+            db = SessionDB(db_path)
+        except Exception:
+            db = None
+
+    result = []
+    for sid, mtime, msg_count in session_files:
+        time_str = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
+        title = None
+
+        if db:
+            try:
+                session_info = db.get_session(sid)
+                if session_info:
+                    title = session_info.get("title")
+            except Exception:
+                pass
+
+        display_title = title or f"会话 {sid[:8]}"
+        result.append({
+            "session_id": sid,
+            "title": display_title,
+            "time_str": time_str,
+            "msg_count": msg_count,
+        })
+
+    if db:
+        db.close()
+
+    return result

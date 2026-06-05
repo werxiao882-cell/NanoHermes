@@ -133,3 +133,39 @@ def test_e2e_conversation_with_tools():
     print("\n" + "=" * 60)
     print("All end-to-end tests passed!")
     print("=" * 60)
+
+
+def test_main_entry_build_model_caller():
+    """Test main.py build_model_caller function and entry point."""
+    from unittest.mock import MagicMock
+    from src.main import build_model_caller
+
+    # Create mock client
+    mock_client = MagicMock()
+    mock_chunk = MagicMock()
+    mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta.content = "Hello"
+    mock_chunk.choices[0].delta.reasoning = None
+    mock_chunk.choices[0].delta.tool_calls = None
+    mock_chunk.usage = MagicMock()
+    mock_chunk.usage.prompt_tokens = 10
+    mock_chunk.usage.completion_tokens = 5
+
+    # Mock stream response
+    mock_stream = [mock_chunk]
+    mock_client.chat.completions.create.return_value = iter(mock_stream)
+
+    # Test build_model_caller
+    model_caller = build_model_caller(mock_client, "test-model")
+    result = model_caller([{"role": "user", "content": "Hi"}], None)
+
+    assert result["content"] == "Hello"
+    assert result["usage"]["input_tokens"] == 10
+    assert result["usage"]["output_tokens"] == 5
+    assert "stream" in result["request_body"]
+    assert result["request_body"]["stream"] is True
+
+    print("\n[5] Testing build_model_caller...")
+    print(f"    Content: {result['content']}")
+    print(f"    Usage: {result['usage']}")
+    print("    build_model_caller works correctly!")
