@@ -101,6 +101,7 @@ class TUIApp:
         self.conversation_lines: list[Text] = []
         self.messages: list[dict[str, Any]] = []
         self._last_reasoning: str = ""
+        self._current_loop = None
         self.status_bar = StatusBar(model=model, context_window=1_000_000)
         self.typewriter = TypewriterEffect(speed_ms=self.config.get("typing_speed", 10))
         self.streaming_md = StreamingMarkdown()
@@ -121,6 +122,9 @@ class TUIApp:
         def _(event):
             self.event_handler.handle_interrupt()
             self.state.running = False
+            # 如果有正在运行的对话循环，尝试中断
+            if hasattr(self, '_current_loop'):
+                self._current_loop.interrupt()
             event.app.exit()
 
         return bindings
@@ -250,6 +254,15 @@ class TUIApp:
             elif tool_name == "terminal":
                 exit_code = data.get("exit_code", -1)
                 self.console.print(ActivityFeed.format_result(tool_name, f"terminal: exit code {exit_code}"))
+            elif tool_name == "todo":
+                summary = data.get("summary", {})
+                total = summary.get("total", 0)
+                pending = summary.get("pending", 0)
+                in_progress = summary.get("in_progress", 0)
+                completed = summary.get("completed", 0)
+                cancelled = summary.get("cancelled", 0)
+                status_str = f"todo: {total} tasks ({pending} pending, {in_progress} active, {completed} done, {cancelled} cancelled)"
+                self.console.print(ActivityFeed.format_result(tool_name, status_str))
             else:
                 self.console.print(ActivityFeed.format_result(tool_name, f"{tool_name}: completed"))
         except (json.JSONDecodeError, AttributeError):
@@ -301,15 +314,7 @@ class TUIApp:
         tool_args = data["tool_args"]
         tool_call = data.get("tool_call", {})
         
-        try:
-            args_dict = json.loads(tool_args) if isinstance(tool_args, str) else tool_args
-            action = next(iter(args_dict.values())) if args_dict else "exec"
-            if isinstance(action, dict):
-                action = "exec"
-            elif len(str(action)) > 20:
-                action = str(action)[:20] + "..."
-        except (json.JSONDecodeError, StopIteration, TypeError):
-            action = "exec"
+        action = self._extract_tool_action(tool_name, tool_args)
 
         self.show_tool_start(tool_name, action)
         self._current_tool_action = action
@@ -317,6 +322,52 @@ class TUIApp:
         # 保存 tool_call 到 JSONL
         self._save_to_jsonl("tool_call", tool_name=tool_name, tool_args=tool_args,
                            tool_call_id=tool_call.get("id", ""))
+
+    def _extract_tool_action(self, tool_name: str, tool_args: str | dict) -> str:
+        """提取工具操作的简短描述。"""
+        try:
+            args_dict = json.loads(tool_args) if isinstance(tool_args, str) else tool_args
+            if not args_dict:
+                return "exec"
+            
+            # 针对常用工具提取有意义的描述
+            if tool_name == "terminal":
+                cmd = args_dict.get("command", "")
+                return cmd[:40] if cmd else "exec"
+            elif tool_name == "read_file":
+                path = args_dict.get("path", "")
+                return f"read: {path}" if path else "exec"
+            elif tool_name == "write_file":
+                path = args_dict.get("path", "")
+                return f"write: {path}" if path else "exec"
+            elif tool_name == "todo":
+                todos = args_dict.get("todos")
+                merge = args_dict.get("merge", False)
+                if todos:
+                    return f"{len(todos)} tasks ({'merge' if merge else 'replace'})"
+                return "read todos"
+            elif tool_name == "search_files":
+                pattern = args_dict.get("pattern", "")
+                return f"search: {pattern}" if pattern else "exec"
+            elif tool_name == "patch":
+                path = args_dict.get("path", "")
+                return f"patch: {path}" if path else "exec"
+            elif tool_name == "execute_code":
+                code = args_dict.get("code", "")
+                preview = code[:30].replace("\n", " ")
+                return f"code: {preview}..." if code else "exec"
+            elif tool_name in ("skill_manage", "memory", "cronjob", "process"):
+                action = args_dict.get("action", "")
+                return f"{action}" if action else "exec"
+            else:
+                # 通用：取第一个非字典/列表的值
+                for v in args_dict.values():
+                    if not isinstance(v, (dict, list)):
+                        val_str = str(v)
+                        return val_str[:30] + "..." if len(val_str) > 30 else val_str
+                return "exec"
+        except (json.JSONDecodeError, TypeError):
+            return "exec"
 
     def _on_tool_end_handler(self, data: dict[str, Any]) -> None:
         """工具执行结束时的事件处理器。"""
@@ -382,11 +433,12 @@ class TUIApp:
 
         # 创建 ConversationLoop 实例
         wrapped_model_caller = self._create_model_caller_wrapper()
-        loop = ConversationLoop(
+        self._current_loop = ConversationLoop(
             model_call=wrapped_model_caller,
             tool_dispatch=self.tool_dispatch,
             debug=self.debug,
         )
+        loop = self._current_loop
         
         # 订阅事件
         loop.events.on(EventType.TOOL_START, self._on_tool_start_handler)
@@ -400,11 +452,36 @@ class TUIApp:
             memory_handler = MemoryEventHandler(self.memory_manager, self.session_id)
             memory_handler.register(loop.events)
 
-        # 运行对话循环
-        result = loop.run(
-            messages=self.messages,
-            tools=self.tool_schemas if self.tool_schemas else None,
-        )
+        # 在后台线程运行对话循环，支持 Ctrl+C 中断
+        result = [None]
+        exception = [None]
+
+        def _run_loop():
+            try:
+                result[0] = loop.run(
+                    messages=self.messages,
+                    tools=self.tool_schemas if self.tool_schemas else None,
+                )
+            except Exception as e:
+                exception[0] = e
+
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_run_loop)
+            try:
+                while not future.done():
+                    if not self.state.running:
+                        loop.interrupt()
+                        break
+                    await asyncio.sleep(0.1)
+                future.result(timeout=1)
+            except concurrent.futures.TimeoutError:
+                loop.interrupt()
+
+        if exception[0]:
+            raise exception[0]
+        if not result[0]:
+            return
 
         # 注入记忆上下文到消息历史（如果有预取缓存）
         if memory_handler and memory_handler.prefetch_cache:
@@ -420,8 +497,8 @@ class TUIApp:
                     break
 
         # 处理结果
-        final_response = result.get("final_response", "")
-        reasoning = result.get("reasoning")
+        final_response = result[0].get("final_response", "")
+        reasoning = result[0].get("reasoning")
 
         if reasoning:
             self.show_reasoning(reasoning)
