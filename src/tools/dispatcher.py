@@ -47,9 +47,10 @@ def dispatch(
     # 步骤 1: 查找工具
     entry = ToolRegistry.get_tool(name)
     if entry is None:
+        tool_names = [t.name for t in ToolRegistry.get_all_tools()]
         return json.dumps({
             "error": f"工具未找到: '{name}'。已注册的工具: "
-                     f"{', '.join(ToolRegistry.get_all_tools())}"
+                     f"{', '.join(tool_names)}"
         })
 
     # 步骤 2: 检查可用性
