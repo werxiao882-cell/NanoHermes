@@ -33,6 +33,7 @@ def execute_code(
     language: str = "python",
     timeout: int = DEFAULT_TIMEOUT,
     task_id: str = None,
+    **kwargs,
 ) -> str:
     """执行 Python 代码。
     
@@ -143,22 +144,29 @@ register_tool(
     schema={
         "name": "execute_code",
         "description": (
-            "执行 Python 代码。在临时文件中运行，捕获 stdout 和 stderr。\n\n"
-            "使用场景：\n"
-            "- 快速测试代码片段\n"
-            "- 计算复杂表达式\n"
-            "- 运行数据处理脚本\n\n"
-            "限制：\n"
-            "- 超时 30 秒\n"
-            "- 输出限制 10000 字符\n"
-            "- 不应用于长时间运行的任务"
+            "Run a Python script that can call Hermes tools programmatically. Use this when you need 3+ tool calls with processing logic between them, need to filter/reduce large tool outputs before they enter your context, need conditional branching (if X then Y else Z), or need to loop (fetch N pages, process N files, retry on failure).\n\n"
+            "Use normal tool calls instead when: single tool call with no processing, you need to see the full result and apply complex reasoning, or the task requires interactive user input.\n\n"
+            "Available via `from hermes_tools import ...`:\n\n"
+            "  read_file(path: str, offset: int = 1, limit: int = 500) -> dict\n"
+            "    Lines are 1-indexed. Returns {\"content\": \"...\", \"total_lines\": N}\n"
+            "  write_file(path: str, content: str) -> dict\n"
+            "    Always overwrites the entire file.\n"
+            "  search_files(pattern: str, target=\"content\", path=\".\", file_glob=None, limit=50) -> dict\n"
+            "    target: \"content\" (search inside files) or \"files\" (find files by name). Returns {\"matches\": [...]}\n"
+            "  patch(path: str, old_string: str, new_string: str, replace_all: bool = False) -> dict\n"
+            "    Replaces old_string with new_string in the file.\n"
+            "  terminal(command: str, timeout=None, workdir=None) -> dict\n"
+            "    Foreground only (no background/pty). Returns {\"output\": \"...\", \"exit_code\": N}\n\n"
+            "Limits: 5-minute timeout, 50KB stdout cap, max 50 tool calls per script.\n\n"
+            "Scripts run in the session's working directory with the active venv's python, so project deps (pandas, etc.) and relative paths work like in terminal().\n\n"
+            "Print your final result to stdout. Use Python stdlib (json, re, math, csv, datetime, collections, etc.) for processing between tool calls."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "code": {
                     "type": "string",
-                    "description": "要执行的 Python 代码。",
+                    "description": "Python code to execute. Import tools with `from hermes_tools import terminal, ...` and print your final result to stdout.",
                 },
                 "language": {
                     "type": "string",

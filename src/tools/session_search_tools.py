@@ -41,6 +41,7 @@ def session_search(
     limit: int = 10,
     role_filter: str = "",
     task_id: str = None,
+    **kwargs,
 ) -> str:
     """搜索历史会话。
     
@@ -250,34 +251,50 @@ register_tool(
     schema={
         "name": "session_search",
         "description": (
-            "搜索历史会话。支持三种模式：\n"
-            "1. DISCOVERY - 传入 query 进行全文搜索\n"
-            "2. SCROLL - 传入 session_id + around_message_id 滚动查看\n"
-            "3. BROWSE - 不传参数查看最近会话\n\n"
-            "基于 SQLite FTS5 索引，零 LLM 成本。"
+            "Search past sessions stored in the local session DB, or scroll inside one. "
+            "FTS5-backed retrieval over the SQLite message store. No LLM calls — every shape returns actual messages from the DB.\n\n"
+            "THREE CALLING SHAPES\n\n"
+            "  1) DISCOVERY — pass `query`:\n"
+            "     session_search(query=\"auth refactor\", limit=3)\n"
+            "     Runs FTS5, dedupes hits by session lineage, returns the top N sessions.\n\n"
+            "  2) SCROLL — pass `session_id` + `around_message_id`:\n"
+            "     session_search(session_id=\"...\", around_message_id=12345, window=10)\n"
+            "     Returns a window of ±`window` messages centered on the anchor.\n\n"
+            "  3) BROWSE — no args:\n"
+            "     session_search()\n"
+            "     Returns recent sessions chronologically: titles, previews, timestamps.\n\n"
+            "WHEN TO USE\n\n"
+            "  Reach for this on any \"what did we do about X\" / \"where did we leave Y\" / \"find the session where Z\" question — "
+            "before gh, web search, or filesystem inspection."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "搜索关键词（DISCOVERY 模式）。",
-                },
-                "session_id": {
-                    "type": "string",
-                    "description": "指定会话 ID（SCROLL 模式）。",
-                },
-                "around_message_id": {
-                    "type": "integer",
-                    "description": "锚点消息 ID（SCROLL 模式）。",
+                    "description": "Search query (discovery shape). Keywords, phrases, or boolean expressions to find in past sessions. Omit to browse recent sessions."
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "最大结果数（默认 10）。",
+                    "description": "Discovery shape only. Max sessions to return (default 3, max 10).",
+                    "default": 3,
+                },
+                "session_id": {
+                    "type": "string",
+                    "description": "Scroll shape. Session to read inside. Must be paired with around_message_id."
+                },
+                "around_message_id": {
+                    "type": "integer",
+                    "description": "Scroll shape. Message id to center the window on. From a discovery result use match_message_id, or any id seen in a prior window."
+                },
+                "window": {
+                    "type": "integer",
+                    "description": "Scroll shape only. Messages to return on each side of the anchor (anchor itself always included). Clamped to [1, 20]. Default 5.",
+                    "default": 5,
                 },
                 "role_filter": {
                     "type": "string",
-                    "description": "按角色过滤，如 'user,assistant'。",
+                    "description": "Optional. Comma-separated roles to include. Discovery defaults to 'user,assistant'."
                 },
             },
             "required": [],

@@ -142,6 +142,7 @@ def memory(
     old_text: str = "",
     key: str = "",
     task_id: str = None,
+    **kwargs,
 ) -> str:
     """持久记忆工具。
     
@@ -221,40 +222,45 @@ register_tool(
     schema={
         "name": "memory",
         "description": (
-            "保存跨会话的持久记忆。记忆会注入到未来的对话中，所以保持简洁。\n\n"
-            "何时保存（主动执行）：\n"
-            "- 用户纠正你或说'记住这个'\n"
-            "- 用户分享偏好、习惯或个人信息\n"
-            "- 发现环境信息（OS、工具、项目结构）\n"
-            "- 学习到特定用户的约定或工作流\n\n"
-            "两个目标：\n"
-            "- 'user': 用户画像 - 姓名、角色、偏好、沟通风格\n"
-            "- 'memory': Agent 笔记 - 环境事实、项目约定、工具怪癖\n\n"
-            "不要保存：任务进度、会话结果、临时状态（这些用 session_search 查找）"
+            "Save durable information to persistent memory that survives across sessions. Memory is injected into future turns, so keep it compact and focused on facts that will still matter later.\n\n"
+            "WHEN TO SAVE (do this proactively, don't wait to be asked):\n"
+            "- User corrects you or says 'remember this' / 'don't do that again'\n"
+            "- User shares a preference, habit, or personal detail (name, role, timezone, coding style)\n"
+            "- You discover something about the environment (OS, installed tools, project structure)\n"
+            "- You learn a convention, API quirk, or workflow specific to this user's setup\n"
+            "- You identify a stable fact that will be useful again in future sessions\n\n"
+            "PRIORITY: User preferences and corrections > environment facts > procedural knowledge. The most valuable memory prevents the user from having to repeat themselves.\n\n"
+            "Do NOT save task progress, session outcomes, completed-work logs, or temporary TODO state to memory; use session_search to recall those from past transcripts.\n"
+            "If you've discovered a new way to do something, solved a problem that could be necessary later, save it as a skill with the skill tool.\n\n"
+            "TWO TARGETS:\n"
+            "- 'user': who the user is -- name, role, preferences, communication style, pet peeves\n"
+            "- 'memory': your notes -- environment facts, project conventions, tool quirks, lessons learned\n\n"
+            "ACTIONS: add (new entry), replace (update existing -- old_text identifies it), remove (delete -- old_text identifies it).\n\n"
+            "SKIP: trivial/obvious info, things easily re-discovered, raw data dumps, and temporary task state."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["add", "replace", "remove", "view"],
-                    "description": "要执行的操作。",
+                    "enum": ["add", "replace", "remove"],
+                    "description": "The action to perform."
                 },
                 "target": {
                     "type": "string",
                     "enum": ["memory", "user"],
-                    "description": "记忆目标：'memory' 用于笔记，'user' 用于用户画像。",
+                    "description": "Which memory store: 'memory' for personal notes, 'user' for user profile."
                 },
                 "content": {
                     "type": "string",
-                    "description": "记忆内容（add/replace 时需要）。",
+                    "description": "The entry content. Required for 'add' and 'replace'."
                 },
                 "old_text": {
                     "type": "string",
-                    "description": "要替换/删除的原文（replace/remove 时需要）。",
+                    "description": "Short unique substring identifying the entry to replace or remove."
                 },
             },
-            "required": ["action"],
+            "required": ["action", "target"],
         },
     },
     handler=memory,

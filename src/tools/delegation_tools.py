@@ -38,6 +38,7 @@ def delegate_task(
     toolsets: list[str] = None,
     context: str = "",
     task_id: str = None,
+    **kwargs,
 ) -> str:
     """委托任务给子 Agent 执行。
     
@@ -163,24 +164,43 @@ register_tool(
     schema={
         "name": "delegate_task",
         "description": (
-            "委托任务给子 Agent 执行。支持单任务和批量并行模式。\n\n"
-            "子 Agent 拥有独立的对话上下文和受限工具集。\n"
-            "父级只看到最终摘要，不看到中间过程。\n\n"
-            "角色：\n"
-            "- leaf（默认）：专注工作者，不能委托/访问记忆/用户交互\n"
-            "- orchestrator：编排者，可以进一步委托子任务\n\n"
-            "注意：子 Agent 不能访问 delegate_task, clarify, memory, execute_code 工具。"
+            "Spawn one or more subagents to work on tasks in isolated contexts. Each subagent gets its own conversation, terminal session, and toolset. Only the final summary is returned -- intermediate tool results never enter your context window.\n\n"
+            "TWO MODES (one of 'goal' or 'tasks' is required):\n"
+            "1. Single task: provide 'goal' (+ optional context, toolsets)\n"
+            "2. Batch (parallel): provide 'tasks' array with up to 3 items concurrently for this user. All run in parallel and results are returned together.\n\n"
+            "WHEN TO USE delegate_task:\n"
+            "- Reasoning-heavy subtasks (debugging, code review, research synthesis)\n"
+            "- Tasks that would flood your context with intermediate data\n"
+            "- Parallel independent workstreams (research A and B simultaneously)\n\n"
+            "WHEN NOT TO USE (use these instead):\n"
+            "- Mechanical multi-step work with no reasoning needed -> use execute_code\n"
+            "- Single tool call -> just call the tool directly\n"
+            "- Tasks needing user interaction -> subagents cannot use clarify\n\n"
+            "IMPORTANT:\n"
+            "- Subagents have NO memory of your conversation. Pass all relevant info via the 'context' field.\n"
+            "- If the user is writing in a non-English language, say so in 'context' (e.g. 'respond in Chinese').\n"
+            "- Leaf subagents (role='leaf', the default) CANNOT call: delegate_task, clarify, memory, execute_code.\n"
+            "- Each subagent gets its own terminal session (separate working directory and state)."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "goal": {
                     "type": "string",
-                    "description": "单任务目标描述。",
+                    "description": "What the subagent should accomplish. Be specific and self-contained -- the subagent knows nothing about your conversation history."
+                },
+                "context": {
+                    "type": "string",
+                    "description": "Background information the subagent needs: file paths, error messages, project structure, constraints."
+                },
+                "toolsets": {
+                    "type": "array",
+                    "description": "Toolsets to enable for this subagent. Default: inherits your enabled toolsets.",
+                    "items": {"type": "string"}
                 },
                 "tasks": {
                     "type": "array",
-                    "description": "批量任务列表，每项包含 goal/description 和可选 context。",
+                    "description": "Batch mode: tasks to run in parallel. Each gets its own subagent with isolated context and terminal session.",
                     "items": {
                         "type": "object",
                         "properties": {
@@ -193,16 +213,7 @@ register_tool(
                 "role": {
                     "type": "string",
                     "enum": ["leaf", "orchestrator"],
-                    "description": "子 Agent 角色。",
-                },
-                "toolsets": {
-                    "type": "array",
-                    "description": "允许使用的工具集列表。",
-                    "items": {"type": "string"},
-                },
-                "context": {
-                    "type": "string",
-                    "description": "上下文信息。",
+                    "description": "Role of the child agent. 'leaf' (default) = focused worker, cannot delegate further. 'orchestrator' = can use delegate_task to spawn its own workers."
                 },
             },
             "required": [],
