@@ -28,20 +28,67 @@ from typing import Any
 # ─────────────────────────────────────────────
 # 上下文威胁检测模式
 # ─────────────────────────────────────────────
+# 设计理由：
+# 这些正则表达式用于检测提示注入攻击（Prompt Injection）和数据泄露风险。
+# 攻击者可能通过上下文文件注入恶意指令，试图覆盖系统提示或获取敏感信息。
+# 每个模式针对一类常见的攻击向量：
+# - 指令覆盖类：ignore_previous_instructions, disregard_rules, override_system_prompt
+# - 角色劫持类：new_instructions, from_now_on, you_are_now
+# - 数据泄露类：curl_secret, api_key_leak
+# - 系统控制类：system_override, developer_mode
 CONTEXT_THREAT_PATTERNS: list[tuple[str, re.Pattern]] = [
+    # 检测试图忽略先前指令的模式，如 "ignore all previous instructions"
+    # 这是经典的提示注入攻击开头，攻击者试图清除系统安全限制
     ("ignore_previous_instructions", re.compile(r"ignore\s+(all\s+)?previous\s+instructions?", re.IGNORECASE)),
+    
+    # 检测试图 disregard（无视）规则或约束的模式
+    # 攻击者可能试图绕过系统设定的行为边界
     ("disregard_rules", re.compile(r"disregard\s+(all\s+)?(rules?|guidelines?|constraints?)", re.IGNORECASE)),
+    
+    # 检测直接覆盖系统提示的企图
+    # 这是最明显的提示注入攻击，直接声明要 override system prompt
     ("override_system_prompt", re.compile(r"override\s+(the\s+)?system\s+(prompt|instructions)", re.IGNORECASE)),
+    
+    # 检测 "new instructions:" 模式
+    # 攻击者可能用冒号引入新指令，试图替代原有系统指令
     ("new_instructions", re.compile(r"new\s+instructions?\s*:", re.IGNORECASE)),
+    
+    # 检测 "from now on" 或 "from this point forward" 模式
+    # 这类短语通常用于声明新规则的生效点，试图覆盖之前的约束
     ("from_now_on", re.compile(r"from\s+(now\s+on|this\s+point\s+forward)", re.IGNORECASE)),
+    
+    # 检测 "you are now a/an/the <role>" 模式
+    # 角色劫持攻击：试图重新定义 AI 的身份，如 "you are now a debug mode AI"
     ("you_are_now", re.compile(r"you\s+are\s+(now\s+)?(a|an|the)\s+\w+", re.IGNORECASE)),
+    
+    # 检测 curl 命令中的 API Key 泄露
+    # 匹配格式：curl ... -H 'Authorization: Bearer sk-...'
+    # 防止上下文文件中包含真实的 API 密钥
     ("curl_secret", re.compile(r"curl\s+.*-H\s+['\"]Authorization:\s*Bearer\s+sk-", re.IGNORECASE)),
+    
+    # 检测 API Key/Secret/Token 赋值模式
+    # 匹配格式：api_key = 'sk-...' 或 secret: "abc..."
+    # 要求密钥长度 >= 20 字符，避免误报短字符串
     ("api_key_leak", re.compile(r"(api[_-]?key|secret|token)\s*[=:]\s*['\"]?[a-zA-Z0-9]{20,}", re.IGNORECASE)),
+    
+    # 检测 "system: override" 模式
+    # 模拟系统级别指令的格式，试图获得更高权限
     ("system_override", re.compile(r"system\s*:\s*override", re.IGNORECASE)),
+    
+    # 检测启用特殊模式的指令
+    # 如 "enable developer mode"、"activate debug mode"、"activate admin mode"
+    # 这些模式通常意味着绕过安全限制
     ("developer_mode", re.compile(r"(enable|activate)\s+(developer|debug|admin)\s+mode", re.IGNORECASE)),
 ]
 
-# 不可见 Unicode 字符
+# 不可见 Unicode 字符检测
+# 设计理由：
+# 某些 Unicode 字符在视觉上不可见但会影响模型理解，可能被用于：
+# - 零宽空格（U+200B-U+200F）：在文本中隐藏信息
+# - 控制字符（U+0000-U+001F）：可能干扰解析器
+# - 格式控制符（U+2028-U+202E）：改变文本显示方向
+# - BOM（U+FEFF）：文件开头标记，可能被用于注入
+# - 特殊组合符（U+FFF9-U+FFFB）：注释控制符
 CONTEXT_INVISIBLE_CHARS: re.Pattern = re.compile(
     r"[\u200B-\u200F\u2028-\u202E\u2060-\u2064\uFEFF\uFFF9-\uFFFB]"
     r"|[\u0000-\u0008\u000E-\u001F\u007F-\u009F]"
@@ -760,16 +807,44 @@ class PromptAssembler:
     def _compute_stable_hash(self) -> str:
         """计算 stable 层哈希。
 
+        设计理由：
+        使用 SHA256 哈希判断 stable 层内容是否变化。
+        - SHA256 碰撞概率极低，适合缓存失效判断
+        - 只取前 16 位（64 bit），足够唯一性且节省存储空间
+        - 64 bit 的碰撞概率约为 1/2^64，对于实际应用足够安全
+        
+        这个哈希值用于：
+        1. 判断是否需要重建 Anthropic 缓存
+        2. 缓存键（cache key）的一部分
+        3. 调试时追踪提示版本
+
         Returns:
-            哈希字符串。
+            哈希字符串（16 字符，64 bit）。
         """
+        # 拼接所有 stable 部分的内容
+        # 使用空字符串连接，因为每个 part 已经包含完整的 markdown 格式
         stable_content = "".join(
             p.content for p in self._stable_parts
         )
+        # SHA256 返回 64 字符（256 bit），只取前 16 字符（64 bit）
         return hashlib.sha256(stable_content.encode()).hexdigest()[:16]
 
     def _assemble_text(self, parts: list[PromptPart]) -> str:
         """组装提示文本。
+
+        设计理由：
+        按照三层架构的顺序组装提示文本：
+        1. stable 层（最先）：不变的内容，如身份、工具指导
+           - 放在最前面是因为 Anthropic 缓存要求缓存内容在 prompt 前部
+           - 这些内容对模型行为影响最大，需要优先建立上下文
+        2. context 层（中间）：上下文文件
+           - 在 stable 之后，提供当前任务的具体上下文
+           - 可能包含用户提供的文件内容
+        3. volatile 层（最后）：每轮变化的内容
+           - 放在最后是因为这些内容频繁变化
+           - 包括时间戳、记忆快照、用户画像等
+        
+        层间用双换行（\n\n）分隔，保持 markdown 格式的可读性。
 
         Args:
             parts: 提示片段列表。
@@ -777,16 +852,19 @@ class PromptAssembler:
         Returns:
             完整文本。
         """
+        # 按层分组
         layers: dict[str, list[str]] = {"stable": [], "context": [], "volatile": []}
 
         for part in parts:
             layers[part.layer].append(part.content)
 
+        # 按顺序组装：stable -> context -> volatile
         sections = []
         for layer in ["stable", "context", "volatile"]:
             if layers[layer]:
                 sections.append("\n".join(layers[layer]))
 
+        # 层间用双换行分隔，保持 markdown 格式
         return "\n\n".join(sections)
 
     # ── 缓存 ──
@@ -799,11 +877,22 @@ class PromptAssembler:
     ) -> list[PromptPart]:
         """应用 Anthropic prompt caching 标记。
 
-        策略：将 stable 层的最后一个部分标记为缓存断点。
+        设计理由：
+        Anthropic Claude 支持 prompt caching 功能，可以缓存 100K+ tokens 的系统提示。
+        缓存策略：将 stable 层的最后一个部分标记为缓存断点（cache breakpoint）。
+        
+        为什么选择最后一个 stable 部分？
+        - Anthropic 的缓存机制要求缓存的内容必须在 prompt 的前面部分
+        - stable 层是不变的内容（身份、工具指导等），最适合缓存
+        - 标记最后一个 stable 部分可以缓存所有 stable 内容
+        - context 和 volatile 层每轮变化，不适合缓存
+        
+        缓存 TTL 默认 300 秒（5 分钟），这是 Anthropic 的最小缓存时间。
+        超过 TTL 后缓存会被清除，需要重新构建。
 
         Args:
             parts: 提示片段列表。
-            ttl: 缓存 TTL（秒）。
+            ttl: 缓存 TTL（秒），默认 300 秒。
 
         Returns:
             标记后的片段列表。
@@ -812,16 +901,19 @@ class PromptAssembler:
             return parts
 
         # 找到最后一个 stable 部分
+        # 使用线性扫描而非反向查找，因为需要保持顺序
         last_stable_idx = None
         for i, part in enumerate(parts):
             if part.layer == "stable":
                 last_stable_idx = i
 
+        # 只有找到 stable 部分才标记缓存
+        # 如果没有 stable 部分，说明提示完全动态，不值得缓存
         if last_stable_idx is not None:
             parts[last_stable_idx] = PromptPart(
                 content=parts[last_stable_idx].content,
                 layer=parts[last_stable_idx].layer,
-                cached=True,
+                cached=True,  # 标记为缓存断点
                 cache_ttl=ttl,
             )
 
