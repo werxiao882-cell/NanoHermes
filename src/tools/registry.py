@@ -112,12 +112,22 @@ class ToolRegistry:
     def register(cls, entry: ToolEntry) -> None:
         """注册一个工具条目。
 
-        如果工具名已存在，记录警告并覆盖。
+        策略模式体现：
+        - 注册表不关心工具如何实现，只管理注册条目
+        - handler 是执行策略，check_fn 是可用性检查策略
+        - 新策略可以随时替换旧策略（通过覆盖注册）
+
+        为什么允许覆盖而非抛出异常？
+        1. 测试场景：测试用例可以注册 mock 工具覆盖真实实现
+        2. 扩展场景：用户可以自定义工具覆盖默认实现
+        3. 热更新：运行时可以动态替换工具实现
 
         Args:
             entry: 要注册的 ToolEntry 实例。
         """
         if entry.name in cls._tools:
+            # 工具名冲突：记录警告并覆盖
+            # 这是设计决策：允许覆盖而非阻止，便于测试和扩展
             logger.warning(
                 f"工具名冲突: '{entry.name}' 已存在，新注册将覆盖旧注册"
             )
@@ -151,6 +161,16 @@ class ToolRegistry:
     ) -> list[dict[str, Any]]:
         """获取工具 schema 列表（OpenAI 格式）。
 
+        为什么返回 schema 而非 ToolEntry？
+        - LLM API 只需要 schema 来理解工具功能
+        - 隐藏实现细节（handler、check_fn 等）
+        - 减少数据传输量
+
+        过滤策略：
+        - toolset_filter 为 None：返回所有工具（默认行为）
+        - toolset_filter 为 set：只返回属于这些工具集的工具
+        - 使用 set 而非 list：O(1) 查找时间复杂度
+
         Args:
             toolset_filter: 工具集名称集合，只返回属于这些工具集的工具。
                            None 表示返回所有工具的 schema。
@@ -160,6 +180,7 @@ class ToolRegistry:
         """
         schemas = []
         for entry in cls._tools.values():
+            # 如果指定了过滤条件，检查工具是否属于指定工具集
             if toolset_filter and entry.toolset not in toolset_filter:
                 continue
             schemas.append(entry.schema)
@@ -174,12 +195,24 @@ class ToolRegistry:
     def init_all_tools(cls) -> None:
         """初始化所有工具模块。
 
+        为什么需要显式导入而非完全依赖 AST 发现？
+        - terminal.py 的注册逻辑在函数内部，AST 无法检测顶层调用
+        - 某些工具可能有复杂的初始化逻辑，需要显式控制顺序
+        - 提供兜底方案：即使 AST 发现失败，也能确保所有工具加载
+
         显式导入所有工具模块，触发自动注册。
         包括 terminal（需要特殊处理，因为注册在函数内）。
+
+        注意：此方法与 discover_tools() 互斥，不应同时调用。
+        - discover_tools()：自动发现，适合开发阶段
+        - init_all_tools()：显式控制，适合生产环境
         """
         import importlib
 
         # 所有工具模块列表
+        # 维护说明：新增工具时添加到此列表
+        # 如果工具使用顶层 register_tool() 调用，discover_tools() 会自动发现
+        # 此列表主要用于 AST 无法检测的场景（如 terminal.py）
         tool_modules = [
             "src.tools.terminal",
             "src.tools.file_tool",
@@ -199,11 +232,24 @@ class ToolRegistry:
                 importlib.import_module(module_name)
                 logger.debug(f"已初始化工具模块: {module_name}")
             except Exception as e:
+                # 单个工具初始化失败不影响其他工具
                 logger.warning(f"初始化工具模块失败 {module_name}: {e}")
 
     @classmethod
     def get_tool_categories(cls) -> dict[str, list[str]]:
         """按工具集分类所有已注册的工具。
+
+        为什么需要分类？
+        - UI 展示：按功能分组展示工具（如终端、文件、记忆等）
+        - 权限控制：按工具集启用/禁用工具
+        - 调试监控：快速查看每个工具集包含哪些工具
+
+        返回结构示例：
+        {
+            "terminal": ["terminal", "run_command"],
+            "file": ["read_file", "write_file", "search_files"],
+            "memory": ["read_memory", "write_memory"],
+        }
 
         Returns:
             工具集名称到工具名称列表的映射。
@@ -211,6 +257,7 @@ class ToolRegistry:
         categories: dict[str, list[str]] = {}
         for tool in cls._tools.values():
             category = tool.toolset
+            # 如果工具集不存在，初始化为空列表
             if category not in categories:
                 categories[category] = []
             categories[category].append(tool.name)
