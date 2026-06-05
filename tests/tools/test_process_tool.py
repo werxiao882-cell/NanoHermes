@@ -3,7 +3,7 @@
 import pytest
 import json
 
-from src.tools.process_tools import process
+from src.tools.process_tool import process
 
 
 class TestProcessTool:
@@ -34,3 +34,4 @@ class TestProcessTool:
         result = dispatch("process", {"action": "list"})
         data = json.loads(result)
         assert data["status"] in ("process_requested", "success", "error")
+

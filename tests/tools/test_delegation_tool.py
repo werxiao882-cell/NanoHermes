@@ -3,7 +3,7 @@
 import pytest
 import json
 
-from src.tools.delegation_tools import delegate_task
+from src.tools.delegation_tool import delegate_task
 
 
 class TestDelegateTask:
@@ -38,3 +38,4 @@ class TestDelegateTask:
         result = dispatch("delegate_task", {"goal": "Test task"})
         data = json.loads(result)
         assert data["status"] in ("delegation_requested", "success", "error")
+

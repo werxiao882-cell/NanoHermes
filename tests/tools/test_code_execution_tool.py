@@ -4,7 +4,7 @@ import pytest
 import json
 from unittest.mock import patch
 
-from src.tools.code_execution_tools import execute_code
+from src.tools.code_execution_tool import execute_code
 
 
 class TestExecuteCode:
@@ -13,8 +13,7 @@ class TestExecuteCode:
     def test_execute_code_basic(self):
         """Test basic code execution request."""
         result = json.loads(execute_code(code="print('hello')"))
-        # 实际执行返回 success 或 error（取决于执行结果）
-        assert result["status"] in ("code_execution_requested", "success", "error")
+        # 实际执行返回 success �?error（取决于执行结果�?        assert result["status"] in ("code_execution_requested", "success", "error")
         assert result.get("language") == "python" or "stdout" in result or "stderr" in result
 
     def test_execute_code_custom_language(self):
@@ -42,3 +41,4 @@ class TestExecuteCode:
         result = dispatch("execute_code", {"code": "print('test')"})
         data = json.loads(result)
         assert data["status"] in ("code_execution_requested", "success", "error")
+

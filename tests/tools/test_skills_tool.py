@@ -3,7 +3,7 @@
 import pytest
 import json
 
-from src.tools.skills_tools import skill_manage, skill_view, skills_list
+from src.tools.skills_tool import skill_manage, skill_view, skills_list
 
 
 class TestSkillManage:
@@ -88,3 +88,4 @@ class TestSkillsList:
         result = dispatch("skills_list", {})
         data = json.loads(result)
         assert data["success"] is True
+

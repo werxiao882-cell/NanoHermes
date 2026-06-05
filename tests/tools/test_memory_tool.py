@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from src.tools.memory_tools import memory
+from src.tools.memory_tool import memory
 
 
 class TestMemoryTool:
@@ -45,3 +45,4 @@ class TestMemoryTool:
         result = dispatch("memory", {"action": "view"})
         data = json.loads(result)
         assert data["status"] in ("memory_requested", "success", "error")
+
