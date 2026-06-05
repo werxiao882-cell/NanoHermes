@@ -11,12 +11,13 @@ from src.tools.registry import register_tool
 _pending_clarification: dict[str, Any] | None = None
 
 
-def clarify(question: str = "", choices: list = None, task_id: str = None, **kwargs) -> str:
+def clarify(question: str = "", choices: list = None, allow_custom: bool = True, task_id: str = None, **kwargs) -> str:
     """向用户提问，支持预设选项和自定义输入。
 
     Args:
         question: 要问的问题。
         choices: 预设选项列表（最多 4 个）。
+        allow_custom: 是否允许用户自定义输入。
         task_id: 任务 ID。
 
     Returns:
@@ -29,16 +30,16 @@ def clarify(question: str = "", choices: list = None, task_id: str = None, **kwa
 
     _pending_clarification = {
         "question": question,
-        "options": choices or [],
-        "allow_custom": True,
+        "choices": choices or [],
+        "allow_custom": allow_custom,
         "status": "pending",
     }
 
     return json.dumps({
         "status": "clarification_requested",
         "question": question,
-        "options": choices or [],
-        "allow_custom": True,
+        "choices": choices or [],
+        "allow_custom": allow_custom,
         "message": "Waiting for user response..."
     }, ensure_ascii=False)
 

@@ -16,8 +16,8 @@ def _setup_todo_tool():
 
     # Re-import module to trigger auto-registration
     import importlib
-    import src.tools.todo_tools
-    importlib.reload(src.tools.todo_tools)
+    import src.tools.todo_tool
+    importlib.reload(src.tools.todo_tool)
 
     yield
 
