@@ -801,6 +801,9 @@ class TUIApp:
             self.messages.append({"role": "assistant", "content": final_response})
             self._save_message_to_storage("assistant", final_response)
 
+        # 自动压缩检查（任务 12.21）
+        await self._check_auto_compress(result)
+
     async def _handle_command(self, command: str) -> bool:
         cmd = command.lower().strip()
 
@@ -1046,6 +1049,48 @@ class TUIApp:
         self.console.print(f"\n[green]已恢复会话: {identifier[:8]} - {title}[/green]")
         self.console.print(f"[dim]共 {len(self.messages)} 条消息[/dim]\n")
 
+    async def _check_auto_compress(self, response: dict) -> None:
+        """自动压缩检查。
+
+        在每次模型响应后检查是否需要自动触发压缩。
+        检查条件：
+        1. 上下文使用量超过阈值
+        2. API 返回 context_length_exceeded 错误
+        3. 消息数过多（启发式检查）
+
+        如果满足条件，自动执行压缩。
+        """
+        if not self.model_caller:
+            return
+
+        if len(self.messages) < 10:
+            return
+
+        from src.compression import ContextCompressor
+
+        compressor = ContextCompressor(
+            model=self.model,
+            threshold_percent=0.50,
+            protect_first_n=3,
+            protect_last_n=20,
+            summary_target_ratio=0.20,
+        )
+
+        # 检查 1：响应后检查（token 使用量）
+        needs_compress = compressor.check_post_response(response)
+
+        # 检查 2：预飞行检查（消息估算）
+        if not needs_compress:
+            needs_compress = compressor.check_preflight(self.messages)
+
+        # 检查 3：消息数启发式（超过 100 条消息自动触发）
+        if not needs_compress and len(self.messages) > 100:
+            needs_compress = True
+
+        if needs_compress:
+            self.console.print("\\n[yellow]⚡ 上下文接近限制，自动触发压缩...[/yellow]")
+            await self._cmd_compress()
+
     async def _cmd_compress(self, focus_topic: str | None = None) -> None:
         """处理 /compress 命令，手动触发上下文压缩。
         
@@ -1090,13 +1135,16 @@ class TUIApp:
             return response
 
         try:
-            compressed = compressor.compress(
+            result = compressor.compress(
                 self.messages,
                 current_tokens=approx_tokens,
                 focus_topic=focus_topic,
                 force=True,
                 model_caller=model_caller,
             )
+
+            # compress 返回 dict: {"messages": [...], "summary": "...", ...}
+            compressed = result.get("messages", result) if isinstance(result, dict) else result
 
             if len(compressed) == len(self.messages):
                 self.console.print("[yellow]压缩未生效（消息数未减少），可能已达最小压缩限度[/yellow]")

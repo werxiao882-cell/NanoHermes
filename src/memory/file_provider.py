@@ -72,6 +72,11 @@ class FileMemoryProvider(MemoryProvider):
     def name(self) -> str:
         return "builtin"
 
+    @property
+    def is_external(self) -> bool:
+        """内置提供者不是外部提供者。"""
+        return False
+
     def is_available(self) -> bool:
         """文件提供者始终可用。"""
         return True
@@ -95,7 +100,7 @@ class FileMemoryProvider(MemoryProvider):
         """返回记忆内容作为系统提示块。"""
         return self.prefetch("")
 
-    def prefetch(self, query: str, **kwargs) -> str:
+    def prefetch(self, query: str = "", **kwargs) -> str:
         """读取 MEMORY.md 和 USER.md 内容。
 
         Args:
@@ -210,6 +215,29 @@ class FileMemoryProvider(MemoryProvider):
             content += "\n"
         content += f"- {entry}\n"
         return content
+
+    def add_entry(self, title: str, content: str, target: str = "memory") -> bool:
+        """添加一条记忆到文件。
+
+        Args:
+            title: 记忆标题/标签。
+            content: 记忆内容。
+            target: 目标文件（'memory' 或 'user'）。
+
+        Returns:
+            是否成功添加。
+        """
+        file_path = self._user_path if target == "user" else self._memory_path
+
+        if file_path.exists():
+            file_content = file_path.read_text(encoding="utf-8")
+        else:
+            file_content = "# Memory\n\n" if target == "memory" else "# User Profile\n\n"
+
+        entry = f"{title}: {content}"
+        file_content = self._add_entry(file_content, entry)
+        self._atomic_write(file_path, file_content)
+        return True
 
     def _replace_entry(self, content: str, search: str, new_entry: str) -> str:
         """替换记忆条目。

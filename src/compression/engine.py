@@ -47,7 +47,12 @@ class ContextEngine(ABC):
             messages: 当前对话消息列表。
 
         Returns:
-            压缩结果，包含压缩后的消息列表、摘要文本等。
+            压缩结果字典，包含 keys:
+                - messages: 压缩后的消息列表
+                - summary: 生成的摘要文本
+                - head_count: 头部保护消息数
+                - tail_count: 尾部保护消息数
+                - tail_messages: 尾部保护消息列表
         """
         ...
 
