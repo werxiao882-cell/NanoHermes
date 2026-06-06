@@ -224,7 +224,14 @@ class ContextCompressor(ContextEngine):
         # 这里提供接口框架
         return False
 
-    def compress(self, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def compress(
+        self,
+        messages: List[Dict[str, Any]],
+        current_tokens: int | None = None,
+        focus_topic: str | None = None,
+        force: bool = False,
+        model_caller=None,
+    ) -> List[Dict[str, Any]]:
         """执行实际的压缩操作。
 
         **压缩流程设计理由：**
@@ -237,9 +244,13 @@ class ContextCompressor(ContextEngine):
 
         Args:
             messages: 当前对话消息列表。
+            current_tokens: 当前 token 估算数（可选）。
+            focus_topic: 焦点主题（可选，用于焦点压缩）。
+            force: 是否强制压缩（忽略阈值检查）。
+            model_caller: 模型调用函数（可选，用于摘要生成）。
 
         Returns:
-            压缩结果，包含压缩后的消息列表、摘要文本等。
+            压缩后的消息列表。
         """
         # 0. 通知 Memory Provider 在压缩前提取信息
         # 为什么需要预压缩回调？
