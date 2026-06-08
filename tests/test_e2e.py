@@ -56,7 +56,7 @@ def test_e2e_conversation_with_tools():
         assert "Hello World" in data["content"]
         print(f"    read_file: {data['lines_returned']} lines returned")
 
-        result = dispatch("search_files", {"path": tmpdir, "pattern": "*.txt"})
+        result = dispatch("search_files", {"path": tmpdir, "pattern": "*.txt", "target": "files"})
         data = json.loads(result)
         assert data["total_found"] >= 1
         print(f"    search_files: {data['total_found']} files found")

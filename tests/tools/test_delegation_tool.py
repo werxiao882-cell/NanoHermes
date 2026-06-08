@@ -28,12 +28,12 @@ class TestDelegateTask:
     def test_delegate_task_via_dispatcher(self):
         """Test delegate_task tool via dispatcher."""
         from src.tools.registry import ToolRegistry
-        from src.tools import delegation_tools
+        from src.tools import delegation_tool
         import importlib
         from src.tools.dispatcher import dispatch
 
         ToolRegistry.clear()
-        importlib.reload(delegation_tools)
+        importlib.reload(delegation_tool)
 
         result = dispatch("delegate_task", {"goal": "Test task"})
         data = json.loads(result)

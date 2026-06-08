@@ -31,12 +31,12 @@ class TestExecuteCode:
     def test_execute_code_via_dispatcher(self):
         """Test execute_code tool via dispatcher."""
         from src.tools.registry import ToolRegistry
-        from src.tools import code_execution_tools
+        from src.tools import code_execution_tool
         import importlib
         from src.tools.dispatcher import dispatch
 
         ToolRegistry.clear()
-        importlib.reload(code_execution_tools)
+        importlib.reload(code_execution_tool)
 
         result = dispatch("execute_code", {"code": "print('test')"})
         data = json.loads(result)

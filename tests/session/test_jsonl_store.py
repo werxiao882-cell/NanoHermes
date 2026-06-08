@@ -34,7 +34,7 @@ class TestAppendMessage:
 
         messages = store.load_messages("session-1")
         assert len(messages) == 1
-        assert messages[0]["type"] == "user"
+        assert messages[0]["role"] == "user"
         assert messages[0]["content"] == "Hello"
         assert "timestamp" in messages[0]
 

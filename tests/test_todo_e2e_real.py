@@ -83,7 +83,7 @@ def test_todo_tool_real_conversation():
     messages = [
         {
             "role": "user",
-            "content": "帮我规划一个Python项目，包含需求分析、设计、开发、测试四个阶段。请使用 todo 工具创建任务列表�?
+            "content": "帮我规划一个Python项目，包含需求分析、设计、开发、测试四个阶段。请使用 todo 工具创建任务列表。"
         }
     ]
 
@@ -137,7 +137,7 @@ def test_todo_tool_real_conversation():
     add_result = dispatch("todo", {
         "todos": [{
             "id": "new_task",
-            "content": "部署到生产环�?,
+            "content": "部署到生产环境",
             "status": "pending"
         }],
         "merge": True
@@ -147,7 +147,7 @@ def test_todo_tool_real_conversation():
     # Verify new task added
     new_task = next((t for t in add_data["todos"] if t["id"] == "new_task"), None)
     assert new_task is not None, "New task not added via merge"
-    assert new_task["content"] == "部署到生产环�?
+    assert new_task["content"] == "部署到生产环境"
 
     print(f"  Added new task via merge, total: {add_data['summary']['total']}")
 
@@ -206,7 +206,7 @@ def test_todo_tool_complex_workflow():
     messages = [
         {
             "role": "user",
-            "content": "我需要开发一个用户管理系统。请创建详细的任务列表，包括数据库设计、API开发、前端开发、测试等。使�?todo 工具管理�?
+            "content": "我需要开发一个用户管理系统。请创建详细的任务列表，包括数据库设计、API开发、前端开发、测试等。使用 todo 工具管理。"
         }
     ]
 

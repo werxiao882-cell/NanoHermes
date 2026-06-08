@@ -24,7 +24,7 @@ class TestJsonlSessionStore:
         messages = jsonl_store.load_messages("sess1")
 
         assert len(messages) == 1
-        assert messages[0]["type"] == "user"
+        assert messages[0]["role"] == "user"
         assert messages[0]["content"] == "Hello"
         assert "timestamp" in messages[0]
 
@@ -172,7 +172,7 @@ class TestSessionResumeIntegration:
         # Verify messages can be converted to OpenAI format
         openai_messages = []
         for msg in messages:
-            role = msg.get("type")
+            role = msg.get("role")
             if role == "system":
                 continue
             openai_msg = {"role": role}

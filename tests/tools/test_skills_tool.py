@@ -24,12 +24,12 @@ class TestSkillManage:
     def test_skill_manage_via_dispatcher(self):
         """Test skill_manage tool via dispatcher."""
         from src.tools.registry import ToolRegistry
-        from src.tools import skills_tools
+        from src.tools import skills_tool
         import importlib
         from src.tools.dispatcher import dispatch
 
         ToolRegistry.clear()
-        importlib.reload(skills_tools)
+        importlib.reload(skills_tool)
 
         result = dispatch("skill_manage", {"action": "list"})
         data = json.loads(result)
@@ -47,12 +47,12 @@ class TestSkillView:
     def test_skill_view_via_dispatcher(self):
         """Test skill_view tool via dispatcher."""
         from src.tools.registry import ToolRegistry
-        from src.tools import skills_tools
+        from src.tools import skills_tool
         import importlib
         from src.tools.dispatcher import dispatch
 
         ToolRegistry.clear()
-        importlib.reload(skills_tools)
+        importlib.reload(skills_tool)
 
         result = dispatch("skill_view", {"name": "test"})
         data = json.loads(result)
@@ -78,12 +78,12 @@ class TestSkillsList:
     def test_skills_list_via_dispatcher(self):
         """Test skills_list tool via dispatcher."""
         from src.tools.registry import ToolRegistry
-        from src.tools import skills_tools
+        from src.tools import skills_tool
         import importlib
         from src.tools.dispatcher import dispatch
 
         ToolRegistry.clear()
-        importlib.reload(skills_tools)
+        importlib.reload(skills_tool)
 
         result = dispatch("skills_list", {})
         data = json.loads(result)

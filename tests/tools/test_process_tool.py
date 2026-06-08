@@ -24,12 +24,12 @@ class TestProcessTool:
     def test_process_via_dispatcher(self):
         """Test process tool via dispatcher."""
         from src.tools.registry import ToolRegistry
-        from src.tools import process_tools
+        from src.tools import process_tool
         import importlib
         from src.tools.dispatcher import dispatch
 
         ToolRegistry.clear()
-        importlib.reload(process_tools)
+        importlib.reload(process_tool)
 
         result = dispatch("process", {"action": "list"})
         data = json.loads(result)

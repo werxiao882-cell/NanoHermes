@@ -15,9 +15,9 @@ class TestMemoryTool:
     def test_memory_add(self):
         """Test adding memory."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch("src.tools.memory_tools.MEMORY_DIR", Path(tmpdir)), \
-                 patch("src.tools.memory_tools.MEMORY_FILE", Path(tmpdir) / "MEMORY.md"), \
-                 patch("src.tools.memory_tools.USER_FILE", Path(tmpdir) / "USER.md"):
+            with patch("src.tools.memory_tool.MEMORY_DIR", Path(tmpdir)), \
+                 patch("src.tools.memory_tool.MEMORY_FILE", Path(tmpdir) / "MEMORY.md"), \
+                 patch("src.tools.memory_tool.USER_FILE", Path(tmpdir) / "USER.md"):
                 result = json.loads(memory(action="add", content="User likes Python"))
                 assert result["status"] in ("memory_requested", "success")
                 assert result["action"] == "add"
@@ -25,9 +25,9 @@ class TestMemoryTool:
     def test_memory_view(self):
         """Test viewing memory."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch("src.tools.memory_tools.MEMORY_DIR", Path(tmpdir)), \
-                 patch("src.tools.memory_tools.MEMORY_FILE", Path(tmpdir) / "MEMORY.md"), \
-                 patch("src.tools.memory_tools.USER_FILE", Path(tmpdir) / "USER.md"):
+            with patch("src.tools.memory_tool.MEMORY_DIR", Path(tmpdir)), \
+                 patch("src.tools.memory_tool.MEMORY_FILE", Path(tmpdir) / "MEMORY.md"), \
+                 patch("src.tools.memory_tool.USER_FILE", Path(tmpdir) / "USER.md"):
                 result = json.loads(memory(action="view"))
                 assert result["status"] in ("memory_requested", "success")
                 assert result["action"] == "view"
@@ -35,12 +35,12 @@ class TestMemoryTool:
     def test_memory_via_dispatcher(self):
         """Test memory tool via dispatcher."""
         from src.tools.registry import ToolRegistry
-        from src.tools import memory_tools
+        from src.tools import memory_tool
         import importlib
         from src.tools.dispatcher import dispatch
 
         ToolRegistry.clear()
-        importlib.reload(memory_tools)
+        importlib.reload(memory_tool)
 
         result = dispatch("memory", {"action": "view"})
         data = json.loads(result)
