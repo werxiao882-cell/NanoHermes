@@ -19,7 +19,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import time
 from typing import Any
 
 from prompt_toolkit import PromptSession
@@ -31,14 +30,13 @@ from rich.panel import Panel
 from rich.text import Text
 
 from src.cli.state import TUIState
-from src.cli.event_handler import TUIEventHandler
+from src.cli.event_handler import TUIEventHandler, ConversationEventHandler
 from src.cli.layout import LayoutManager, LayoutConfig
 from src.cli.completers import ContextAwareCompleter
 from src.cli.history import TUIHistory
 from src.cli.streaming import TypewriterEffect, StreamingMarkdown, StreamingStatusIndicator
-from src.cli.widgets import StatusBar, ActivityFeed
+from src.cli.widgets import StatusBar
 from src.conversation.loop import ConversationLoop
-from src.conversation.events import EventType
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +67,9 @@ class TUIApp:
         skill_count: int = 0,
         tool_schemas: list[dict[str, Any]] | None = None,
         tool_categories: dict[str, list[str]] | None = None,
+        tool_categories_info: dict[str, list[dict[str, Any]]] | None = None,
         skill_categories: dict[str, list[str]] | None = None,
+        system_prompt: str = "",
         config: dict[str, Any] | None = None,
         session_db=None,
         jsonl_store=None,
@@ -144,12 +144,16 @@ class TUIApp:
         self.skill_count = skill_count
         self.tool_schemas = tool_schemas or []
         self.tool_categories = tool_categories or {}
+        self.tool_categories_info = tool_categories_info or {}
         self.skill_categories = skill_categories or {}
+        self.system_prompt = system_prompt
 
         # 渲染组件
         self.console = Console()
         self.conversation_lines: list[Text] = []
         self.messages: list[dict[str, Any]] = []
+        if system_prompt:
+            self.messages.append({"role": "system", "content": system_prompt})
         self._last_reasoning: str = ""
         self._current_loop = None
         self.status_bar = StatusBar(model=model, context_window=1_000_000)
@@ -203,9 +207,7 @@ class TUIApp:
             """
             self.event_handler.handle_interrupt()
             self.state.running = False
-            # 如果有正在运行的对话循环，尝试中断
-            # 使用 hasattr 检查是为了避免在初始化完成前访问不存在的属性
-            if hasattr(self, '_current_loop'):
+            if getattr(self, '_current_loop', None) is not None:
                 self._current_loop.interrupt()
             event.app.exit()
 
@@ -244,10 +246,11 @@ class TUIApp:
 
     def _render_banner(self) -> Panel:
         """渲染启动横幅，显示模型信息、工具列表和技能列表。
-        
+
         设计理由：
-        - 工具/技能按类别分组展示，避免列表过长
-        - 每个类别最多显示 5 个，超出部分用"等 N 个"提示
+        - 工具按类别分组展示，每个工具显示名称、描述和加载状态
+        - 延迟加载工具用黄色 (deferred) 标记，始终加载工具用绿色 (loaded) 标记
+        - 每个类别最多显示 5 个工具，超出部分用"等 N 个"提示
         - 使用 Rich 的 Text 对象而非纯字符串，支持富文本样式
         """
         banner_text = Text()
@@ -256,13 +259,24 @@ class TUIApp:
         banner_text.append(f"Model: {self.model}\n", style="dim")
         banner_text.append(f"Session: {self.session_id}\n\n", style="dim")
 
-        if self.tool_categories:
+        if self.tool_categories_info:
             banner_text.append("Tools:\n", style="bold cyan")
-            for category, tools in sorted(self.tool_categories.items()):
-                tool_list = ", ".join(tools[:5])
+            for category, tools in sorted(self.tool_categories_info.items()):
+                banner_text.append(f"  [{category}]\n", style="bold dim")
+                for tool in tools[:5]:
+                    name = tool["name"]
+                    desc = tool.get("description", "")
+                    is_deferred = tool.get("defer_loading", False)
+                    status_text = "(deferred)" if is_deferred else "(loaded)"
+                    status_style = "yellow" if is_deferred else "green"
+                    banner_text.append(f"    - {name} ", style="default")
+                    banner_text.append(status_text, style=status_style)
+                    if desc:
+                        banner_text.append(f": {desc}\n", style="dim")
+                    else:
+                        banner_text.append("\n")
                 if len(tools) > 5:
-                    tool_list += f" 等 {len(tools)} 个"
-                banner_text.append(f"  • {category}: {tool_list}\n", style="dim")
+                    banner_text.append(f"    ... and {len(tools) - 5} more\n", style="dim")
             banner_text.append("\n", style="dim")
 
         if self.skill_categories:
@@ -471,226 +485,26 @@ class TUIApp:
     # 对话循环
     # ========================================================================
 
-    def _create_model_caller_wrapper(self):
-        """创建模型调用包装器，添加状态指示器和计时。
-        
-        闭包设计理由：
-        - 使用闭包（而非类）的原因：
-          1. 轻量级：只需包装一个函数，无需定义完整类
-          2. 状态隔离：call_start_time 通过列表 [0] 存储，避免全局变量
-          3. 词法作用域：内部函数可以访问外部函数的 self，无需额外传参
-        
-        为什么用列表 [0] 而非普通变量：
-        - Python 的闭包只能捕获可变对象的引用，不能重新绑定变量名
-        - 如果用 call_start_time = 0，内部函数无法修改它（会创建新局部变量）
-        - 用列表 [0] 可以通过修改列表内容实现"可变捕获"
-        
-        状态管理：
-        - 调用前：启动状态指示器（旋转动画），记录开始时间
-        - 调用后：无论成功/失败（finally），停止指示器并更新状态栏
-        - 状态栏更新包括：token 使用量、响应时间，用于性能监控
-        """
-        call_start_time = [0]  # 使用列表实现闭包可变状态
-
-        def wrapped_caller(messages, tools):
-            """包装后的模型调用函数。
-            
-            签名与原始 model_caller 一致，但添加了：
-            - 状态指示器（UI 反馈）
-            - 计时（性能监控）
-            - token 使用量统计（状态栏更新）
-            """
-            call_start_time[0] = time.time()
-            self.status_indicator.start()
-            try:
-                response = self.model_caller(messages, tools)
-                return response
-            finally:
-                # finally 确保即使异常也会停止指示器
-                elapsed = time.time() - call_start_time[0]
-                self.status_indicator.complete()
-
-                # 更新状态栏（仅当响应包含 usage 信息时）
-                if isinstance(response, dict):
-                    usage = response.get("usage", {})
-                    input_tokens = usage.get("input_tokens", 0)
-                    output_tokens = usage.get("output_tokens", 0)
-                    self.status_bar.update_tokens(input_tokens, output_tokens)
-                    self.status_bar.update_time(elapsed)
-
-        return wrapped_caller
-
-    def _on_tool_start_handler(self, data: dict[str, Any]) -> None:
-        """工具开始执行时的事件处理器。
-        
-        事件驱动架构的设计理由：
-        - ConversationLoop 通过 EventBus 发布事件，TUI 订阅感兴趣的事件
-        - 优势：解耦核心对话逻辑与 UI 渲染，两者可以独立演化
-        - 事件类型：TOOL_START、TOOL_END、MODEL_RESPONSE 等
-        
-        数据处理：
-        - 提取工具名称和参数，生成简短动作描述（如 "read: main.py"）
-        - 保存 tool_call 到 JSONL，用于会话恢复时重建完整上下文
-        """
-        tool_name = data["tool_name"]
-        tool_args = data["tool_args"]
-        tool_call = data.get("tool_call", {})
-        
-        action = self._extract_tool_action(tool_name, tool_args)
-
-        self.show_tool_start(tool_name, action)
-        self._current_tool_action = action
-
-        # 保存 tool_call 到 JSONL
-        self._save_to_jsonl("tool_call", tool_name=tool_name, tool_args=tool_args,
-                           tool_call_id=tool_call.get("id", ""))
-
-    def _extract_tool_action(self, tool_name: str, tool_args: str | dict) -> str:
-        """提取工具操作的简短描述，用于 UI 展示。
-        
-        设计理由：
-        - 不同工具的关键参数不同，需要针对性提取：
-          - terminal：显示命令（截断到 40 字符）
-          - read_file/write_file：显示文件路径
-          - search_files：显示搜索模式
-          - todo：显示任务数量和模式（merge/replace）
-        - 通用策略：取第一个非字典/列表的值（简单启发式）
-        - 失败时返回 "exec"，确保 UI 不会崩溃
-        """
-        try:
-            args_dict = json.loads(tool_args) if isinstance(tool_args, str) else tool_args
-            if not args_dict:
-                return "exec"
-            
-            # 针对常用工具提取有意义的描述
-            if tool_name == "terminal":
-                cmd = args_dict.get("command", "")
-                return cmd[:40] if cmd else "exec"
-            elif tool_name == "read_file":
-                path = args_dict.get("path", "")
-                return f"read: {path}" if path else "exec"
-            elif tool_name == "write_file":
-                path = args_dict.get("path", "")
-                return f"write: {path}" if path else "exec"
-            elif tool_name == "todo":
-                todos = args_dict.get("todos")
-                merge = args_dict.get("merge", False)
-                if todos:
-                    return f"{len(todos)} tasks ({'merge' if merge else 'replace'})"
-                return "read todos"
-            elif tool_name == "search_files":
-                pattern = args_dict.get("pattern", "")
-                return f"search: {pattern}" if pattern else "exec"
-            elif tool_name == "patch":
-                path = args_dict.get("path", "")
-                return f"patch: {path}" if path else "exec"
-            elif tool_name == "execute_code":
-                code = args_dict.get("code", "")
-                preview = code[:30].replace("\n", " ")
-                return f"code: {preview}..." if code else "exec"
-            elif tool_name in ("skill_manage", "memory", "cronjob", "process"):
-                action = args_dict.get("action", "")
-                return f"{action}" if action else "exec"
-            else:
-                # 通用：取第一个非字典/列表的值
-                for v in args_dict.values():
-                    if not isinstance(v, (dict, list)):
-                        val_str = str(v)
-                        return val_str[:30] + "..." if len(val_str) > 30 else val_str
-                return "exec"
-        except (json.JSONDecodeError, TypeError):
-            return "exec"
-
-    def _on_tool_end_handler(self, data: dict[str, Any]) -> None:
-        """工具执行结束时的事件处理器。
-        
-        职责：
-        1. 显示工具完成信息（名称、动作、耗时）
-        2. 显示结果摘要（根据工具类型解析不同字段）
-        3. 保存 tool_result 到 JSONL，用于会话恢复
-        
-        状态传递：
-        - 使用 _current_tool_action 属性在 TOOL_START 和 TOOL_END 之间传递动作描述
-        - 这是简单的状态共享方式，避免在事件中重复计算动作描述
-        """
-        tool_name = data["tool_name"]
-        result = data["result"]
-        elapsed = data["elapsed"]
-        tool_call = data.get("tool_call", {})
-        
-        action = getattr(self, "_current_tool_action", "exec")
-        self.show_tool_complete(tool_name, action, elapsed)
-        self.show_tool_result_summary(tool_name, result)
-
-        # 保存 tool_result 到 JSONL
-        self._save_to_jsonl("tool_result", tool_call_id=tool_call.get("id", ""),
-                           tool_name=tool_name, content=result,
-                           metadata={"elapsed": elapsed})
-
-    def _on_model_response_handler(self, data: dict[str, Any]) -> None:
-        """模型响应完成后的事件处理器，保存助手回复到 JSONL。
-        
-        设计理由：
-        - 只在事件处理器中保存，而非在 _run_conversation_loop 末尾保存
-        - 原因：ConversationLoop 可能有多轮工具调用，每轮模型响应都需要保存
-        - 保存完整结构：content、reasoning、usage、tool_calls
-        """
-        response = data["response"]
-
-        if not self.session_id or self.session_id == "new_session":
-            return
-
-        # 保存助手回复到 JSONL
-        content = response.get("content", "")
-        reasoning = response.get("reasoning")
-        usage = response.get("usage")
-        tool_calls = response.get("tool_calls")
-
-        if self.jsonl_store:
-            try:
-                self.jsonl_store.append_message(
-                    self.session_id,
-                    role="assistant",
-                    content=content,
-                    tool_calls=tool_calls,
-                    reasoning=reasoning,
-                    usage=usage,
-                )
-            except Exception as e:
-                logger.debug(f"Failed to save assistant message to JSONL: {e}")
-
-    def _save_to_jsonl(self, role: str, **kwargs) -> None:
-        """保存消息到 JSONL 的通用方法。"""
-        if not self.session_id or self.session_id == "new_session":
-            return
-        if not self.jsonl_store:
-            return
-        try:
-            self.jsonl_store.append_message(self.session_id, role=role, **kwargs)
-        except Exception as e:
-            logger.debug(f"Failed to save {role} to JSONL: {e}")
-
     async def _run_conversation_loop(self, user_input: str) -> None:
         """使用 ConversationLoop 运行对话循环。
-        
+
         异步编程（async/await）的使用理由：
         1. TUI 主循环是异步的（run() 方法是 async），需要 await 子协程
         2. 虽然 ConversationLoop.run() 本身是同步的（阻塞式 API 调用），
            但我们在后台线程中运行它，并用 asyncio.sleep() 轮询完成状态
         3. 异步架构允许 TUI 在等待 API 响应时保持响应（处理 Ctrl+C 等）
-        
+
         线程模型设计：
         - ConversationLoop.run() 在后台线程（ThreadPoolExecutor）中运行
         - 原因：LLM API 调用是阻塞的（同步 HTTP 请求），会阻塞事件循环
         - 主线程通过检查 state.running 标志来检测用户中断（Ctrl+C）
         - 使用 asyncio.sleep(0.1) 轮询，避免忙等待（busy-wait）消耗 CPU
-        
+
         事件订阅机制：
-        - 通过 loop.events.on() 订阅 ConversationLoop 的内部事件
-        - 事件类型：TOOL_START、TOOL_END、MODEL_RESPONSE
-        - 优势：无需修改 ConversationLoop 代码，即可插入 UI 更新逻辑
-        - 这是观察者模式的实现，实现核心逻辑与 UI 的解耦
-        
+        - ConversationEventHandler 统一管理所有 TUI 对对话事件的订阅
+        - 通过 register(events) 一次性注册，与 MemoryEventHandler 模式一致
+        - 解耦 TUIApp 与事件订阅细节
+
         Memory 集成：
         - 如果 memory_manager 可用，创建 MemoryEventHandler 并注册到事件总线
         - MemoryEventHandler 会监听对话事件，自动触发记忆检索和刷写
@@ -703,24 +517,24 @@ class TUIApp:
         self.messages.append({"role": "user", "content": user_input})
         self._save_message_to_storage("user", user_input)
 
-        # 创建 ConversationLoop 实例
-        # 包装 model_caller 以添加状态指示器和计时
-        wrapped_model_caller = self._create_model_caller_wrapper()
         self._current_loop = ConversationLoop(
-            model_call=wrapped_model_caller,
+            model_call=self.model_caller,
             tool_dispatch=self.tool_dispatch,
             debug=self.debug,
         )
         loop = self._current_loop
-        
-        # 订阅事件：将 UI 更新逻辑绑定到对话循环的内部事件
-        # 这是事件驱动架构的核心：UI 不主动查询，而是被动响应事件
-        loop.events.on(EventType.TOOL_START, self._on_tool_start_handler)
-        loop.events.on(EventType.TOOL_END, self._on_tool_end_handler)
-        loop.events.on(EventType.MODEL_RESPONSE, self._on_model_response_handler)
+
+        # 统一注册 TUI 事件处理器（模型调用 + 工具执行生命周期）
+        conversation_handler = ConversationEventHandler(
+            console=self.console,
+            status_bar=self.status_bar,
+            status_indicator=self.status_indicator,
+            session_id=self.session_id,
+            jsonl_store=self.jsonl_store,
+        )
+        conversation_handler.register(loop.events)
 
         # 注册 Memory 事件处理器
-        # MemoryEventHandler 会自动监听对话事件，触发记忆相关操作
         memory_handler = None
         if self.memory_manager:
             from src.memory.event_handler import MemoryEventHandler
@@ -802,7 +616,7 @@ class TUIApp:
             self._save_message_to_storage("assistant", final_response)
 
         # 自动压缩检查（任务 12.21）
-        await self._check_auto_compress(result)
+        await self._check_auto_compress(result[0])
 
     async def _handle_command(self, command: str) -> bool:
         cmd = command.lower().strip()
@@ -1256,7 +1070,13 @@ class TUIApp:
             for tool in tool_list:
                 available = tool.check_fn() if tool.check_fn else True
                 status = "[green]✓[/green]" if available else "[dim]✗[/dim]"
-                self.console.print(f"    {status} [bold]{tool.name}[/bold] - [dim]{tool.description}[/dim]")
+                if tool.defer_loading:
+                    load_tag = "[yellow](deferred)[/yellow]"
+                else:
+                    load_tag = "[green](loaded)[/green]"
+                self.console.print(f"    {status} [bold]{tool.name}[/bold] {load_tag}")
+                if tool.description:
+                    self.console.print(f"       [dim]{tool.description}[/dim]")
         self.console.print()
 
     async def shutdown(self) -> None:
@@ -1276,7 +1096,9 @@ def create_tui(
     skill_count: int = 0,
     tool_schemas: list[dict[str, Any]] | None = None,
     tool_categories: dict[str, list[str]] | None = None,
+    tool_categories_info: dict[str, list[dict[str, Any]]] | None = None,
     skill_categories: dict[str, list[str]] | None = None,
+    system_prompt: str = "",
     config: dict[str, Any] | None = None,
     session_db=None,
     jsonl_store=None,
@@ -1302,7 +1124,9 @@ def create_tui(
         skill_count=skill_count,
         tool_schemas=tool_schemas,
         tool_categories=tool_categories,
+        tool_categories_info=tool_categories_info,
         skill_categories=skill_categories,
+        system_prompt=system_prompt,
         config=config,
         session_db=session_db,
         jsonl_store=jsonl_store,
