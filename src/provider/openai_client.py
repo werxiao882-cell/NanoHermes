@@ -127,15 +127,17 @@ class OpenAIClient:
         _model: 当前使用的模型名称。
     """
 
-    def __init__(self, client: OpenAI, model: str):
+    def __init__(self, client: OpenAI, model: str, debug: bool = False):
         """初始化 OpenAI 客户端。
 
         Args:
             client: 已初始化的 OpenAI SDK 客户端实例。
             model: 要使用的模型名称。
+            debug: 是否开启 debug 模式，输出完整请求体。
         """
         self._client = client
         self._model = model
+        self._debug = debug
 
     def chat_completion(
         self,
@@ -234,7 +236,7 @@ class OpenAIClient:
 
             # 累积变量：用于在流结束后构建完整响应
             full_content = ""      # 拼接所有增量文本
-            tool_calls = []        # 收集工具调用信息（可能分散在多个 chunk 中）
+            tool_calls_dict: dict[int, dict] = {}  # 按 index 合并工具调用分片
             usage = None           # token 使用量（通常在最后一个 chunk 中）
             finish_reason = None   # 结束原因（"stop", "tool_calls", "length" 等）
 
@@ -256,11 +258,27 @@ class OpenAIClient:
                     yield delta.content
 
                 # 提取工具调用：tool_calls 可能分片传输
-                # 每个 chunk 可能包含一个工具调用的部分信息（index, id, function 等）
-                # 需要逐个 append，后续由调用方组装完整调用
+                # 每个 chunk 包含同一工具调用的不同部分（id, function.name, function.arguments 片段）
+                # 需要按 index 合并，而非简单追加
                 if delta.tool_calls:
                     for tc in delta.tool_calls:
-                        tool_calls.append(tc.model_dump())
+                        tc_dict = tc.model_dump()
+                        index = tc_dict.get("index", 0)
+                        if index not in tool_calls_dict:
+                            tool_calls_dict[index] = tc_dict
+                        else:
+                            # 合并字段：id 只在首个 chunk 出现，function.arguments 需要拼接
+                            existing = tool_calls_dict[index]
+                            if tc_dict.get("id") and not existing.get("id"):
+                                existing["id"] = tc_dict["id"]
+                            if tc_dict.get("type"):
+                                existing["type"] = tc_dict["type"]
+                            func_new = tc_dict.get("function", {})
+                            func_existing = existing.get("function", {})
+                            if func_new.get("name"):
+                                func_existing["name"] = func_new["name"]
+                            if func_new.get("arguments"):
+                                func_existing["arguments"] = func_existing.get("arguments", "") + func_new["arguments"]
 
                 # 提取结束原因：仅在最后一个 chunk 中设置
                 # 表示模型为何停止生成（正常结束、工具调用、长度限制等）
@@ -271,6 +289,9 @@ class OpenAIClient:
                 # 不是所有提供商都支持流式 usage，需要 hasattr 检查
                 if hasattr(chunk, 'usage') and chunk.usage:
                     usage = extract_usage(chunk.usage)
+
+            # 将合并后的工具调用转换为列表（按 index 排序）
+            tool_calls = [tool_calls_dict[i] for i in sorted(tool_calls_dict.keys())] if tool_calls_dict else []
 
             # 流结束后，yield 完整响应作为生成器的最终返回值
             # 调用方可以通过 for 循环的最后一个值获取，或捕获 StopIteration.value
@@ -319,10 +340,32 @@ class OpenAIClient:
                     {"type": "function", "function": t} for t in tools
                 ]
 
+            # Debug 模式：输出完整请求体（包括系统提示词）
+            if self._debug:
+                import json
+                print(f"\n{'='*70}")
+                print(f"[DEBUG] >>> 请求体 (Request Body)")
+                print(f"{'='*70}")
+
+                # 单独输出系统提示词
+                for msg in messages:
+                    if msg.get("role") == "system":
+                        content = msg.get("content", "")
+                        print(f"\n[SYSTEM PROMPT] ({len(content)} chars)")
+                        print("-" * 70)
+                        print(content)
+                        print("-" * 70)
+                        break
+
+                # 输出完整请求体 JSON
+                print(f"\n[FULL REQUEST BODY]")
+                print(json.dumps(kwargs, ensure_ascii=False, indent=2))
+                print(f"{'='*70}\n")
+
             # 累积变量：用于构建完整响应
             full_content = ""
             reasoning = ""         # 模型的思考过程（extended thinking / reasoning_content）
-            tool_calls = []
+            tool_calls_dict: dict[int, dict] = {}  # 按 index 合并工具调用分片
             usage = None
 
             try:
@@ -350,16 +393,34 @@ class OpenAIClient:
                     elif hasattr(delta, 'reasoning_content') and delta.reasoning_content:
                         reasoning += delta.reasoning_content
 
-                    # 提取工具调用：累积所有工具调用信息
+                    # 提取工具调用：按 index 合并分片
                     if delta.tool_calls:
                         for tc in delta.tool_calls:
-                            tool_calls.append(tc.model_dump())
+                            tc_dict = tc.model_dump()
+                            index = tc_dict.get("index", 0)
+                            if index not in tool_calls_dict:
+                                tool_calls_dict[index] = tc_dict
+                            else:
+                                existing = tool_calls_dict[index]
+                                if tc_dict.get("id") and not existing.get("id"):
+                                    existing["id"] = tc_dict["id"]
+                                if tc_dict.get("type"):
+                                    existing["type"] = tc_dict["type"]
+                                func_new = tc_dict.get("function", {})
+                                func_existing = existing.get("function", {})
+                                if func_new.get("name"):
+                                    func_existing["name"] = func_new["name"]
+                                if func_new.get("arguments"):
+                                    func_existing["arguments"] = func_existing.get("arguments", "") + func_new["arguments"]
 
                     # 提取 usage：流式最后一个 chunk 可能包含 usage
                     if hasattr(chunk, 'usage') and chunk.usage:
                         usage = chunk.usage
             except Exception as e:
                 raise classify_error(e)
+
+            # 将合并后的工具调用转换为列表（按 index 排序）
+            tool_calls = [tool_calls_dict[i] for i in sorted(tool_calls_dict.keys())] if tool_calls_dict else []
 
             # 格式化工具调用：SDK 返回的格式与 ConversationLoop 期望的格式不同
             # 需要转换为标准格式：id, type, function.{name, arguments}
@@ -377,6 +438,9 @@ class OpenAIClient:
                     }
                     for tc in tool_calls
                 ]
+                # 清理可能残留的 index 字段
+                for ft in formatted_tool_calls:
+                    ft.pop("index", None)
 
             # 返回统一格式的字典，供 ConversationLoop 使用
             # 包含 request_body 用于调试和日志记录

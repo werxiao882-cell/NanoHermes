@@ -26,6 +26,18 @@ class DebugHandler:
         print(f"\n{'='*70}")
         print(f"[DEBUG] >>> 第 {iteration} 轮 - 请求体 (Request Body)")
         print(f"{'='*70}")
+
+        # 单独输出系统提示词（第一条 system 消息）
+        for msg in messages:
+            if msg.get("role") == "system":
+                print(f"\n[SYSTEM PROMPT] ({len(msg.get('content', ''))} chars)")
+                print("-" * 70)
+                print(msg.get("content", ""))
+                print("-" * 70)
+                break
+
+        # 输出完整请求体 JSON
+        print(f"\n[FULL REQUEST BODY]")
         print(json.dumps(request_body, ensure_ascii=False, indent=2))
         print(f"{'='*70}\n")
 
