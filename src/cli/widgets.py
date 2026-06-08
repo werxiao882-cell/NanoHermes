@@ -263,20 +263,26 @@ class ActivityFeed:
     PREFIX = "┊"
 
     @staticmethod
-    def format_start(tool_name: str, action: str = "") -> str:
-        icon = styled_text("🟦", "blue")
+    def format_start(tool_name: str, action: str = "") -> Text:
         action_text = f" {action}" if action else ""
-        return f"{ActivityFeed.PREFIX} {icon} preparing {tool_name}{action_text}..."
+        text = Text()
+        text.append(f"{ActivityFeed.PREFIX} ")
+        text.append("🟦", style="blue")
+        text.append(f" preparing {tool_name}{action_text}...")
+        return text
 
     @staticmethod
-    def format_complete(tool_name: str, action: str = "", elapsed: float = 0.0) -> str:
-        icon = styled_text("🟩", "green")
+    def format_complete(tool_name: str, action: str = "", elapsed: float = 0.0) -> Text:
         action_text = f" {action}" if action else ""
         time_text = f" {elapsed:.1f}s" if elapsed > 0 else ""
-        return f"{ActivityFeed.PREFIX} {icon} {tool_name}{action_text}{time_text}"
+        text = Text()
+        text.append(f"{ActivityFeed.PREFIX} ")
+        text.append("🟩", style="green")
+        text.append(f" {tool_name}{action_text}{time_text}")
+        return text
 
     @staticmethod
-    def format_result(tool_name: str, summary: str) -> str:
+    def format_result(tool_name: str, summary: str) -> Text:
         icons = {
             "read_file": "📄",
             "write_file": "📝",
@@ -286,13 +292,19 @@ class ActivityFeed:
             "grep": "🔎",
         }
         icon = icons.get(tool_name, "✅")
-        return f"{ActivityFeed.PREFIX} {icon} {summary}"
+        text = Text()
+        text.append(f"{ActivityFeed.PREFIX} ")
+        text.append(f"{icon} {summary}")
+        return text
 
     @staticmethod
-    def format_error(tool_name: str, error: str = "") -> str:
-        icon = styled_text("🟥", "red")
+    def format_error(tool_name: str, error: str = "") -> Text:
         error_text = f" - {error[:50]}" if error else ""
-        return f"{ActivityFeed.PREFIX} {icon} {tool_name}{error_text}"
+        text = Text()
+        text.append(f"{ActivityFeed.PREFIX} ")
+        text.append("🟥", style="red")
+        text.append(f" {tool_name}{error_text}")
+        return text
 
 
 class ProgressBar:
