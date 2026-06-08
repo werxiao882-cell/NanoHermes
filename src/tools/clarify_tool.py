@@ -110,4 +110,5 @@ register_tool(
     },
     handler=clarify,
     description="向用户提问",
+    defer_loading=True,
 )

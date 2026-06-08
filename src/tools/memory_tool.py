@@ -266,4 +266,5 @@ register_tool(
     handler=memory,
     check_fn=check_memory_requirements,
     description="持久记忆",
+    defer_loading=True,
 )
