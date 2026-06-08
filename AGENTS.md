@@ -2,23 +2,18 @@
 
 ## 项目概况
 
-Python 自进化 AI Agent 系统，参考 Hermes Agent 架构。10 个核心模块，~166 个测试。
+Python 自进化 AI Agent 系统，参考 Hermes Agent 架构。15 个核心模块，~960 个测试。
 
 ## 关键命令
 
 ```bash
 # 启动
-python -m src.main              # 交互对话模式
-python -m src.main --test-api   # 测试 API 连接
+python -m src.main              # TUI 交互模式（默认）
 python -m src.main --debug      # debug 模式（输出完整请求/响应 JSON + 思考内容）
 python -m src.main --resume     # 恢复最近会话
 python -m src.main --resume <id>  # 按 ID 恢复
 python -m src.main --resume-title "标题"  # 按标题恢复
 python -m src.main --list-sessions  # 列出所有历史会话
-python -m src.main --tui        # 启动 TUI 聊天界面
-
-# 快速 API 测试（独立脚本）
-python test_api.py
 
 # MCP 服务器启动
 python -m src.mcp.server                    # Stdio 模式（默认）
@@ -52,28 +47,49 @@ python -m pytest tests/test_e2e.py -v -s  # 端到端（-s 显示输出）
 
 ```
 src/
-├── main.py / __main__.py    # 入口（耦合所有模块）
+├── main.py / __main__.py    # 入口（组合根，依赖注入 + 模块组装）
 ├── provider/                # LLM 提供商运行时（凭证/API路由/客户端/回退链）
-├── tools/                   # 工具运行时（注册表/分发器/终端/文件/澄清/技能等）
+├── tools/                   # 工具运行时（注册表/分发器/搜索引擎/终端/文件/技能等）
 ├── mcp/                     # MCP 协议支持（服务器/客户端/桥接/注册表）
 ├── session/                 # 会话存储（SQLite + JSONL 双存储）
 ├── memory/                  # 记忆系统（文件提供者 + 编排器）
 ├── skills/                  # 技能系统（SKILL.md 解析 + Curator 自进化）
 ├── compression/             # 上下文压缩（摘要预算 + 头尾保护）
 ├── prompt/                  # 系统提示组装（三层：stable/context/volatile）
-├── conversation/            # 核心对话循环 + 错误分类
+├── conversation/            # 核心对话循环 + 错误分类 + 事件总线
 ├── delegation/              # 多 Agent 委托（leaf/orchestrator 角色）
 ├── insights/                # 指标引擎（token 聚合 + 成本估算）
 ├── auxiliary/               # 辅助 LLM 客户端（后台任务）
-└── cli/                     # TUI 聊天界面 + 流式 CLI
+├── cli/                     # TUI 聊天界面 + 事件处理器 + 流式组件
+└── config/                  # 配置加载（模型定义/凭证解析/提供商注册）
 ```
+
+## 工具系统
+
+### 工具注册
+
+- 工具通过 AST 自动发现：`discover_tools(tools_dir)` 扫描 `src/tools/` 下的模块
+- 或显式初始化：`ToolRegistry.init_all_tools()` 导入所有工具模块
+- 每个工具在模块加载时调用 `register_tool()` 自动注册
+
+### 延迟加载（Tool Search）
+
+工具分为两类：
+
+**始终加载**（`defer_loading=False`，6 个）：启动时加入 LLM 上下文
+- `read_file`, `write_file`, `search_files`, `patch`, `terminal`, `search_tools`
+
+**延迟加载**（`defer_loading=True`，11 个）：通过 `search_tools` 工具按需发现
+- `execute_code`, `process`, `todo`, `memory`, `session_search`, `clarify`, `skill_view`, `skills_list`, `skill_manage`, `delegate_task`, `cronjob`
+
+搜索引擎使用 BM25（自然语言）+ Regex（精确匹配）双引擎，Auto 模式自动选择策略。
 
 ## 重要约定
 
 - **每个 `src/<module>/` 必须包含 `ARCHITECTURE.md`**（详见 `openspec/specs/project-conventions/spec.md`）
-- 工具通过 AST 自动发现：`discover_tools(tools_dir)` 扫描 `src/tools/` 下的模块
 - 代码注释使用**中文**，说明"为什么"而非仅"做什么"
 - pytest 配置 `asyncio_mode = "auto"`，无需手动标记异步测试
+- 事件驱动解耦：`ConversationLoop` 通过 `EventBus` 发布事件，外部处理器（记忆、TUI、调试）订阅接入
 
 ## 编码规范
 
@@ -244,14 +260,14 @@ def apply_anthropic_cache_control(
 |------|------|----------|
 | `main.py` | 依赖注入、模块组装、CLI 参数解析 | 业务逻辑、SDK 操作、UI 渲染 |
 | `provider/` | 凭证解析、客户端构建、API 调用、回退链 | UI 逻辑、会话管理、工具分发 |
-| `tools/` | 工具注册、分发、执行 | 对话逻辑、会话存储、记忆管理 |
+| `tools/` | 工具注册、分发、执行、搜索（BM25/Regex） | 对话逻辑、会话存储、记忆管理 |
 | `session/` | 会话生命周期、消息存储、搜索 | UI 格式化、对话循环、压缩逻辑 |
 | `memory/` | 记忆读写、提供者编排 | 会话管理、工具调用、提示组装 |
 | `skills/` | 技能加载、启用/禁用、CRUD | 对话逻辑、UI 渲染、工具分发 |
 | `compression/` | 上下文压缩、摘要生成 | 直接操作数据库（通过事件） |
 | `prompt/` | 系统提示组装、缓存控制 | 威胁检测（独立安全模块）、文件搜索 |
-| `conversation/` | 核心对话循环、事件总线、错误分类 | UI 渲染、工具实现、记忆管理 |
-| `cli/` | UI 渲染、用户输入、命令展示 | 对话逻辑、压缩实现、技能管理 |
+| `conversation/` | 核心对话循环、事件总线、错误分类、动态工具管理 | UI 渲染、工具实现、记忆管理 |
+| `cli/` | UI 渲染、用户输入、命令展示、事件处理器 | 对话逻辑、压缩实现、技能管理 |
 | `insights/` | 数据聚合、指标计算 | UI 格式化（独立 formatter）、定价数据 |
 | `delegation/` | 多 Agent 委托、并发控制 | 工具实现、会话管理 |
 | `mcp/` | MCP 协议支持、服务器/客户端 | 工具实现、对话逻辑 |
@@ -316,5 +332,6 @@ client = OpenAI(api_key=api_key)  # 应该用 build_client()
 
 - 测试框架：pytest + pytest-asyncio（auto 模式）
 - 端到端测试需要有效 API Key 和 `.env` 配置
-- 并发测试验证多线程场景（`test_concurrent.py`）
-- 集成测试验证完整启动流程（`test_main_integration.py`）
+- 工具搜索测试：`tests/tools/test_search_tool.py`（BM25 + Regex + 动态工具发现）
+- 注册表测试：`tests/tools/test_tool_registry.py`（defer_loading 过滤）
+- 已知跳过：`tests/tools/test_code_execution_tool.py`（编码问题）、`tests/tools/test_integration.py`（依赖缺失）
