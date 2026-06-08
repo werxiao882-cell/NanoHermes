@@ -303,4 +303,5 @@ register_tool(
     handler=session_search,
     check_fn=check_session_search_requirements,
     description="历史会话搜索",
+    defer_loading=True,
 )

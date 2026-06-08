@@ -386,4 +386,5 @@ register_tool(
     handler=process,
     check_fn=check_process_requirements,
     description="后台进程管理",
+    defer_loading=True,
 )

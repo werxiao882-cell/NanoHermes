@@ -178,6 +178,13 @@ def todo_tool(
     """
     global _todo_store
 
+    # 兼容模型传入 JSON 字符串的情况
+    if isinstance(todos, str):
+        try:
+            todos = json.loads(todos)
+        except json.JSONDecodeError:
+            return json.dumps({"error": "Invalid JSON for todos parameter"})
+
     if todos is not None:
         items = _todo_store.write(todos, merge)
     else:
@@ -285,4 +292,5 @@ register_tool(
     schema=TODO_SCHEMA,
     handler=lambda todos=None, merge=False, task_id=None, **kwargs: todo_tool(todos=todos, merge=merge),
     description="Manage your task list for the current session",
+    defer_loading=True,
 )

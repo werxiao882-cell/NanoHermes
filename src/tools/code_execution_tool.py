@@ -183,4 +183,5 @@ register_tool(
     handler=execute_code,
     check_fn=check_code_execution_requirements,
     description="执行 Python 代码",
+    defer_loading=True,
 )

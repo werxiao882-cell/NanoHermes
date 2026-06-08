@@ -222,4 +222,5 @@ register_tool(
     handler=delegate_task,
     check_fn=check_delegation_requirements,
     description="子 Agent 委托",
+    defer_loading=True,
 )

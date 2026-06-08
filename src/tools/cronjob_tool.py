@@ -448,4 +448,5 @@ register_tool(
     handler=cronjob,
     check_fn=check_cronjob_requirements,
     description="管理定时任务",
+    defer_loading=True,
 )
