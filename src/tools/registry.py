@@ -58,6 +58,7 @@ class ToolEntry:
     - handler 返回字符串：统一工具输出格式，便于下游处理
     - check_fn 可选：不是所有工具都需要可用性检查（如文件工具始终可用）
     - is_async 标记：用于分发器决定如何调用 handler（await 或直接调用）
+    - defer_loading 标记：控制工具是否在启动时加载到 LLM 上下文
 
     Attributes:
         name: 工具的唯一名称（如 "terminal", "read_file"）。
@@ -74,6 +75,8 @@ class ToolEntry:
                   分发器根据此标记决定调用方式。
         description: 人类可读的工具描述。
                      用于调试、日志和 UI 展示。
+        defer_loading: 是否延迟加载。True 时工具不在启动时加载到上下文，
+                       只能通过 search_tools 工具动态发现。
     """
     name: str
     toolset: str
@@ -82,6 +85,7 @@ class ToolEntry:
     check_fn: Callable[[], bool] | None = None
     is_async: bool = False
     description: str = ""
+    defer_loading: bool = False
 
 
 class ToolRegistry:
@@ -158,6 +162,7 @@ class ToolRegistry:
     def get_tool_schemas(
         cls,
         toolset_filter: set[str] | None = None,
+        exclude_deferred: bool = False,
     ) -> list[dict[str, Any]]:
         """获取工具 schema 列表（OpenAI 格式）。
 
@@ -169,22 +174,38 @@ class ToolRegistry:
         过滤策略：
         - toolset_filter 为 None：返回所有工具（默认行为）
         - toolset_filter 为 set：只返回属于这些工具集的工具
+        - exclude_deferred 为 True：排除 defer_loading=True 的工具
         - 使用 set 而非 list：O(1) 查找时间复杂度
 
         Args:
             toolset_filter: 工具集名称集合，只返回属于这些工具集的工具。
                            None 表示返回所有工具的 schema。
+            exclude_deferred: 是否排除延迟加载的工具。True 时只返回
+                             defer_loading=False 的工具（用于初始上下文）。
 
         Returns:
             OpenAI 格式的工具 schema 列表。
         """
         schemas = []
         for entry in cls._tools.values():
-            # 如果指定了过滤条件，检查工具是否属于指定工具集
+            if exclude_deferred and entry.defer_loading:
+                continue
             if toolset_filter and entry.toolset not in toolset_filter:
                 continue
             schemas.append(entry.schema)
         return schemas
+
+    @classmethod
+    def get_deferred_tools(cls) -> list[ToolEntry]:
+        """获取所有延迟加载的工具条目。
+
+        延迟加载的工具不在启动时加载到 LLM 上下文，
+        只能通过 search_tools 工具动态发现。
+
+        Returns:
+            defer_loading=True 的 ToolEntry 列表。
+        """
+        return [entry for entry in cls._tools.values() if entry.defer_loading]
 
     @classmethod
     def clear(cls) -> None:
@@ -225,6 +246,7 @@ class ToolRegistry:
             "src.tools.skills_tool",
             "src.tools.process_tool",
             "src.tools.todo_tool",
+            "src.tools.tool_search",
         ]
 
         for module_name in tool_modules:
@@ -263,6 +285,34 @@ class ToolRegistry:
             categories[category].append(tool.name)
         return categories
 
+    @classmethod
+    def get_tool_categories_with_info(cls) -> dict[str, list[dict[str, Any]]]:
+        """按工具集分类所有已注册的工具，包含详细信息。
+
+        返回结构示例：
+        {
+            "terminal": [
+                {"name": "terminal", "description": "执行 shell 命令", "defer_loading": False},
+                {"name": "process", "description": "后台进程管理", "defer_loading": True},
+            ],
+        }
+
+        Returns:
+            工具集名称到工具信息列表的映射，每个工具包含 name、description、defer_loading。
+        """
+        categories: dict[str, list[dict[str, Any]]] = {}
+        for tool in cls._tools.values():
+            category = tool.toolset
+            if category not in categories:
+                categories[category] = []
+            categories[category].append({
+                "name": tool.name,
+                "description": tool.description or "",
+                "defer_loading": tool.defer_loading,
+            })
+        return categories
+        return categories
+
 
 def register_tool(
     name: str,
@@ -272,6 +322,7 @@ def register_tool(
     check_fn: Callable[[], bool] | None = None,
     is_async: bool = False,
     description: str = "",
+    defer_loading: bool = False,
 ) -> None:
     """便捷函数：注册一个工具。
 
@@ -301,6 +352,8 @@ def register_tool(
         check_fn: 可用性检查函数（可选）。返回 True 表示工具可用。
         is_async: 是否为异步工具。影响分发器的调用方式。
         description: 人类可读描述。用于调试和日志。
+        defer_loading: 是否延迟加载。True 时工具不在启动时加载到上下文，
+                      只能通过 search_tools 工具动态发现。默认 False。
     """
     entry = ToolEntry(
         name=name,
@@ -310,6 +363,7 @@ def register_tool(
         check_fn=check_fn,
         is_async=is_async,
         description=description,
+        defer_loading=defer_loading,
     )
     ToolRegistry.register(entry)
 
@@ -324,9 +378,14 @@ def get_all_tools() -> list[ToolEntry]:
     return ToolRegistry.get_all_tools()
 
 
-def get_tool_schemas(toolset_filter: set[str] | None = None) -> list[dict[str, Any]]:
+def get_tool_schemas(toolset_filter: set[str] | None = None, exclude_deferred: bool = False) -> list[dict[str, Any]]:
     """便捷函数：获取工具 schema 列表。"""
-    return ToolRegistry.get_tool_schemas(toolset_filter)
+    return ToolRegistry.get_tool_schemas(toolset_filter, exclude_deferred)
+
+
+def get_deferred_tools() -> list[ToolEntry]:
+    """便捷函数：获取所有延迟加载的工具。"""
+    return ToolRegistry.get_deferred_tools()
 
 
 def discover_tools(tools_dir: str | None = None) -> None:
@@ -377,7 +436,7 @@ def discover_tools(tools_dir: str | None = None) -> None:
     # async_bridge.py: 异步桥接层，基础设施
     # terminal.py: 终端工具的注册逻辑在函数内部，AST 无法检测
     skip_files = {"__init__.py", "registry.py", "dispatcher.py", "toolsets.py",
-                  "availability.py", "async_bridge.py", "terminal.py"}
+                  "availability.py", "async_bridge.py", "terminal.py", "search_tool.py"}
 
     for py_file in sorted(tools_path.glob("*.py")):
         if py_file.name in skip_files:
