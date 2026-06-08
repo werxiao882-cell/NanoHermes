@@ -59,7 +59,13 @@ class TestFileMemoryProviderPrefetch:
 
     def test_empty_files_return_empty(self, provider, hermes_home):
         """测试空文件返回空字符串。"""
+        # initialize() 会创建带有标题的文件，需要清空内容
         provider.initialize("session-1")
+        # 清空文件内容（保留文件）
+        memory_path = hermes_home / "memory" / "MEMORY.md"
+        user_path = hermes_home / "memory" / "USER.md"
+        memory_path.write_text("", encoding="utf-8")
+        user_path.write_text("", encoding="utf-8")
 
         result = provider.prefetch("")
         assert result == ""
@@ -90,13 +96,13 @@ class TestFileMemoryProviderActions:
 
         assert json.loads(result)["success"] is True
 
-        memory_path = hermes_home / "MEMORY.md"
+        memory_path = hermes_home / "memory" / "MEMORY.md"
         content = memory_path.read_text(encoding="utf-8")
         assert "- New fact" in content
 
     def test_replace_memory_entry(self, provider, hermes_home):
         """测试替换记忆条目。"""
-        memory_path = hermes_home / "MEMORY.md"
+        memory_path = hermes_home / "memory" / "MEMORY.md"
         memory_path.write_text("- Old fact\n", encoding="utf-8")
 
         provider.initialize("session-1")
@@ -115,7 +121,7 @@ class TestFileMemoryProviderActions:
 
     def test_remove_memory_entry(self, provider, hermes_home):
         """测试删除记忆条目。"""
-        memory_path = hermes_home / "MEMORY.md"
+        memory_path = hermes_home / "memory" / "MEMORY.md"
         memory_path.write_text("- Fact to remove\n- Keep this\n", encoding="utf-8")
 
         provider.initialize("session-1")
@@ -143,7 +149,7 @@ class TestFileMemoryProviderActions:
 
         assert json.loads(result)["success"] is True
 
-        user_path = hermes_home / "USER.md"
+        user_path = hermes_home / "memory" / "USER.md"
         content = user_path.read_text(encoding="utf-8")
         assert "- User is a developer" in content
 
@@ -153,13 +159,13 @@ class TestFileMemoryProviderAtomicWrite:
 
     def test_atomic_write_creates_temp_file(self, provider, hermes_home):
         """测试原子写入创建临时文件。"""
-        memory_path = hermes_home / "MEMORY.md"
+        memory_path = hermes_home / "memory" / "MEMORY.md"
         memory_path.write_text("# Memory\n\n", encoding="utf-8")
 
         provider._atomic_write(memory_path, "- New content\n")
 
         # 临时文件不应存在
-        assert not (hermes_home / "MEMORY.tmp").exists()
+        assert not (hermes_home / "memory" / "MEMORY.tmp").exists()
         # 目标文件应包含新内容
         content = memory_path.read_text(encoding="utf-8")
         assert "- New content" in content
@@ -199,7 +205,7 @@ class TestFileMemoryProviderCharLimits:
 
     def test_truncate_long_memory_content(self, provider, hermes_home):
         """测试截断过长的记忆内容。"""
-        memory_path = hermes_home / "MEMORY.md"
+        memory_path = hermes_home / "memory" / "MEMORY.md"
         long_content = "A" * 3000
         memory_path.write_text(long_content, encoding="utf-8")
 
@@ -211,7 +217,7 @@ class TestFileMemoryProviderCharLimits:
 
     def test_truncate_long_user_content(self, provider, hermes_home):
         """测试截断过长的用户内容。"""
-        user_path = hermes_home / "USER.md"
+        user_path = hermes_home / "memory" / "USER.md"
         long_content = "B" * 2000
         user_path.write_text(long_content, encoding="utf-8")
 

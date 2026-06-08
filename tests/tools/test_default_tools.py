@@ -15,25 +15,25 @@ def _setup_default_tools():
     ToolRegistry.clear()
 
     # Reload all tool modules to trigger re-registration
-    from src.tools import clarify_tools
-    from src.tools import code_execution_tools
-    from src.tools import cronjob_tools
-    from src.tools import delegation_tools
-    from src.tools import memory_tools
-    from src.tools import session_search_tools
-    from src.tools import skills_tools
-    from src.tools import process_tools
-    from src.tools import file_tools
+    from src.tools import clarify_tool
+    from src.tools import code_execution_tool
+    from src.tools import cronjob_tool
+    from src.tools import delegation_tool
+    from src.tools import memory_tool
+    from src.tools import session_search_tool
+    from src.tools import skills_tool
+    from src.tools import process_tool
+    from src.tools import file_tool
 
-    importlib.reload(clarify_tools)
-    importlib.reload(code_execution_tools)
-    importlib.reload(cronjob_tools)
-    importlib.reload(delegation_tools)
-    importlib.reload(memory_tools)
-    importlib.reload(session_search_tools)
-    importlib.reload(skills_tools)
-    importlib.reload(process_tools)
-    importlib.reload(file_tools)
+    importlib.reload(clarify_tool)
+    importlib.reload(code_execution_tool)
+    importlib.reload(cronjob_tool)
+    importlib.reload(delegation_tool)
+    importlib.reload(memory_tool)
+    importlib.reload(session_search_tool)
+    importlib.reload(skills_tool)
+    importlib.reload(process_tool)
+    importlib.reload(file_tool)
 
     yield
 
@@ -206,8 +206,8 @@ class TestPatchTool:
 
         result = dispatch("patch", {
             "path": str(test_file),
-            "old_str": "Hello World",
-            "new_str": "Hi World",
+            "old_string": "Hello World",
+            "new_string": "Hi World",
         })
         data = json.loads(result)
         assert data["status"] == "success"
@@ -221,8 +221,8 @@ class TestPatchTool:
         from src.tools.dispatcher import dispatch
         result = dispatch("patch", {
             "path": "/nonexistent/file.txt",
-            "old_str": "test",
-            "new_str": "test",
+            "old_string": "test",
+            "new_string": "test",
         })
         data = json.loads(result)
         assert "error" in data
@@ -236,8 +236,8 @@ class TestPatchTool:
 
         result = dispatch("patch", {
             "path": str(test_file),
-            "old_str": "Not Found",
-            "new_str": "test",
+            "old_string": "Not Found",
+            "new_string": "test",
         })
         data = json.loads(result)
         assert "error" in data

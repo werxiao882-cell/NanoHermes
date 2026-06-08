@@ -55,8 +55,8 @@ class TestSessionStorageLifecycle:
         # 验证 JSONL 存储
         messages_jsonl = jsonl_store.load_messages(session_id)
         assert len(messages_jsonl) == 2
-        assert messages_jsonl[0]["type"] == "user"
-        assert messages_jsonl[1]["type"] == "assistant"
+        assert messages_jsonl[0]["role"] == "user"
+        assert messages_jsonl[1]["role"] == "assistant"
 
     def test_list_sessions_after_save(self, temp_storage):
         """测试保存后可列出会话。"""
