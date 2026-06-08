@@ -49,7 +49,7 @@ def dispatch(
     if entry is None:
         return json.dumps({
             "error": f"工具未找到: '{name}'。已注册的工具: "
-                     f"{', '.join(ToolRegistry.get_all_tools())}"
+                     f"{', '.join(entry.name for entry in ToolRegistry.get_all_tools())}"
         })
 
     # 步骤 2: 检查可用性

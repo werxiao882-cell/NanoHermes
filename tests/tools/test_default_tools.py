@@ -15,6 +15,7 @@ def _setup_default_tools():
     ToolRegistry.clear()
 
     # Reload all tool modules to trigger re-registration
+    from src.tools import terminal
     from src.tools import clarify_tools
     from src.tools import code_execution_tools
     from src.tools import cronjob_tools
@@ -25,6 +26,7 @@ def _setup_default_tools():
     from src.tools import process_tools
     from src.tools import file_tools
 
+    importlib.reload(terminal)
     importlib.reload(clarify_tools)
     importlib.reload(code_execution_tools)
     importlib.reload(cronjob_tools)

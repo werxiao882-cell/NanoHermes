@@ -103,6 +103,7 @@ class JsonlSessionStore:
             metadata: 额外元数据。
         """
         record = {
+            "type": role,
             "role": role,
             "timestamp": time.time(),
         }

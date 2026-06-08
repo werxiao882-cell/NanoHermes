@@ -510,7 +510,7 @@ class TUIApp:
                     self.state.welcomed = True
 
                 try:
-                    user_input = await self.session.prompt_async()
+                    user_input = await self.session.prompt_async("> ")
                 except EOFError:
                     self.state.running = False
                     break
