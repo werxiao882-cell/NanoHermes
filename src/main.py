@@ -124,19 +124,21 @@ def main_chat(debug: bool = False, resume: str | None = None, resume_title: str 
     client = OpenAI(api_key=api_key, base_url=base_url)
 
     from src.provider.openai_client import OpenAIClient as ProviderOpenAIClient
-    provider_client = ProviderOpenAIClient(client, model)
+    provider_client = ProviderOpenAIClient(client, model, debug=debug)
     model_caller = provider_client.build_caller()  # 构建可重用的调用器闭包
 
     # ── 步骤 3: 初始化工具系统 ──
     # 工具注册表是类级别单例，需要全局初始化一次
-    from src.tools.registry import ToolRegistry
+    from src.tools.registry import ToolRegistry, get_tool_schemas
     from src.tools.dispatcher import dispatch as tool_dispatch_func
 
     ToolRegistry.init_all_tools()  # 扫描 src/tools/ 目录并注册所有工具
 
+    # 获取初始工具集（排除延迟加载的工具）
     tool_count = len(ToolRegistry.get_all_tools())
-    tool_schemas = ToolRegistry.get_tool_schemas()  # 用于 LLM 工具调用
-    tool_categories = ToolRegistry.get_tool_categories()  # 用于 UI 展示
+    tool_schemas = get_tool_schemas(exclude_deferred=True)  # 仅核心工具 + search_tools
+    tool_categories = ToolRegistry.get_tool_categories()  # 用于 UI 展示（简单名称列表）
+    tool_categories_info = ToolRegistry.get_tool_categories_with_info()  # 用于 UI 展示（含描述和延迟加载状态）
 
     # ── 步骤 4: 初始化技能系统 ──
     from src.skills.manager import SkillManager
@@ -165,7 +167,19 @@ def main_chat(debug: bool = False, resume: str | None = None, resume_title: str 
     file_provider = FileMemoryProvider(hermes_home)
     memory_manager.add_provider(file_provider)
 
-    # ── 步骤 7: 创建 TUI（依赖注入所有模块） ──
+    # ── 步骤 6.5: 组装系统提示词 ──
+    from src.prompt.assembler import PromptAssembler
+    assembler = PromptAssembler()
+    system_prompt_result = assembler.build_system_prompt(
+        model=model,
+        skills=[],  # TODO: 从 skill_manager 获取启用的技能
+        toolsets=list(tool_categories.keys()) if tool_categories else None,
+        include_memory=False,  # 记忆由 MemoryEventHandler 动态注入
+        include_user_profile=False,
+    )
+    system_prompt = system_prompt_result.full_text
+
+    # ── 步骤 7: 创建 TUI（依赖注入所有模块） ───
     # 设计理由：
     # TUI 不实现任何业务逻辑，仅负责：
     # - 用户输入输出
@@ -181,7 +195,9 @@ def main_chat(debug: bool = False, resume: str | None = None, resume_title: str 
         skill_count=skill_count,
         tool_schemas=tool_schemas,
         tool_categories=tool_categories,
+        tool_categories_info=tool_categories_info,  # 工具详细信息（含描述和延迟加载状态）
         skill_categories=skill_categories,
+        system_prompt=system_prompt,      # 注入系统提示词
         config={
             "typing_speed": config.tui.typing_speed,
             "show_tool_panel": config.tui.show_tool_panel,
