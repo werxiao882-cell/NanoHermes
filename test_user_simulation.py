@@ -77,7 +77,7 @@ memory_provider = FileMemoryProvider(memory_dir)
 print(f"  ✅ 记忆系统: FileMemoryProvider")
 
 # 7. 提示组装
-from src.prompt.assembler import PromptAssembler
+from src.conversation.assembler import PromptAssembler
 prompt_assembler = PromptAssembler()
 print(f"  ✅ 提示组装: PromptAssembler")
 

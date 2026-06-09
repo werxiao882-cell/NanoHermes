@@ -203,7 +203,7 @@ class TestPromptAssembly:
 
     def test_three_tier_assembly(self):
         """测试三层提示组装。"""
-        from src.prompt.assembler import PromptAssembler
+        from src.conversation.assembler import PromptAssembler
 
         assembler = PromptAssembler()
         assembler.set_stable(["身份：AI 助手", "工具：terminal"])
@@ -217,7 +217,7 @@ class TestPromptAssembly:
 
     def test_stable_hash_changes(self):
         """测试 stable 层变化时哈希改变。"""
-        from src.prompt.assembler import PromptAssembler
+        from src.conversation.assembler import PromptAssembler
 
         assembler = PromptAssembler()
         assembler.set_stable(["stable text 1"])
