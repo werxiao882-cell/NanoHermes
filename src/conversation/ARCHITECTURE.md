@@ -83,7 +83,8 @@
 
 ## Responsibility
 三层系统提示组装器，确保提示缓存有效。
-包含身份、工具指导、技能索引、上下文文件、记忆快照、用户画像等。
+段落化结构（Claude Code 风格）：Identity → Tool Usage → Skills → Operational Guidance → Context Files → Memory → User Profile → Timestamp。
+包含身份、工具指导（含 select: 精确加载语法）、技能索引（含 TRIGGER/SKIP 规则）、上下文文件、记忆快照、用户画像等。
 
 ### 安全特性
 - **上下文威胁检测**：10 种正则模式检测提示注入攻击和数据泄露风险
@@ -97,11 +98,12 @@
 │                    PromptAssembler                            │
 │                                                              │
 │  ┌────────────────────────────────────────────────────────┐  │
-│  │  Stable Layer (缓存友好)                                │  │
-│  │  - Identity: "你是 NanoHermes..."                      │  │
-│  │  - Tool guidance: "你可以使用终端工具..."              │  │
-│  │  - Skill hints: available skills list                  │  │
-│  │  - Environment hints: working directory, etc.          │  │
+│  │  Stable Layer (缓存友好, 段落化结构)                    │  │
+│  │  - # Identity: SOUL.md 内容                            │  │
+│  │  - # Tool Usage: Always-Loaded + Deferred (分组)       │  │
+│  │    + select:<name> 精确加载语法                        │  │
+│  │  - # Skills: TRIGGER/SKIP 内联格式                     │  │
+│  │  - # Operational Guidance: 模型特定指导                │  │
 │  │  → Changes rarely, good for prompt caching             │  │
 │  └────────────────────────────────────────────────────────┘  │
 │                                                              │
