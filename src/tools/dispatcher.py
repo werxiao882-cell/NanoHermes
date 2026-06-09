@@ -50,6 +50,7 @@ from src.tools.registry import ToolRegistry
 from src.tools.availability import check_tool_availability
 from src.tools.result_budget import apply_budget_to_dispatch_result
 from src.tools.execution_tracker import ToolExecutionTracker
+from src.tools.concurrency_limiter import ToolConcurrencyLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -104,10 +105,24 @@ def dispatch(
     # - 返回错误字符串让主循环能继续处理（如展示错误给用户）
     entry = ToolRegistry.get_tool(name)
     if entry is None:
-        tool_names = [t.name for t in ToolRegistry.get_all_tools()]
+        # 检查是否为延迟加载的工具（存在于注册表但未在当前上下文中加载）
+        # 提供 select: 语法提示，帮助模型快速定位并加载工具
+        deferred_names = [
+            t.name for t in ToolRegistry.get_all_tools() if t.defer_loading
+        ]
+        core_names = [
+            t.name for t in ToolRegistry.get_all_tools() if not t.defer_loading
+        ]
+
         return json.dumps({
-            "error": f"工具未找到: '{name}'。已注册的工具: "
-                     f"{', '.join(tool_names)}"
+            "error": "InputValidationError",
+            "message": (
+                f"工具 '{name}' 未加载。"
+                f"使用 search_tools 查询 'select:{name}' 加载后再调用。"
+            ),
+            "hint": f"search_tools(query='select:{name}')",
+            "available_tools": core_names,
+            "deferred_tools": deferred_names,
         })
 
     # 步骤 2: 检查可用性
@@ -425,3 +440,75 @@ def _parse_args(args: dict[str, Any] | str | None) -> dict[str, Any]:
             return {"raw": args}
     # 其他类型（理论上不应该出现），返回空字典
     return {}
+
+
+def dispatch_batch(
+    tool_calls: list[tuple[str, dict[str, Any] | str | None]],
+) -> list[str]:
+    """批量执行工具调用。
+
+    设计理由：
+    - LLM 可能一次返回多个 tool_use（parallel tool calling）
+    - 逐个 dispatch() 调用可行，但 dispatch_batch() 提供统一的批量入口
+    - 集成 ToolConcurrencyLimiter 的分组逻辑，为后续异步并发预留接口
+    - 同步路径下顺序执行即可，真正的并发执行由 async execute_batch 处理
+
+    Args:
+        tool_calls: [(name, args), ...] 工具调用列表。
+
+    Returns:
+        [result1, result2, ...] 与输入顺序一致的结果字符串列表。
+    """
+    if not tool_calls:
+        return []
+
+    # 步骤 1: 将 (name, args) 元组转为 limiter 所需的 dict 格式
+    call_dicts = [
+        {"name": name, "args": args}
+        for name, args in tool_calls
+    ]
+
+    # 步骤 2: 构建并发配置并注册到 limiter
+    # 从注册表读取每个工具的并发属性
+    limiter = ToolConcurrencyLimiter()
+    for name, _ in tool_calls:
+        entry = ToolRegistry.get_tool(name)
+        if entry:
+            limiter.register_tool(
+                tool_name=name,
+                max_concurrent_instances=entry.max_concurrent_instances,
+                is_concurrency_safe=entry.is_concurrency_safe,
+            )
+
+    # 步骤 3: 分组（并发组 vs 串行组）
+    # 同步路径：组间串行，组内也串行（dispatch 本身是同步函数）
+    # 异步路径：可改用 limiter.execute_batch() 实现组内并发
+    batches = limiter.partition_tool_calls(call_dicts)
+
+    # 步骤 4: 按组执行
+    # 使用结果映射保持原始顺序
+    all_results: list[str | None] = [None] * len(tool_calls)
+    idx = 0
+
+    for batch in batches:
+        calls = batch["calls"]
+
+        for call in calls:
+            name = call["name"]
+            args = call.get("args")
+            result = dispatch(name, args)
+
+            # 应用结果预算（dispatch 内部已应用，这里做二次保障）
+            entry = ToolRegistry.get_tool(name)
+            result = apply_budget_to_dispatch_result(
+                result=result,
+                tool_name=name,
+                tool_budget=entry.max_result_tokens if entry else None,
+            )
+
+            all_results[idx] = result
+            idx += 1
+
+    # 步骤 5: 返回结果
+    # 理论上 all_results 不会有 None，但做防御性检查
+    return [r for r in all_results if r is not None]
