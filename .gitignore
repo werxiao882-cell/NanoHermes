@@ -33,5 +33,9 @@ claude-code-analysis/
 
 # 本地工作状态文件
 .hermes/
+
+# 测试输出（日志/报告忽略，skill 和脚本保留）
+testing-artifacts/logs/
+testing-artifacts/reports/
 .nano_progress_state.json
 nul

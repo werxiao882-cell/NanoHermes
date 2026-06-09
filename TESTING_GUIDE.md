@@ -76,7 +76,38 @@ rm -f ~/.nanohermes/sessions.db
 rm -rf ~/.nanohermes/memory/*
 ```
 
-### 2.2 测试数据准备
+### 2.2 测试输出目录规范（强制）
+
+> **核心原则**：所有测试生成的报告和脚本必须统一存放在 `testing-artifacts/` 目录下，严禁散落在项目根目录或其他位置。
+
+```bash
+# 测试输出目录结构（首次测试前自动创建）
+testing-artifacts/
+├── reports/              # 测试报告（Markdown 格式）
+│   ├── report-2026-06-09-2230.md
+│   ├── report-2026-06-09-2245.md
+│   └── ...
+├── scripts/              # 测试辅助脚本（Python/Bash）
+│   ├── check_session_storage.py
+│   ├── validate_memory.py
+│   └── ...
+└── logs/                 # 测试运行日志
+    ├── test-2026-06-09-2230.log
+    └── ...
+```
+
+**冲突处理规则**：
+1. **永不删除历史报告**：即使文件名相同，也不覆盖或删除已有的报告文件
+2. **自动重命名**：当目标文件名已存在时，在文件名后追加序号或时间戳（如 `report-2026-06-09-2230.md` → `report-2026-06-09-2230-2.md`）
+3. **脚本复用优先**：生成新脚本前检查 `testing-artifacts/scripts/` 是否已有功能相似的脚本，有则修改复用，无则创建新文件
+4. **日志按时间隔离**：每次测试运行使用唯一时间戳命名日志文件
+
+```bash
+# 创建输出目录（在测试准备阶段执行）
+mkdir -p testing-artifacts/{reports,scripts,logs}
+```
+
+### 2.3 测试数据准备
 
 | 数据类型 | 路径 | 说明 |
 |---------|------|------|
@@ -635,13 +666,14 @@ sqlite3 ~/.nanohermes/sessions.db "SELECT COUNT(*) FROM sessions;"
 ### 6.2 日志验证
 
 ```bash
-# 调试模式启动，查看完整日志
-python -m src.main --debug 2>&1 | tee test.log
+# 调试模式启动，日志保存到 testing-artifacts/logs/
+TIMESTAMP=$(date +%Y%m%d-%H%M)
+python -m src.main --debug 2>&1 | tee testing-artifacts/logs/test-${TIMESTAMP}.log
 
 # 搜索关键日志
-grep -i "error" test.log
-grep -i "tool_call" test.log
-grep -i "memory" test.log
+grep -i "error" testing-artifacts/logs/test-${TIMESTAMP}.log
+grep -i "tool_call" testing-artifacts/logs/test-${TIMESTAMP}.log
+grep -i "memory" testing-artifacts/logs/test-${TIMESTAMP}.log
 ```
 
 ### 6.3 性能指标
@@ -687,6 +719,10 @@ grep -i "memory" test.log
 
 ## 八、测试报告模板
 
+> **存放规则**：所有测试报告必须保存在 `testing-artifacts/reports/` 目录下。
+> 文件命名格式：`report-YYYY-MM-DD-HHMM.md`（如 `report-2026-06-09-2230.md`）。
+> **冲突处理**：若文件名已存在，自动追加序号（如 `report-2026-06-09-2230-2.md`），**永不覆盖历史报告**。
+
 ```markdown
 # NanoHermes 测试报告
 
@@ -728,9 +764,28 @@ grep -i "memory" test.log
 
 ## 九、附录
 
+### 9.0 测试 Skill（项目内置）
+
+项目自带 PTY 测试 skill，位于 `skills/nanohermes-pty-testing/`：
+
+```
+skills/nanohermes-pty-testing/
+├── SKILL.md              # 测试流程、检查点、输出规范
+├── templates/
+│   └── report-template.md  # 测试报告模板
+└── scripts/
+    └── validate-sessions.py  # 会话存储验证脚本
+```
+
+使用方式：AI Agent 加载此 skill 后，按 7 阶段流程自动执行 PTY 端到端测试。
+用例标记说明：[PTY] 直接可执行(82), [DEBUG] 需 --debug(4), [FAULT] 需故障注入(3), [MANUAL] 仅手动(2), [UNIT] 仅单元测试(40)。
+
 ### 9.1 常用命令
 
 ```bash
+# 创建测试输出目录
+mkdir -p testing-artifacts/{reports,scripts,logs}
+
 # 启动测试
 python -m src.main              # 正常模式
 python -m src.main --debug      # 调试模式
@@ -743,8 +798,12 @@ python -m src.main --resume <id>
 rm -rf ~/.nanohermes/sessions/*
 rm -f ~/.nanohermes/sessions.db
 
-# 查看日志
-tail -f ~/.nanohermes/nanohermes.log  # 如有日志文件
+# 查看测试日志
+ls -la testing-artifacts/logs/
+cat testing-artifacts/logs/test-*.log
+
+# 查看测试报告
+ls -la testing-artifacts/reports/
 ```
 
 ### 9.2 关键文件路径
@@ -757,10 +816,14 @@ tail -f ~/.nanohermes/nanohermes.log  # 如有日志文件
 | 会话数据库 | `~/.nanohermes/sessions.db` | SQLite |
 | 记忆文件 | `~/.nanohermes/memory/` | MEMORY.md/USER.md |
 | 配置文件 | `.env` | 环境变量 |
+| **测试报告** | `testing-artifacts/reports/` | 所有测试报告存放目录 |
+| **测试脚本** | `testing-artifacts/scripts/` | 测试辅助脚本存放目录 |
+| **测试日志** | `testing-artifacts/logs/` | 测试运行日志存放目录 |
 
 ### 9.3 测试检查清单
 
 ```
+[ ] 测试输出目录创建（testing-artifacts/{reports,scripts,logs}）
 [ ] 环境配置完成
 [ ] .env 文件正确
 [ ] 依赖安装完成
@@ -779,6 +842,7 @@ tail -f ~/.nanohermes/nanohermes.log  # 如有日志文件
 
 ---
 
-*文档版本: 2.0*
+*文档版本: 2.1*
 *最后更新: 2026-06-09*
 *基于真实测试过程总结，扩展至 131 个测试用例*
+*v2.1 更新：新增 testing-artifacts 输出目录规范，报告/脚本/日志集中管理，冲突自动重命名不覆盖历史*
