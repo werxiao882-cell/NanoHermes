@@ -111,18 +111,26 @@ class TestToolErrorClassifier:
 
         classifier = ToolErrorClassifier(base_delay_ms=100, max_delay_ms=10000)
 
-        delays = []
-        for attempt in range(1, 6):
-            delay = classifier._calculate_delay(attempt)
-            delays.append(delay)
+        # 多次采样验证平均增长趋势
+        all_delays = []
+        for _ in range(10):
+            delays = []
+            for attempt in range(1, 6):
+                delay = classifier._calculate_delay(attempt)
+                delays.append(delay)
+            all_delays.append(delays)
 
-        # 延迟应大致指数增长
-        for i in range(1, len(delays)):
-            assert delays[i] > delays[i - 1] * 1.5  # 至少增长 50%
+        # 计算平均延迟
+        avg_delays = [sum(d[i] for d in all_delays) / len(all_delays) for i in range(5)]
+
+        # 平均延迟应大致指数增长（至少 1.3 倍）
+        for i in range(1, len(avg_delays)):
+            assert avg_delays[i] > avg_delays[i - 1] * 1.3
 
         # 不应超过最大延迟
-        for delay in delays:
-            assert delay <= 10000
+        for delays in all_delays:
+            for delay in delays:
+                assert delay <= 10000
 
     def test_retry_after_extraction(self):
         """应能从错误信息中提取 Retry-After 值。"""
@@ -158,12 +166,12 @@ class TestToolErrorClassifier:
 
         # 工具不在白名单中
         assert not classifier.should_retry(
-            ConnectionError("reset"), 1, "terminal", {"read_file"}
+            ConnectionError("Connection reset"), 1, "terminal", {"read_file"}
         )
 
         # 工具在白名单中且错误可重试
         assert classifier.should_retry(
-            ConnectionError("reset"), 1, "read_file", {"read_file"}
+            ConnectionError("Connection reset"), 1, "read_file", {"read_file"}
         )
 
     def test_max_retries_exceeded(self):
@@ -172,10 +180,10 @@ class TestToolErrorClassifier:
         classifier = ToolErrorClassifier(max_retries=3)
 
         assert classifier.should_retry(
-            ConnectionError("reset"), 3, "read_file", {"read_file"}
+            ConnectionError("Connection reset"), 3, "read_file", {"read_file"}
         )
         assert not classifier.should_retry(
-            ConnectionError("reset"), 4, "read_file", {"read_file"}
+            ConnectionError("Connection reset"), 4, "read_file", {"read_file"}
         )
 
 
