@@ -770,15 +770,23 @@ grep -i "memory" testing-artifacts/logs/test-${TIMESTAMP}.log
 
 ```
 skills/nanohermes-pty-testing/
-├── SKILL.md              # 测试流程、检查点、输出规范
+├── SKILL.md                      # 7 阶段测试流程 + 方法论（按需加载 reference）
+├── references/                   # 详细用例清单（渐进式加载）
+│   ├── core-tools.md             # tool-runtime(54) + tool-search(6) = 60 用例
+│   ├── session-storage.md        # session-storage(20) = 20 用例
+│   ├── memory-system.md          # memory-system(12) = 12 用例
+│   ├── provider-config.md        # provider(15) + config(11) + prompt(8) = 34 用例
+│   ├── conversation.md           # conversation-loop(20) + delegation(8) = 28 用例
+│   ├── cli-tui.md                # cli/TUI(18) = 18 用例
+│   └── advanced.md               # skills(11) + compression(10) + insights(7) + mcp(10) + auxiliary(6) = 44 用例
 ├── templates/
-│   └── report-template.md  # 测试报告模板
+│   └── report-template.md        # 测试报告模板
 └── scripts/
-    └── validate-sessions.py  # 会话存储验证脚本
+    └── validate-sessions.py      # 会话存储验证脚本
 ```
 
-使用方式：AI Agent 加载此 skill 后，按 7 阶段流程自动执行 PTY 端到端测试。
-用例标记说明：[PTY] 直接可执行(82), [DEBUG] 需 --debug(4), [FAULT] 需故障注入(3), [MANUAL] 仅手动(2), [UNIT] 仅单元测试(40)。
+使用方式：AI Agent 加载此 skill 后，按 7 阶段流程执行。详细用例在执行到对应阶段时通过 `skill_view(name, file_path='references/xxx.md')` 按需加载。
+总计 202 用例：[PTY]120, [DEBUG]18, [FAULT]12, [MANUAL]8, [UNIT]44。
 
 ### 9.1 常用命令
 
@@ -842,7 +850,7 @@ ls -la testing-artifacts/reports/
 
 ---
 
-*文档版本: 2.1*
+*文档版本: 3.0*
 *最后更新: 2026-06-09*
-*基于真实测试过程总结，扩展至 131 个测试用例*
-*v2.1 更新：新增 testing-artifacts 输出目录规范，报告/脚本/日志集中管理，冲突自动重命名不覆盖历史*
+*基于真实测试过程总结，202 个测试用例覆盖 15 个核心模块*
+*v3.0 更新：用例从 131 扩展到 202（+53%），SKILL.md 重构为 7 阶段流程 + 7 个 reference 文件按需加载*
