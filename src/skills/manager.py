@@ -232,6 +232,28 @@ class SkillManager:
             entries = [e for e in entries if e.enabled]
         return entries
 
+    def get_enabled_skills(self) -> list[dict[str, Any]]:
+        """获取已启用技能的详细信息（含 trigger/skip 规则）。
+
+        设计理由：
+        - PromptAssembler 通过此方法获取技能信息，避免访问私有属性 _skills
+        - 返回 dict 列表而非 SkillEntry，解耦数据结构
+        - 包含 trigger/skip 字段，支持 TRIGGER/SKIP 内联格式
+
+        Returns:
+            已启用技能信息列表，每个包含 name, description, trigger, skip。
+        """
+        entries = [e for e in self._skills.values() if e.enabled]
+        return [
+            {
+                "name": e.skill.name,
+                "description": e.skill.description,
+                "trigger": e.skill.trigger or [],
+                "skip": e.skill.skip or [],
+            }
+            for e in entries
+        ]
+
     def list_skills_with_query(self, query: str = "") -> list[dict[str, Any]]:
         """列出可用技能，支持关键词过滤。
 
@@ -443,11 +465,11 @@ class SkillManager:
     def build_skill_prompt(self) -> str:
         """构建技能提示文本，注入到系统提示 volatile 层。
 
-        提示格式：
+        提示格式（Claude Code 风格，含 TRIGGER/SKIP 规则）：
         ```
         ## Available Skills
 
-        - **skill-name**: Skill description here
+        - **skill-name**: Skill description TRIGGER — when X; when Y SKIP — when Z
         - **another-skill**: Another description
 
         To use a skill, mention its name in your response.
@@ -456,7 +478,8 @@ class SkillManager:
         设计考量：
         - 仅包含已启用技能（enabled_only=True）
         - 使用 Markdown 列表格式，便于模型解析
-        - 简洁格式：仅名称和描述，避免过多细节占用上下文
+        - TRIGGER/SKIP 规则内联到技能描述，提高模型理解效率
+        - 无规则的技能仅显示名称和描述，保持简洁
         - 末尾添加使用说明，引导模型正确使用技能
 
         注入位置：
@@ -472,12 +495,21 @@ class SkillManager:
 
         lines = ["## Available Skills", ""]
         for entry in enabled:
-            # 使用 Markdown 粗体格式，增强可读性
-            lines.append(f"- **{entry.skill.name}**: {entry.skill.description}")
+            skill = entry.skill
+            line = f"- **{skill.name}**: {skill.description}"
+
+            if skill.trigger:
+                trigger_text = "; ".join(skill.trigger)
+                line += f" TRIGGER — {trigger_text}"
+
+            if skill.skip:
+                skip_text = "; ".join(skill.skip)
+                line += f" SKIP — {skip_text}"
+
+            lines.append(line)
         lines.append("")
         lines.append("To use a skill, mention its name in your response.")
 
-        # 使用 join 而非字符串拼接，性能更好且更易读
         return "\n".join(lines)
 
     # ========================================================================
