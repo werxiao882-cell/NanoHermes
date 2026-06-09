@@ -3,6 +3,13 @@ name: openspec-explore
 description: Enter explore mode - a thinking partner for exploring ideas, investigating problems, and clarifying requirements. Use when the user wants to think through something before or during a change.
 license: MIT
 compatibility: Requires openspec CLI.
+trigger:
+  - when the user wants to explore ideas or investigate a problem
+  - when the user wants to think through requirements before implementing
+  - when the user mentions /opsx-explore
+skip:
+  - when the user explicitly wants to implement (use openspec-apply-change)
+  - when the user wants to propose a new change (use openspec-propose)
 metadata:
   author: openspec
   version: "1.0"
