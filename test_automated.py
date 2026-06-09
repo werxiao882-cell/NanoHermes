@@ -207,7 +207,7 @@ def test_memory_system():
 # ─── 7. 提示组装测试 ────────────────────────────────────────
 def test_prompt_assembly():
     """测试系统提示组装。"""
-    from src.prompt.assembler import PromptAssembler
+    from src.conversation.assembler import PromptAssembler
     
     assembler = PromptAssembler()
     

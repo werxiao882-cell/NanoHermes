@@ -180,8 +180,7 @@ NanoHermes/
 | **memory** | 记忆提供者接口、编排器、文件记忆 | `src/memory/ARCHITECTURE.md` |
 | **skills** | SKILL.md 解析、Curator 自进化 | `src/skills/ARCHITECTURE.md` |
 | **compression** | 上下文压缩、摘要预算、头尾保护 | `src/compression/ARCHITECTURE.md` |
-| **prompt** | 三层提示组装 (stable/context/volatile) | `src/prompt/ARCHITECTURE.md` |
-| **conversation** | 核心对话循环、事件总线、错误分类、动态工具管理 | `src/conversation/ARCHITECTURE.md` |
+| **conversation** | 核心对话循环、事件总线、错误分类、动态工具管理、三层提示组装 | `src/conversation/ARCHITECTURE.md` |
 | **delegation** | 委托管理、leaf/orchestrator 角色 | `src/delegation/ARCHITECTURE.md` |
 | **insights** | Token 聚合、成本估算、活动趋势 | `src/insights/ARCHITECTURE.md` |
 | **auxiliary** | 后台 LLM 任务（摘要生成、记忆刷写） | `src/auxiliary/ARCHITECTURE.md` |

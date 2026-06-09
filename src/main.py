@@ -168,7 +168,7 @@ def main_chat(debug: bool = False, resume: str | None = None, resume_title: str 
     memory_manager.add_provider(file_provider)
 
     # ── 步骤 6.5: 组装系统提示词 ──
-    from src.prompt.assembler import PromptAssembler
+    from src.conversation.assembler import PromptAssembler
     assembler = PromptAssembler()
     system_prompt_result = assembler.build_system_prompt(
         model=model,
@@ -226,10 +226,15 @@ def main():
                         help="通过标题恢复历史会话")
     parser.add_argument("--list-sessions", action="store_true",
                         help="列出所有历史会话")
+    parser.add_argument("--headless", action="store_true",
+                        help="Headless REPL 模式（无 TUI，适合管道脚本/SSH/CI）")
     args = parser.parse_args()
 
     if args.list_sessions:
         list_sessions_command()
+    elif args.headless:
+        from src.sdk import main_headless
+        main_headless()
     else:
         main_chat(
             debug=args.debug,

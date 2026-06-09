@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from src.prompt.assembler import (
+from src.conversation.assembler import (
     PromptAssembler,
     PromptPart,
     ContextThreat,
