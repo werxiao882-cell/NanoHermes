@@ -181,3 +181,77 @@ class TestSkillManager:
 
             manager._reload()
             assert "test" not in manager._skills
+
+    def test_get_enabled_skills(self):
+        """Test get_enabled_skills returns dict list with trigger/skip."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = SkillManager(tmpdir)
+            skill = Skill(
+                name="test",
+                description="Test skill",
+                trigger=["when user asks X"],
+                skip=["when Y is configured"],
+            )
+            manager._skills["test"] = SkillEntry(skill=skill)
+
+            result = manager.get_enabled_skills()
+            assert len(result) == 1
+            assert result[0]["name"] == "test"
+            assert result[0]["description"] == "Test skill"
+            assert result[0]["trigger"] == ["when user asks X"]
+            assert result[0]["skip"] == ["when Y is configured"]
+
+    def test_get_enabled_skills_excludes_disabled(self):
+        """Test get_enabled_skills excludes disabled skills."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = SkillManager(tmpdir)
+            skill1 = Skill(name="s1", description="Skill 1")
+            skill2 = Skill(name="s2", description="Skill 2")
+            manager._skills["s1"] = SkillEntry(skill=skill1, enabled=True)
+            manager._skills["s2"] = SkillEntry(skill=skill2, enabled=False)
+
+            result = manager.get_enabled_skills()
+            assert len(result) == 1
+            assert result[0]["name"] == "s1"
+
+    def test_get_enabled_skills_empty_trigger_skip(self):
+        """Test get_enabled_skills returns empty lists for no rules."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = SkillManager(tmpdir)
+            skill = Skill(name="test", description="Test")
+            manager._skills["test"] = SkillEntry(skill=skill)
+
+            result = manager.get_enabled_skills()
+            assert result[0]["trigger"] == []
+            assert result[0]["skip"] == []
+
+    def test_build_skill_prompt_with_trigger_skip(self):
+        """Test build_skill_prompt includes TRIGGER/SKIP inline."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = SkillManager(tmpdir)
+            skill = Skill(
+                name="deploy",
+                description="Deploy app",
+                trigger=["when user wants to deploy"],
+                skip=["when in dev mode"],
+            )
+            manager._skills["deploy"] = SkillEntry(skill=skill)
+
+            prompt = manager.build_skill_prompt()
+            assert "TRIGGER" in prompt
+            assert "when user wants to deploy" in prompt
+            assert "SKIP" in prompt
+            assert "when in dev mode" in prompt
+
+    def test_build_skill_prompt_without_rules(self):
+        """Test build_skill_prompt without rules uses simple format."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = SkillManager(tmpdir)
+            skill = Skill(name="simple", description="Simple skill")
+            manager._skills["simple"] = SkillEntry(skill=skill)
+
+            prompt = manager.build_skill_prompt()
+            assert "**simple**" in prompt
+            assert "Simple skill" in prompt
+            assert "TRIGGER" not in prompt
+            assert "SKIP" not in prompt
