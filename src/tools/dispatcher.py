@@ -48,8 +48,13 @@ from typing import Any
 
 from src.tools.registry import ToolRegistry
 from src.tools.availability import check_tool_availability
+from src.tools.result_budget import apply_budget_to_dispatch_result
+from src.tools.execution_tracker import ToolExecutionTracker
 
 logger = logging.getLogger(__name__)
+
+# 执行追踪器单例
+_tracker = ToolExecutionTracker()
 
 # 持久事件循环（CLI 路径复用）
 # 为什么需要全局持久循环？
@@ -122,6 +127,15 @@ def dispatch(
     # - _parse_args() 处理多种输入格式（None/dict/str），保证兼容性
     call_args = _parse_args(args)
 
+    # 步骤 3.5: 生成工具调用 ID 并标记开始执行（DFX: execution tracking）
+    import uuid
+    tool_call_id = task_id or f"call_{uuid.uuid4().hex[:8]}"
+    if not _tracker.mark_start(tool_call_id, name, call_args):
+        # 防重入: 已在执行中
+        return json.dumps({
+            "error": f"工具调用 '{tool_call_id}' ({name}) 已在执行中"
+        })
+
     # 步骤 4: 执行 handler
     try:
         if entry.is_async:
@@ -137,6 +151,17 @@ def dispatch(
             # - 统一注入避免每个工具手动处理
             result = entry.handler(**call_args, task_id=task_id)
 
+        # 步骤 4.5: 应用结果预算（DFX: result budget）
+        # 在返回前截断大型工具结果，防止占满上下文
+        result = apply_budget_to_dispatch_result(
+            result=result,
+            tool_name=name,
+            tool_budget=entry.max_result_tokens,
+        )
+
+        # 步骤 4.6: 标记执行完成（DFX: execution tracking）
+        _tracker.mark_complete(tool_call_id, result_length=len(result))
+
         return result
 
     except Exception as e:
@@ -145,6 +170,10 @@ def dispatch(
         # - 工具实现可能有各种 bug（网络错误、解析错误、权限问题等）
         # - 主循环需要稳定的返回值格式（JSON 字符串）
         # - exc_info=True 记录完整堆栈，便于调试
+
+        # 标记执行失败（DFX: execution tracking）
+        _tracker.mark_failed(tool_call_id, error=f"{type(e).__name__}: {e}")
+
         logger.error(f"工具执行失败 '{name}': {e}", exc_info=True)
         return json.dumps({
             "error": f"工具执行失败: {type(e).__name__}: {e}"

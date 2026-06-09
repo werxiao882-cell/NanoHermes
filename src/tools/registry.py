@@ -60,6 +60,13 @@ class ToolEntry:
     - is_async 标记：用于分发器决定如何调用 handler（await 或直接调用）
     - defer_loading 标记：控制工具是否在启动时加载到 LLM 上下文
 
+    DFX 扩展字段（tool-dfx-reliability）:
+    - retryable: 失败时是否可自动重试（只读工具默认 True）
+    - max_retries: 最大重试次数（默认 3）
+    - max_concurrent_instances: 最大并发实例数（默认 1）
+    - is_concurrency_safe: 是否可与其他工具并发执行
+    - max_result_tokens: 结果预算 token 数（None 时使用全局默认）
+
     Attributes:
         name: 工具的唯一名称（如 "terminal", "read_file"）。
               作为注册表的键，必须全局唯一。
@@ -77,6 +84,11 @@ class ToolEntry:
                      用于调试、日志和 UI 展示。
         defer_loading: 是否延迟加载。True 时工具不在启动时加载到上下文，
                        只能通过 search_tools 工具动态发现。
+        retryable: 失败时是否可自动重试（默认 False）。
+        max_retries: 最大重试次数（默认 3）。
+        max_concurrent_instances: 该工具最大并发实例数（默认 1）。
+        is_concurrency_safe: 是否可与其他工具并发执行（默认 False）。
+        max_result_tokens: 结果预算 token 数（None 时使用全局默认）。
     """
     name: str
     toolset: str
@@ -86,6 +98,22 @@ class ToolEntry:
     is_async: bool = False
     description: str = ""
     defer_loading: bool = False
+
+    # ─── DFX 扩展字段 ───
+    retryable: bool = False
+    """失败时是否可自动重试。参考 Claude Code withRetry.ts。"""
+
+    max_retries: int = 3
+    """最大重试次数。"""
+
+    max_concurrent_instances: int = 1
+    """该工具最大并发实例数。参考 Claude Code getMaxToolUseConcurrency()。"""
+
+    is_concurrency_safe: bool = False
+    """是否可与其他工具并发执行。参考 Claude Code Tool.isConcurrencySafe()。"""
+
+    max_result_tokens: int | None = None
+    """结果预算 token 数（None 时使用全局默认 8000，terminal 默认 4000）。"""
 
 
 class ToolRegistry:
