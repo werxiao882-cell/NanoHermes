@@ -135,15 +135,12 @@ def main_chat(debug: bool = False, resume: str | None = None, resume_title: str 
     ToolRegistry.init_all_tools()  # 扫描 src/tools/ 目录并注册所有工具
 
     # 获取初始工具集（排除延迟加载的工具）
-    tool_count = len(ToolRegistry.get_all_tools())
     tool_schemas = get_tool_schemas(exclude_deferred=True)  # 仅核心工具 + search_tools
-    tool_categories = ToolRegistry.get_tool_categories()  # 用于 UI 展示（简单名称列表）
     tool_categories_info = ToolRegistry.get_tool_categories_with_info()  # 用于 UI 展示（含描述和延迟加载状态）
 
     # ── 步骤 4: 初始化技能系统 ──
     from src.skills.manager import SkillManager
     skill_manager = SkillManager()
-    skill_count = len(skill_manager.list_skills())
     
     # 按类别分类技能（用于 UI 展示和上下文感知补全）
     skill_categories = skill_manager.get_skills_by_category()
@@ -197,10 +194,7 @@ def main_chat(debug: bool = False, resume: str | None = None, resume_title: str 
         tool_dispatch=tool_dispatch_func,  # 注入工具分发函数
         model=model,
         session_id=session_id,
-        tool_count=tool_count,
-        skill_count=skill_count,
         tool_schemas=tool_schemas,
-        tool_categories=tool_categories,
         tool_categories_info=tool_categories_info,  # 工具详细信息（含描述和延迟加载状态）
         skill_categories=skill_categories,
         system_prompt=system_prompt,      # 注入系统提示词
@@ -238,9 +232,6 @@ def main():
 
     if args.list_sessions:
         list_sessions_command()
-    elif args.headless:
-        from src.sdk import main_headless
-        main_headless()
     else:
         main_chat(
             debug=args.debug,

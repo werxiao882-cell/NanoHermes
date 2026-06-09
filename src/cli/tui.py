@@ -63,10 +63,7 @@ class TUIApp:
         tool_dispatch=None,
         model: str = "",
         session_id: str = "",
-        tool_count: int = 0,
-        skill_count: int = 0,
         tool_schemas: list[dict[str, Any]] | None = None,
-        tool_categories: dict[str, list[str]] | None = None,
         tool_categories_info: dict[str, list[dict[str, Any]]] | None = None,
         skill_categories: dict[str, list[str]] | None = None,
         system_prompt: str = "",
@@ -140,10 +137,7 @@ class TUIApp:
         self.tool_dispatch = tool_dispatch
         self.model = model
         self.session_id = session_id
-        self.tool_count = tool_count
-        self.skill_count = skill_count
         self.tool_schemas = tool_schemas or []
-        self.tool_categories = tool_categories or {}
         self.tool_categories_info = tool_categories_info or {}
         self.skill_categories = skill_categories or {}
         self.system_prompt = system_prompt
@@ -163,6 +157,16 @@ class TUIApp:
 
         self.state.session_id = session_id
         logger.info("TUIApp 初始化完成")
+
+    @property
+    def tool_count(self) -> int:
+        """动态计算工具数量，避免冗余参数。"""
+        return len(self.tool_schemas)
+
+    @property
+    def skill_count(self) -> int:
+        """动态计算技能数量，避免冗余参数。"""
+        return sum(len(skills) for skills in self.skill_categories.values())
 
     def _create_key_bindings(self) -> KeyBindings:
         """创建快捷键绑定。
@@ -1092,10 +1096,7 @@ def create_tui(
     tool_dispatch,
     model: str,
     session_id: str,
-    tool_count: int = 0,
-    skill_count: int = 0,
     tool_schemas: list[dict[str, Any]] | None = None,
-    tool_categories: dict[str, list[str]] | None = None,
     tool_categories_info: dict[str, list[dict[str, Any]]] | None = None,
     skill_categories: dict[str, list[str]] | None = None,
     system_prompt: str = "",
@@ -1120,10 +1121,7 @@ def create_tui(
         tool_dispatch=tool_dispatch,
         model=model,
         session_id=session_id,
-        tool_count=tool_count,
-        skill_count=skill_count,
         tool_schemas=tool_schemas,
-        tool_categories=tool_categories,
         tool_categories_info=tool_categories_info,
         skill_categories=skill_categories,
         system_prompt=system_prompt,
