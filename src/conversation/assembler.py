@@ -157,21 +157,40 @@ class PromptAssembler:
     """三层系统提示组装器。
 
     stable 部分变化时重建缓存，volatile 部分每轮更新。
+
+    段落化结构（Claude Code 风格）：
+    1. Identity → 2. Tool Usage → 3. Skills → 4. Operational Guidance
+    → 5. Memory Context → 6. User Profile → 7. Current Time
+
+    设计原则：
+    - 所有内容动态组装，禁止硬编码工具名、技能名
+    - 工具列表从 ToolRegistry 实时读取
+    - 技能信息从 SkillManager 实时读取
     """
 
-    def __init__(self, config: dict[str, Any] | None = None):
+    def __init__(
+        self,
+        config: dict[str, Any] | None = None,
+        tool_registry: Any = None,
+        skill_manager: Any = None,
+    ):
         """初始化提示组装器。
 
         Args:
             config: 配置字典。
+            tool_registry: ToolRegistry 类引用，用于动态获取工具信息。
+                          如果为 None，则使用传入的 toolsets 参数（向后兼容）。
+            skill_manager: SkillManager 实例，用于动态获取技能信息（含 trigger/skip）。
+                          如果为 None，则使用传入的 skills 参数（向后兼容）。
         """
         self._config = config or {}
+        self._tool_registry = tool_registry
+        self._skill_manager = skill_manager
         self._stable_parts: list[PromptPart] = []
         self._context_parts: list[PromptPart] = []
         self._volatile_parts: list[PromptPart] = []
         self._soul_content: str = ""
         self._skill_registry: dict[str, Any] = {}
-        self._tool_registry: dict[str, Any] = {}
         self._user_profile: dict[str, Any] = {}
         self._memory_context: dict[str, Any] = {}
         self._stable_hash: str = ""
@@ -247,12 +266,27 @@ class PromptAssembler:
         include_memory: bool = True,
         include_user_profile: bool = True,
     ) -> list[PromptPart]:
-        """构建系统提示片段列表。
+        """构建系统提示片段列表（段落化结构）。
+
+        段落顺序（Claude Code 风格）：
+        Stable 层：
+        1. Identity (SOUL.md)
+        2. Tool Usage (工具使用：Always-Loaded + Deferred + Guidelines)
+        3. Skills (技能提示：含 TRIGGER/SKIP)
+        4. Operational Guidance (模型操作指导)
+
+        Context 层：
+        5. Context Files (上下文文件)
+
+        Volatile 层：
+        6. Memory Context (记忆上下文)
+        7. User Profile (用户画像)
+        8. Current Time (时间戳)
 
         Args:
             model: 模型名称。
-            skills: 技能列表。
-            toolsets: 工具集列表。
+            skills: 技能列表（向后兼容，优先使用 skill_manager）。
+            toolsets: 工具集列表（向后兼容，优先使用 tool_registry）。
             context_files: 上下文文件路径列表。
             include_memory: 是否包含记忆上下文。
             include_user_profile: 是否包含用户画像。
@@ -263,47 +297,47 @@ class PromptAssembler:
         all_parts: list[PromptPart] = []
 
         # ── Stable 层 ──
-        # 1. Soul/Identity
+        # 1. Identity (SOUL.md)
         soul = self.load_soul_md()
         if soul:
             all_parts.append(PromptPart(content=soul, layer="stable"))
 
-        # 2. 工具指导
-        tool_guidance = self.build_tool_guidance(toolsets)
-        if tool_guidance:
-            all_parts.append(PromptPart(content=tool_guidance, layer="stable"))
+        # 2. Tool Usage (工具使用段落)
+        tool_usage = self.build_tool_guidance(toolsets)
+        if tool_usage:
+            all_parts.append(PromptPart(content=tool_usage, layer="stable"))
 
-        # 3. 技能提示
+        # 3. Skills (技能提示)
         skills_prompt = self.build_skills_prompt(skills)
         if skills_prompt:
             all_parts.append(PromptPart(content=skills_prompt, layer="stable"))
 
-        # 4. 模型操作指导
+        # 4. Operational Guidance (模型操作指导)
         model_guidance = self.build_model_operational_guidance(model)
         if model_guidance:
             all_parts.append(PromptPart(content=model_guidance, layer="stable"))
 
         # ── Context 层 ──
-        # 上下文文件
+        # 5. Context Files (上下文文件)
         if context_files:
             context_prompt = self.build_context_files_prompt(context_files)
             if context_prompt:
                 all_parts.append(PromptPart(content=context_prompt, layer="context"))
 
         # ── Volatile 层 ──
-        # 记忆上下文
+        # 6. Memory Context (记忆上下文)
         if include_memory:
             memory_ctx = self.build_memory_context()
             if memory_ctx:
                 all_parts.append(PromptPart(content=memory_ctx, layer="volatile"))
 
-        # 用户画像
+        # 7. User Profile (用户画像)
         if include_user_profile:
             user_profile = self.build_user_profile()
             if user_profile:
                 all_parts.append(PromptPart(content=user_profile, layer="volatile"))
 
-        # 时间戳
+        # 8. Current Time (时间戳)
         timestamp = self._build_timestamp()
         all_parts.append(PromptPart(content=timestamp, layer="volatile"))
 
@@ -355,91 +389,148 @@ class PromptAssembler:
 
         return ""
 
-    # ── 工具指导 ──
+    # ── 工具使用段落（段落化结构） ──
 
     def build_tool_guidance(self, toolsets: list[str] | None = None) -> str:
-        """构建工具指导文本。
+        """构建工具使用段落（Claude Code 风格）。
+
+        段落结构：
+        # Tool Usage
+        ## Always-Loaded Tools
+        - <从注册表动态获取>
+
+        ## Deferred Tools (use search_tools to discover)
+        ### <toolset>: <tool1>, <tool2>
+        ...
+
+        ## Tool Selection Guidelines
+        - 通用指导（不硬编码工具名）
+
+        设计理由：
+        - 所有工具名从 ToolRegistry 动态获取，禁止硬编码
+        - 延迟工具按 toolset 分组，帮助模型快速定位
+        - 通用指导不绑定具体工具名，适用于任何工具集
 
         Args:
-            toolsets: 工具集列表。
+            toolsets: 工具集列表（向后兼容，优先使用 tool_registry 动态获取）。
 
         Returns:
-            工具指导文本。
+            工具使用段落文本。
         """
-        if not toolsets:
-            toolsets = ["terminal", "file", "memory"]
+        parts = ["# Tool Usage", ""]
 
-        guidance_parts = [
-            "# Tool Usage Guidelines",
+        # ── Always-Loaded Tools ──
+        core_tools = self._get_core_tools()
+        if core_tools:
+            parts.append("## Always-Loaded Tools")
+            parts.append("")
+            tool_list = ", ".join(t["name"] for t in core_tools)
+            parts.append(f"- {tool_list}")
+            parts.append("")
+
+        # ── Deferred Tools ──
+        deferred_tools = self._get_deferred_tools_grouped()
+        if deferred_tools:
+            parts.append("## Deferred Tools (use search_tools to discover)")
+            parts.append("")
+            for toolset_name, tools in deferred_tools.items():
+                tool_names = ", ".join(t["name"] for t in tools)
+                parts.append(f"### {toolset_name}: {tool_names}")
+            parts.append("")
+
+        # ── Tool Selection Guidelines ──
+        parts.extend(self._build_tool_guidelines())
+
+        return "\n".join(parts)
+
+    def _get_core_tools(self) -> list[dict[str, Any]]:
+        """从注册表动态获取核心工具（非延迟加载）。
+
+        Returns:
+            核心工具列表，每个包含 name, description。
+        """
+        if self._tool_registry:
+            # 动态从注册表获取
+            try:
+                schemas = self._tool_registry.get_tool_schemas(exclude_deferred=True)
+                return [{"name": s["name"], "description": s.get("description", "")} for s in schemas]
+            except Exception:
+                pass
+
+        # 向后兼容：如果无注册表引用，返回空（由调用方通过 toolsets 参数处理）
+        return []
+
+    def _get_deferred_tools_grouped(self) -> dict[str, list[dict[str, Any]]]:
+        """从注册表动态获取延迟工具，按 toolset 分组。
+
+        Returns:
+            {toolset_name: [{"name": ..., "description": ...}, ...]}
+        """
+        if self._tool_registry:
+            try:
+                categories = self._tool_registry.get_tool_categories_with_info()
+                # 过滤 defer_loading=True 的工具
+                grouped = {}
+                for toolset, tools in categories.items():
+                    deferred = [t for t in tools if t.get("defer_loading", False)]
+                    if deferred:
+                        grouped[toolset] = deferred
+                return grouped
+            except Exception:
+                pass
+
+        return {}
+
+    def _build_tool_guidelines(self) -> list[str]:
+        """构建通用工具选择指导（不硬编码工具名）。
+
+        Returns:
+            指导文本行列表。
+        """
+        return [
+            "## Tool Selection Guidelines",
             "",
-            "## General Principles",
             "- 优先使用最简洁有效的方式完成任务",
             "- 在执行破坏性操作前确认影响范围",
-            "- 合理使用工具缓存避免重复工作",
+            "- 不确定工具是否存在时，使用 search_tools 搜索",
+            "- 发现工具后，可直接在下一轮调用",
             "",
         ]
 
-        tool_guidance_map = {
-            "terminal": [
-                "## Terminal",
-                "- 使用 terminal 工具执行 shell 命令",
-                "- 避免长时间运行的阻塞命令",
-                "- 对不确定的命令先使用 echo 测试",
-                "",
-            ],
-            "file": [
-                "## File Operations",
-                "- 使用 read_file 读取文件内容",
-                "- 使用 write_file 创建或覆盖文件",
-                "- 使用 patch 进行增量编辑",
-                "- 避免不必要的大文件读写",
-                "",
-            ],
-            "memory": [
-                "## Memory",
-                "- 使用 memory 工具记录和检索上下文",
-                "- 重要信息应持久化到 MEMORY.md",
-                "- 定期清理过期的记忆条目",
-                "",
-            ],
-            "delegation": [
-                "## Delegation",
-                "- 使用 delegate_task 委托子任务",
-                "- 为子 Agent 提供清晰的目标和上下文",
-                "- 合理使用 leaf 和 orchestrator 角色",
-                "",
-            ],
-            "skills": [
-                "## Skills",
-                "- 使用 skills 工具加载和使用技能",
-                "- 技能提供专业领域知识",
-                "- 优先使用已有技能而非从头实现",
-                "",
-            ],
-        }
-
-        for ts in toolsets:
-            if ts in tool_guidance_map:
-                guidance_parts.extend(tool_guidance_map[ts])
-
-        return "\n".join(guidance_parts)
-
-    # ── 技能提示 ──
+    # ── 技能提示（TRIGGER/SKIP 格式） ──
 
     def build_skills_prompt(self, skills: list[str] | None = None) -> str:
-        """构建技能提示文本。
+        """构建技能提示文本（Claude Code 风格）。
+
+        格式：
+        # Skills
+        ## Active Skills
+        - <name>: <description> TRIGGER — <rules> SKIP — <rules>
+
+        设计理由：
+        - 优先从 SkillManager 获取技能详细信息（含 trigger/skip）
+        - 如果 SkillManager 不可用，回退到使用传入的 skills 名称列表
+        - TRIGGER/SKIP 规则内联到技能描述，提高模型理解效率
 
         Args:
-            skills: 技能名称列表。
+            skills: 技能名称列表（向后兼容，优先使用 skill_manager 动态获取）。
 
         Returns:
             技能提示文本。
         """
+        # 优先从 SkillManager 获取完整技能信息
+        skill_entries = self._get_skill_entries()
+        if skill_entries:
+            return self._build_skills_from_entries(skill_entries)
+
+        # 向后兼容：使用传入的技能名称列表
         if not skills:
             return ""
 
         parts = [
-            "# Active Skills",
+            "# Skills",
+            "",
+            "## Active Skills",
             "",
             "以下技能已激活，将在任务执行中提供专业指导：",
             "",
@@ -448,8 +539,72 @@ class PromptAssembler:
         for skill in skills:
             skill_info = self._skill_registry.get(skill, {})
             description = skill_info.get("description", f"Skill: {skill}")
-            parts.append(f"## {skill}")
-            parts.append(description)
+            parts.append(f"- **{skill}**: {description}")
+            parts.append("")
+
+        return "\n".join(parts)
+
+    def _get_skill_entries(self) -> list[dict[str, Any]] | None:
+        """从 SkillManager 获取完整技能信息（含 trigger/skip）。
+
+        Returns:
+            技能信息列表，或 None（如果 SkillManager 不可用）。
+        """
+        if self._skill_manager:
+            try:
+                # 尝试获取启用的技能列表
+                if hasattr(self._skill_manager, "get_enabled_skills"):
+                    return self._skill_manager.get_enabled_skills()
+                # 回退：尝试从 _skills 属性获取
+                if hasattr(self._skill_manager, "_skills"):
+                    return [
+                        {
+                            "name": se.skill.name,
+                            "description": se.skill.description,
+                            "trigger": getattr(se.skill, "trigger", []),
+                            "skip": getattr(se.skill, "skip", []),
+                        }
+                        for se in self._skill_manager._skills.values()
+                        if getattr(se, "enabled", True)
+                    ]
+            except Exception:
+                pass
+        return None
+
+    def _build_skills_from_entries(self, entries: list[dict[str, Any]]) -> str:
+        """从技能条目列表构建技能提示（含 TRIGGER/SKIP 格式）。
+
+        Args:
+            entries: 技能信息列表，每个包含 name, description, trigger, skip。
+
+        Returns:
+            技能提示文本。
+        """
+        parts = [
+            "# Skills",
+            "",
+            "## Active Skills",
+            "",
+        ]
+
+        for entry in entries:
+            name = entry.get("name", "unknown")
+            description = entry.get("description", "")
+            trigger = entry.get("trigger", [])
+            skip = entry.get("skip", [])
+
+            # 构建 TRIGGER/SKIP 内联格式
+            rule_parts = [f"- **{name}**: {description}"]
+
+            if trigger:
+                trigger_text = "; ".join(trigger)
+                rule_parts.append(f"  TRIGGER — {trigger_text}")
+
+            if skip:
+                skip_text = "; ".join(skip)
+                rule_parts.append(f"  SKIP — {skip_text}")
+
+            parts.append(" ".join(rule_parts))
             parts.append("")
 
         return "\n".join(parts)
