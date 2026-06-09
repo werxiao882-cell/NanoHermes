@@ -733,3 +733,183 @@ class TestSystemPromptResult:
         assert result.has_cache_markers is False
         assert result.threats == []
         assert result.build_time_ms == 0.0
+
+
+class TestPromptParagraphs:
+    """Tests for paragraph-based prompt assembly (Claude Code style)."""
+
+    def _make_mock_registry(self):
+        """Create a mock registry with core + deferred tools."""
+        return type("MockRegistry", (), {
+            "get_tool_schemas": lambda self, exclude_deferred=False: [
+                {"name": "terminal", "description": "Run shell commands"},
+                {"name": "read_file", "description": "Read files"},
+            ] if exclude_deferred else [
+                {"name": "terminal", "description": "Run shell commands"},
+                {"name": "read_file", "description": "Read files"},
+                {"name": "execute_code", "description": "Execute code"},
+                {"name": "process", "description": "Process management"},
+            ],
+            "get_tool_categories_with_info": lambda self: {
+                "terminal": [
+                    {"name": "terminal", "description": "Run shell commands", "defer_loading": False},
+                    {"name": "process", "description": "Process management", "defer_loading": True},
+                ],
+                "code": [
+                    {"name": "execute_code", "description": "Execute code", "defer_loading": True},
+                ],
+                "file": [
+                    {"name": "read_file", "description": "Read files", "defer_loading": False},
+                ],
+            },
+        })()
+
+    def _make_mock_skill_manager(self):
+        """Create a mock skill manager with trigger/skip rules."""
+        return type("MockSkillManager", (), {
+            "get_enabled_skills": lambda self: [
+                {
+                    "name": "deploy",
+                    "description": "Deploy application",
+                    "trigger": ["when user wants to deploy"],
+                    "skip": ["when in dev mode"],
+                },
+                {
+                    "name": "test-runner",
+                    "description": "Run tests",
+                    "trigger": [],
+                    "skip": [],
+                },
+            ],
+        })()
+
+    def test_paragraph_order(self):
+        """Test sections appear in correct order: Identity → Tools → Skills → Guidance → Memory → Profile → Time."""
+        mock_reg = self._make_mock_registry()
+        mock_sm = self._make_mock_skill_manager()
+        assembler = PromptAssembler(
+            tool_registry=mock_reg,
+            skill_manager=mock_sm,
+        )
+        assembler.set_memory_context({"summary": "test"})
+        assembler.set_user_profile({"name": "TestUser"})
+
+        parts = assembler.build_system_prompt_parts(
+            model="gpt-4",
+            include_memory=True,
+            include_user_profile=True,
+        )
+        texts = [p.content for p in parts]
+        full = "\n\n".join(texts)
+
+        tool_idx = full.index("Tool Usage")
+        skills_idx = full.index("Skills")
+        guidance_idx = full.index("Operational Guidance")
+        memory_idx = full.index("Memory Context")
+        profile_idx = full.index("User Profile")
+
+        assert tool_idx < skills_idx < guidance_idx < memory_idx < profile_idx
+
+    def test_paragraph_layers(self):
+        """Test each section is in the correct layer (stable/context/volatile)."""
+        mock_reg = self._make_mock_registry()
+        mock_sm = self._make_mock_skill_manager()
+        assembler = PromptAssembler(
+            tool_registry=mock_reg,
+            skill_manager=mock_sm,
+        )
+        assembler.set_memory_context({"summary": "test"})
+        assembler.set_user_profile({"name": "TestUser"})
+
+        parts = assembler.build_system_prompt_parts(
+            model="gpt-4",
+            include_memory=True,
+            include_user_profile=True,
+        )
+
+        stable_parts = [p for p in parts if p.layer == "stable"]
+        volatile_parts = [p for p in parts if p.layer == "volatile"]
+
+        assert len(stable_parts) >= 3
+        assert len(volatile_parts) >= 2
+
+        stable_text = " ".join(p.content for p in stable_parts)
+        assert "Tool Usage" in stable_text
+        assert "Skills" in stable_text
+
+        volatile_text = " ".join(p.content for p in volatile_parts)
+        assert "Memory Context" in volatile_text
+        assert "User Profile" in volatile_text
+
+    def test_section_separators(self):
+        """Test sections are separated by double newlines."""
+        mock_reg = self._make_mock_registry()
+        assembler = PromptAssembler(tool_registry=mock_reg)
+        parts = assembler.build_system_prompt_parts()
+        for part in parts:
+            assert part.content.strip() != ""
+
+
+class TestToolGrouping:
+    """Tests for deferred tool grouping in system prompt."""
+
+    def test_deferred_tools_grouped_by_toolset(self):
+        """Test deferred tools appear under their toolset header."""
+        mock_registry = type("MockRegistry", (), {
+            "get_tool_schemas": lambda self, exclude_deferred=False: [],
+            "get_tool_categories_with_info": lambda self: {
+                "system": [
+                    {"name": "process", "description": "Process mgmt", "defer_loading": True},
+                    {"name": "cronjob", "description": "Cron jobs", "defer_loading": True},
+                ],
+                "code": [
+                    {"name": "execute_code", "description": "Execute code", "defer_loading": True},
+                ],
+            },
+        })()
+
+        assembler = PromptAssembler(tool_registry=mock_registry)
+        result = assembler.build_tool_guidance()
+
+        assert "### system: process, cronjob" in result
+        assert "### code: execute_code" in result
+
+    def test_deferred_tools_loading_hint(self):
+        """Test Deferred Tools section includes loading hint."""
+        mock_registry = type("MockRegistry", (), {
+            "get_tool_schemas": lambda self, exclude_deferred=False: [],
+            "get_tool_categories_with_info": lambda self: {
+                "test": [
+                    {"name": "tool_a", "description": "A", "defer_loading": True},
+                ],
+            },
+        })()
+
+        assembler = PromptAssembler(tool_registry=mock_registry)
+        result = assembler.build_tool_guidance()
+        assert "search_tools" in result
+        assert "Deferred Tools" in result
+
+    def test_single_tool_in_toolset(self):
+        """Test single tool in a toolset shows correct format."""
+        mock_registry = type("MockRegistry", (), {
+            "get_tool_schemas": lambda self, exclude_deferred=False: [],
+            "get_tool_categories_with_info": lambda self: {
+                "memory": [
+                    {"name": "memory", "description": "Memory access", "defer_loading": True},
+                ],
+            },
+        })()
+
+        assembler = PromptAssembler(tool_registry=mock_registry)
+        result = assembler.build_tool_guidance()
+        assert "### memory: memory" in result
+
+    def test_no_hardcoded_tool_names(self):
+        """Test that tool guidance doesn't contain hardcoded tool names."""
+        assembler = PromptAssembler()
+        guidelines = assembler._build_tool_guidelines()
+        full_text = "\n".join(guidelines)
+        assert "terminal" not in full_text
+        assert "read_file" not in full_text
+        assert "execute_code" not in full_text

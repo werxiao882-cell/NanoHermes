@@ -244,6 +244,121 @@ class TestRegexSearch:
         assert results[0]["name"] == "read_file"
 
 
+class TestSelectSyntax:
+    """测试 select: 语法精确加载。"""
+
+    def _sample_tools(self):
+        return [
+            {"name": "read_file", "description": "Read a text file", "parameters": {"properties": {}}},
+            {"name": "write_file", "description": "Write to a file", "parameters": {"properties": {}}},
+            {"name": "terminal", "description": "Execute shell commands", "parameters": {"properties": {}}},
+            {"name": "execute_code", "description": "Execute Python code", "parameters": {"properties": {}}},
+            {"name": "process", "description": "Background process management", "parameters": {"properties": {}}},
+        ]
+
+    def test_single_tool_selection(self):
+        """单选：select:terminal 返回 terminal 工具。"""
+        searcher = ToolSearch(self._sample_tools())
+        results = searcher.search("select:terminal")
+        assert len(results) == 1
+        assert results[0]["name"] == "terminal"
+
+    def test_multiple_tool_selection(self):
+        """多选：select:terminal,read_file,write_file 按顺序返回。"""
+        searcher = ToolSearch(self._sample_tools())
+        results = searcher.search("select:terminal,read_file,write_file")
+        assert len(results) == 3
+        assert results[0]["name"] == "terminal"
+        assert results[1]["name"] == "read_file"
+        assert results[2]["name"] == "write_file"
+
+    def test_nonexistent_tool_ignored(self):
+        """不存在的工具名静默忽略。"""
+        searcher = ToolSearch(self._sample_tools())
+        results = searcher.search("select:terminal,nonexistent_tool")
+        assert len(results) == 1
+        assert results[0]["name"] == "terminal"
+
+    def test_empty_selection(self):
+        """select: 空选择返回空列表。"""
+        searcher = ToolSearch(self._sample_tools())
+        results = searcher.search("select:")
+        assert results == []
+
+    def test_select_with_spaces(self):
+        """select: 语法中的空格被正确处理。"""
+        searcher = ToolSearch(self._sample_tools())
+        results = searcher.search("select: terminal , read_file ")
+        assert len(results) == 2
+        assert results[0]["name"] == "terminal"
+        assert results[1]["name"] == "read_file"
+
+    def test_max_ten_tools_limit(self):
+        """超过 10 个工具时截断。"""
+        many_tools = [{"name": f"tool_{i}", "description": f"Tool {i}", "parameters": {"properties": {}}} for i in range(15)]
+        searcher = ToolSearch(many_tools)
+        query = "select:" + ",".join(f"tool_{i}" for i in range(15))
+        results = searcher.search(query)
+        assert len(results) == 10
+        assert results[0]["name"] == "tool_0"
+        assert results[9]["name"] == "tool_9"
+
+    def test_select_empty_tools(self):
+        """空工具列表时 select 返回空。"""
+        searcher = ToolSearch([])
+        results = searcher.search("select:terminal")
+        assert results == []
+
+
+class TestSelectFallback:
+    """测试非 select 查询仍走 BM25/Regex。"""
+
+    def _sample_tools(self):
+        return [
+            {"name": "read_file", "description": "Read a text file", "parameters": {"properties": {}}},
+            {"name": "send_email", "description": "Send an email", "parameters": {"properties": {}}},
+        ]
+
+    def test_non_select_uses_bm25(self):
+        """非 select 查询走 BM25。"""
+        searcher = ToolSearch(self._sample_tools())
+        results = searcher.search("read a file", mode="bm25")
+        assert len(results) > 0
+        assert results[0]["name"] == "read_file"
+
+    def test_non_select_uses_regex(self):
+        """非 select 正则查询走 Regex。"""
+        searcher = ToolSearch(self._sample_tools())
+        results = searcher.search("send_.*", mode="regex")
+        assert len(results) == 1
+        assert results[0]["name"] == "send_email"
+
+    def test_search_tools_with_select(self, clean_registry):
+        """search_tools 工具支持 select 语法。"""
+        from src.tools.search_tool import search_tools
+
+        register_tool(
+            name="execute_code",
+            toolset="code",
+            schema={"name": "execute_code", "description": "Execute code", "parameters": {"properties": {}}},
+            handler=lambda: "executed",
+            defer_loading=True,
+        )
+        register_tool(
+            name="process",
+            toolset="system",
+            schema={"name": "process", "description": "Process management", "parameters": {"properties": {}}},
+            handler=lambda: "ok",
+            defer_loading=True,
+        )
+
+        result = search_tools(query="select:execute_code")
+        data = json.loads(result)
+        assert isinstance(data, list)
+        assert len(data) == 1
+        assert data[0]["name"] == "execute_code"
+
+
 class TestAutoMode:
     """测试 Auto 模式策略选择。"""
 
