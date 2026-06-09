@@ -23,6 +23,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass, field
+from typing import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +135,7 @@ class ToolConcurrencyLimiter:
     async def execute(
         self,
         tool_name: str,
-        executor: callable,
+        executor: Callable,
         timeout: float | None = None,
     ) -> str:
         """执行单个工具调用，受并发限流器控制。
@@ -197,7 +198,7 @@ class ToolConcurrencyLimiter:
     async def execute_batch(
         self,
         tool_calls: list[dict],
-        executor: callable,
+        executor: Callable,
     ) -> list[str]:
         """批量执行工具调用，自动分组和限流。
 
@@ -323,3 +324,39 @@ class ToolConcurrencyLimiter:
                 for name, cfg in self.tool_configs.items()
             },
         }
+
+    # ─── 同步执行接口 ─────────────────────────────────────────
+
+    def execute_batch_sync(
+        self,
+        tool_calls: list[dict],
+        executor: Callable,
+    ) -> list[str]:
+        """同步批量执行工具调用，自动分组。
+
+        设计理由：
+          - dispatch() 是同步函数，不能在 async execute_batch 中直接使用
+          - 本方法提供同步路径，保留分组逻辑但组内顺序执行
+          - 异步路径（真正的并发）由 execute_batch() 处理
+
+        Args:
+            tool_calls: [{"name": ..., "args": ...}, ...]
+            executor: callable(name, args) -> str，通常为 dispatch()
+
+        Returns:
+            结果字符串列表，与输入顺序一致。
+        """
+        # 步骤 1: 分组
+        batches = self.partition_tool_calls(tool_calls)
+
+        # 步骤 2: 按组执行（同步路径：组间串行，组内也串行）
+        all_results: list[str] = []
+
+        for batch in batches:
+            calls = batch["calls"]
+
+            for call in calls:
+                result = executor(call["name"], call.get("args", {}))
+                all_results.append(result)
+
+        return all_results
