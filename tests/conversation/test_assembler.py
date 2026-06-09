@@ -26,7 +26,8 @@ class TestPromptAssemblerInit:
         assert assembler._context_parts == []
         assert assembler._volatile_parts == []
         assert assembler._skill_registry == {}
-        assert assembler._tool_registry == {}
+        assert assembler._tool_registry is None
+        assert assembler._skill_manager is None
         assert assembler._user_profile == {}
         assert assembler._memory_context == {}
 
@@ -203,13 +204,20 @@ class TestBuildSystemPrompt:
         assert any("Active Skills" in t for t in texts)
 
     def test_build_parts_with_toolsets(self):
-        """Test build_system_prompt_parts with toolsets."""
-        assembler = PromptAssembler()
-        parts = assembler.build_system_prompt_parts(toolsets=["terminal", "file"])
+        """Test build_system_prompt_parts with mock registry."""
+        mock_registry = type("MockRegistry", (), {
+            "get_tool_schemas": lambda self, exclude_deferred=False: [
+                {"name": "terminal", "description": "Run shell commands"},
+            ],
+            "get_tool_categories_with_info": lambda self: {},
+        })()
+
+        assembler = PromptAssembler(tool_registry=mock_registry)
+        parts = assembler.build_system_prompt_parts()
         texts = [p.content for p in parts]
         full = "\n".join(texts)
-        assert "Terminal" in full
-        assert "File Operations" in full
+        assert "Tool Usage" in full
+        assert "terminal" in full
 
     def test_build_parts_with_model(self):
         """Test build_system_prompt_parts with model guidance."""
@@ -319,29 +327,54 @@ class TestSoulMd:
 class TestToolGuidance:
     """Tests for tool guidance building."""
 
-    def test_build_tool_guidance_empty(self):
-        """Test build_tool_guidance with empty toolsets uses defaults."""
+    def test_build_tool_guidance_no_registry(self):
+        """Test build_tool_guidance without registry returns only guidelines."""
         assembler = PromptAssembler()
         result = assembler.build_tool_guidance()
-        assert "Tool Usage Guidelines" in result
-        assert "General Principles" in result
+        # 无注册表时，只返回通用指导
+        assert "Tool Usage" in result
+        assert "Tool Selection Guidelines" in result
+        assert "优先使用最简洁有效的方式" in result
 
-    def test_build_tool_guidance_terminal(self):
-        """Test build_tool_guidance with terminal toolset."""
-        assembler = PromptAssembler()
-        result = assembler.build_tool_guidance(toolsets=["terminal"])
-        assert "Terminal" in result
+    def test_build_tool_guidance_with_mock_registry(self):
+        """Test build_tool_guidance with mock registry."""
+        # 创建模拟注册表
+        mock_registry = type("MockRegistry", (), {
+            "get_tool_schemas": lambda self, exclude_deferred=False: [
+                {"name": "terminal", "description": "Run shell commands"},
+                {"name": "read_file", "description": "Read files"},
+            ] if not exclude_deferred else [
+                {"name": "terminal", "description": "Run shell commands"},
+            ],
+            "get_tool_categories_with_info": lambda self: {
+                "terminal": [
+                    {"name": "terminal", "description": "Run shell commands", "defer_loading": False},
+                ],
+                "file": [
+                    {"name": "read_file", "description": "Read files", "defer_loading": True},
+                ],
+            },
+        })()
 
-    def test_build_tool_guidance_all(self):
-        """Test build_tool_guidance with all known toolsets."""
+        assembler = PromptAssembler(tool_registry=mock_registry)
+        result = assembler.build_tool_guidance()
+
+        assert "Tool Usage" in result
+        assert "Always-Loaded Tools" in result
+        assert "terminal" in result
+        assert "Deferred Tools" in result
+        assert "read_file" in result
+
+    def test_build_tool_guidelines(self):
+        """Test _build_tool_guidelines returns generic guidelines."""
         assembler = PromptAssembler()
-        result = assembler.build_tool_guidance(
-            toolsets=["terminal", "file", "memory", "delegation", "skills"]
-        )
-        assert "Terminal" in result
-        assert "File Operations" in result
-        assert "Memory" in result
-        assert "Delegation" in result
+        guidelines = assembler._build_tool_guidelines()
+        full_text = "\n".join(guidelines)
+        assert "Tool Selection Guidelines" in full_text
+        assert "优先使用最简洁有效的方式" in full_text
+        # 不应包含具体工具名
+        assert "terminal" not in full_text
+        assert "read_file" not in full_text
 
 
 class TestSkillsPrompt:
@@ -354,14 +387,39 @@ class TestSkillsPrompt:
         assert result == ""
 
     def test_build_skills_prompt_with_skills(self):
-        """Test build_skills_prompt with registered skills."""
+        """Test build_skills_prompt with registered skills (backward compat)."""
         assembler = PromptAssembler()
         assembler.register_skill("python-dev", "Python development skill")
         assembler.register_skill("web-research", "Web research skill")
         result = assembler.build_skills_prompt(["python-dev", "web-research"])
+        assert "Skills" in result
         assert "Active Skills" in result
         assert "python-dev" in result
         assert "web-research" in result
+
+    def test_build_skills_prompt_with_trigger_skip(self):
+        """Test build_skills_prompt with TRIGGER/SKIP rules."""
+        # 创建模拟 SkillManager
+        mock_skill_manager = type("MockSkillManager", (), {
+            "get_enabled_skills": lambda self: [
+                {
+                    "name": "code-review",
+                    "description": "Review code for bugs",
+                    "trigger": ["when asked to review code", "when checking for bugs"],
+                    "skip": ["when no code has changed"],
+                },
+            ],
+        })()
+
+        assembler = PromptAssembler(skill_manager=mock_skill_manager)
+        result = assembler.build_skills_prompt()
+
+        assert "Skills" in result
+        assert "code-review" in result
+        assert "TRIGGER" in result
+        assert "SKIP" in result
+        assert "when asked to review code" in result
+        assert "when no code has changed" in result
 
 
 class TestModelOperationalGuidance:

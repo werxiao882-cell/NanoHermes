@@ -168,12 +168,18 @@ def main_chat(debug: bool = False, resume: str | None = None, resume_title: str 
     memory_manager.add_provider(file_provider)
 
     # ── 步骤 6.5: 组装系统提示词 ──
+    # 设计理由：
+    # 注入 ToolRegistry 和 SkillManager，使 assembler 能动态获取工具和技能信息
+    # 禁止硬编码工具名、技能名，所有内容从注册表实时读取
     from src.conversation.assembler import PromptAssembler
-    assembler = PromptAssembler()
+    assembler = PromptAssembler(
+        tool_registry=ToolRegistry,  # 注入注册表类，用于动态获取工具信息
+        skill_manager=skill_manager,  # 注入技能管理器，用于获取技能 trigger/skip 规则
+    )
     system_prompt_result = assembler.build_system_prompt(
         model=model,
-        skills=[],  # TODO: 从 skill_manager 获取启用的技能
-        toolsets=list(tool_categories.keys()) if tool_categories else None,
+        skills=[],  # 不再使用，由 skill_manager 动态获取
+        toolsets=[],  # 不再使用，由 tool_registry 动态获取
         include_memory=False,  # 记忆由 MemoryEventHandler 动态注入
         include_user_profile=False,
     )
