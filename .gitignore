@@ -26,6 +26,7 @@ venv/
 # 参考文档（不提交到库）
 hermes-agent-ref/
 msprof_mcp/
+claude-code-analysis/
 
 # 日志
 *.log
