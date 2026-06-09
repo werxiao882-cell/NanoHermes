@@ -290,6 +290,53 @@ class ToolSearch:
         """
         return bool(_REGEX_INDICATORS.search(query))
 
+    @staticmethod
+    def _parse_select_query(query: str) -> list[str]:
+        """解析 select: 语法，提取工具名列表。
+
+        设计理由：
+        - select: 前缀表示精确加载指定工具，而非模糊搜索
+        - 逗号分隔支持批量加载
+        - 最多 10 个工具，防止上下文溢出
+
+        Args:
+            query: 以 "select:" 开头的查询字符串。
+
+        Returns:
+            工具名列表（已去空白，最多 10 个）。
+        """
+        SELECT_PREFIX = "select:"
+        if not query.startswith(SELECT_PREFIX):
+            return []
+
+        raw = query[len(SELECT_PREFIX):]
+        if not raw.strip():
+            return []
+
+        names = [name.strip() for name in raw.split(",") if name.strip()]
+        return names[:10]
+
+    def _search_select(self, names: list[str]) -> list[dict[str, Any]]:
+        """按名称精确加载工具 schema。
+
+        设计理由：
+        - 按查询中指定的顺序返回
+        - 不存在的工具名静默忽略
+        - O(n) 遍历构建 name→tool 映射，然后 O(m) 按名称查找
+
+        Args:
+            names: 工具名列表。
+
+        Returns:
+            匹配的工具 schema 列表（按指定顺序）。
+        """
+        tool_map = {t.get("name", ""): t for t in self._tools}
+        results = []
+        for name in names:
+            if name in tool_map:
+                results.append(tool_map[name])
+        return results
+
     def search(
         self,
         query: str,
@@ -299,12 +346,13 @@ class ToolSearch:
         """搜索工具。
 
         搜索策略：
+        - "select:": 精确加载指定工具（优先检测）
         - "auto": 自动检测查询类型，包含正则特征字符时使用 Regex，否则 BM25
         - "bm25": 强制使用 BM25 自然语言搜索
         - "regex": 强制使用 Regex 模式匹配
 
         Args:
-            query: 查询字符串（自然语言或正则表达式）。
+            query: 查询字符串（自然语言、正则表达式或 select: 语法）。
             mode: 搜索模式，"auto" | "bm25" | "regex"。
             top_k: 返回结果数量上限。
 
@@ -313,6 +361,11 @@ class ToolSearch:
         """
         if not self._tools:
             return []
+
+        # 优先检测 select: 语法（精确加载，不走搜索引擎）
+        if query.startswith("select:"):
+            select_names = self._parse_select_query(query)
+            return self._search_select(select_names)
 
         if mode == "regex" or (mode == "auto" and self._is_regex(query)):
             return self._search_regex(query, top_k)
@@ -393,6 +446,8 @@ def _register_search_tools() -> None:
                 "that none of the visible tools provide, or when you suspect a tool exists for a specific task.\n\n"
                 "Use natural language queries like 'send a message to a user' or 'create a pull request'. "
                 "You can also use regex patterns like 'get_.*_data' for precise matching.\n\n"
+                "Use 'select:<name>[,<name>...]' to explicitly load specific tools by name "
+                "(e.g., 'select:execute_code,process'). Maximum 10 tools per query.\n\n"
                 "Returns up to 5 matching tool schemas. After discovering tools, you can call them directly in the next turn."
             ),
             "parameters": {
@@ -400,7 +455,11 @@ def _register_search_tools() -> None:
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Search query: natural language description (e.g., 'send email') or regex pattern (e.g., 'get_.*_data').",
+                        "description": (
+                            "Search query: natural language (e.g., 'send email'), "
+                            "regex pattern (e.g., 'get_.*_data'), "
+                            "or select syntax (e.g., 'select:execute_code,process')."
+                        ),
                     },
                     "mode": {
                         "type": "string",
