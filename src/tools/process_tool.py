@@ -149,12 +149,15 @@ def _start_process(command: str, cwd: str = "") -> str:
     work_dir = Path(cwd) if cwd else Path.cwd()
     
     try:
+        # 显式指定 UTF-8 编码，避免 Windows 默认使用 GBK 导致解码失败
         proc = subprocess.Popen(
             command,
             shell=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             cwd=work_dir,
         )
         

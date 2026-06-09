@@ -126,6 +126,8 @@ class LocalEnvironment(TerminalEnvironment):
         effective_cwd = cwd or os.getcwd()
 
         try:
+            # 显式指定 UTF-8 编码，避免 Windows 默认使用 GBK 导致解码失败
+            # errors='replace' 将无法解码的字节替换为 ，防止程序崩溃
             process = subprocess.Popen(
                 command,
                 shell=True,
@@ -133,6 +135,8 @@ class LocalEnvironment(TerminalEnvironment):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
             )
 
             try:

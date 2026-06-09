@@ -339,7 +339,6 @@ class ToolRegistry:
                 "defer_loading": tool.defer_loading,
             })
         return categories
-        return categories
 
 
 def register_tool(
