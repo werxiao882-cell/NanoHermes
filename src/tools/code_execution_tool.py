@@ -67,11 +67,13 @@ def execute_code(
             temp_path = f.name
         
         try:
-            # 执行代码
+            # 执行代码，显式指定 UTF-8 编码避免 Windows GBK 解码失败
             result = subprocess.run(
                 [sys.executable, temp_path],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=timeout,
                 cwd=Path.cwd(),
             )

@@ -47,6 +47,9 @@ SLASH_COMMANDS = [
     "/tools", "/compress", "/quit", "/exit",
 ]
 
+# 哨兵对象：区分 __init__ 中 session_db 参数"未传" vs "显式传 None"
+_UNSET = object()
+
 
 class TUIApp:
     """TUI 主应用类，整合了应用管理和适配器功能。
@@ -59,71 +62,70 @@ class TUIApp:
 
     def __init__(
         self,
-        model_caller=None,
-        tool_dispatch=None,
-        model: str = "",
-        session_id: str = "",
-        tool_schemas: list[dict[str, Any]] | None = None,
-        tool_categories_info: dict[str, list[dict[str, Any]]] | None = None,
-        skill_categories: dict[str, list[str]] | None = None,
-        system_prompt: str = "",
-        config: dict[str, Any] | None = None,
-        session_db=None,
-        jsonl_store=None,
-        memory_manager=None,
-        skill_manager=None,
+        *,
         debug: bool = False,
+        resume: str | None = None,
+        resume_title: str | None = None,
+        config: dict[str, Any] | None = None
     ):
         """初始化 TUI 应用。
-        
-        参数说明（依赖注入）：
-        - model_caller: 调用 LLM API 的函数，注入而非内部创建以支持不同 API 提供商
-        - tool_dispatch: 工具分发器，负责根据工具名调用对应实现
-        - session_db: 会话数据库（SQLite），用于会话元数据和搜索
-        - jsonl_store: JSONL 存储，用于完整消息历史（支持会话恢复）
-        - memory_manager: 记忆管理器，提供长期记忆能力
-        - skill_manager: 技能管理器，管理可用技能列表
-        - config: 配置字典，控制 UI 行为（如打字速度、面板位置等）
-        - debug: 是否开启调试模式，影响日志输出和错误处理
-        
+
         设计理由：
-        - 所有参数都有默认值，支持部分初始化（测试场景可以只注入必要依赖）
-        - 可选依赖使用 None 作为默认值，在运行时检查可用性而非强制要求
+        - 生产环境：无需传参，内部自动初始化所有依赖（配置/Provider/工具/存储/记忆/提示词）
+        - 测试环境：传 session_db（含 None）跳过自动初始化，使用轻量默认值
+        - session_db 使用 _UNSET 哨兵区分"未传参"（自动初始化）和"显式传 None"（无数据库）
+
+        Args:
+            debug: 是否开启调试模式。
+            resume: 恢复会话 ID。
+            resume_title: 通过标题恢复会话。
+            config: UI 配置覆盖（typing_speed, show_tool_panel 等）。
+            session_db: 会话数据库。_UNSET=自动初始化，None=无数据库，实例=使用注入的数据库。
         """
-        self.config = config or {}
+        # ── 1. 参数保存 ──
+        # 将构造参数保存为实例属性，供后续初始化阶段和运行时使用
         self.debug = debug
-        
-        # 状态管理：集中管理应用状态，避免状态散落在多个属性中
-        # 使用独立状态对象的好处：
-        # 1. 状态变更可以被监听和记录
-        # 2. 便于序列化/反序列化（如保存/恢复状态）
-        # 3. 测试时可以单独 mock 状态对象
+        self._resume = resume
+        self._resume_title = resume_title
+        self.config = config or {}
+
+        # ── 2. 日志配置 ──
+        # 使用局部导入 logging，避免与模块级 logger 冲突
+        # 默认 WARNING 级别减少噪音；debug 模式下 src 命名空间降为 DEBUG
+        # 时间格式用 HH:MM:SS（省略日期），因为 TUI 会话通常不超过一天
+        from pathlib import Path
+        import logging as _logging
+        _logging.basicConfig(
+            level=_logging.WARNING,
+            format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            datefmt="%H:%M:%S",
+        )
+        if self.debug:
+            _logging.getLogger("src").setLevel(_logging.DEBUG)
+
+        # ── 3. 状态管理 ──
+        # TUIState 集中管理应用状态（running/welcomed/session_id 等）
+        # TUIEventHandler 处理状态变更的副作用（如中断信号的状态同步）
         self.state = TUIState()
         self.event_handler = TUIEventHandler(self.state)
-        
-        # 存储层依赖（可选）
-        self.session_db = session_db
-        self.jsonl_store = jsonl_store
-        self.memory_manager = memory_manager
-        self.skill_manager = skill_manager
 
-        # 布局配置：从 config 读取，支持运行时自定义
+        # ── 4. 布局管理 ──
+        # LayoutManager 负责 TUI 区域划分（对话区、工具面板、状态栏）
+        # 布局参数从 config 读取，支持运行时覆盖默认值
         layout_config = LayoutConfig(
             show_tool_panel=self.config.get("show_tool_panel", True),
             tool_panel_position=self.config.get("tool_panel_position", "right"),
         )
         self.layout_manager = LayoutManager(layout_config)
 
-        # UI 组件初始化
+        # ── 5. 输入组件 ──
+        # 组装 prompt_toolkit 的输入管线：快捷键 → 样式 → 补全器 → 历史记录 → PromptSession
+        # PromptSession 是 prompt_toolkit 的核心，封装了终端输入的所有交互逻辑
+        # application 延迟赋值，因为需要在 run() 中根据运行时状态决定是否创建
         self.key_bindings = self._create_key_bindings()
         self.style = self._create_style()
         self.completer = ContextAwareCompleter()
         self.history = TUIHistory()
-        
-        # PromptSession 是 prompt_toolkit 的核心组件，负责：
-        # - 用户输入处理（支持多行、自动补全、历史导航）
-        # - 快捷键绑定
-        # - 样式应用
         self.session = PromptSession(
             key_bindings=self.key_bindings,
             style=self.style,
@@ -132,30 +134,109 @@ class TUIApp:
         )
         self.application: Application | None = None
 
-        # 适配器功能：桥接 TUI 与核心对话系统
-        self.model_caller = model_caller
-        self.tool_dispatch = tool_dispatch
-        self.model = model
-        self.session_id = session_id
-        self.tool_schemas = tool_schemas or []
-        self.tool_categories_info = tool_categories_info or {}
-        self.skill_categories = skill_categories or {}
-        self.system_prompt = system_prompt
-
-        # 渲染组件
+        # ── 6. 渲染组件 ──
+        # Console: Rich 渲染入口，所有终端输出通过它完成
+        # conversation_lines: 预渲染的 Text 列表，用于对话面板展示
+        # messages: 原始消息字典列表，用于发送给 LLM API
+        # typewriter/streaming_md/status_indicator: 流式输出的三个层次
+        #   - typewriter: 逐字打字效果（视觉体验）
+        #   - streaming_md: 流式 Markdown 渲染（内容格式化）
+        #   - status_indicator: 流式状态指示器（加载中/就绪）
+        # 注意：system_prompt 在步骤 13 组装，此处先初始化为空字符串
+        # 步骤 13 完成后会用实际内容替换，并追加到 messages 中
+        self.system_prompt = ""
         self.console = Console()
         self.conversation_lines: list[Text] = []
         self.messages: list[dict[str, Any]] = []
-        if system_prompt:
-            self.messages.append({"role": "system", "content": system_prompt})
         self._last_reasoning: str = ""
         self._current_loop = None
-        self.status_bar = StatusBar(model=model, context_window=1_000_000)
+        self.status_bar = None  # 延迟初始化，等 self.model 赋值后创建（见步骤 7）
         self.typewriter = TypewriterEffect(speed_ms=self.config.get("typing_speed", 10))
         self.streaming_md = StreamingMarkdown()
         self.status_indicator = StreamingStatusIndicator()
 
-        self.state.session_id = session_id
+        # ── 7. 配置加载与 API 凭证 ──
+        # 初始化链：配置 → 凭证 → 模型名称
+        # API Key 缺失时直接 sys.exit(1)，因为没有凭证无法进行任何 LLM 调用
+        # 使用 print 而非 logger，因为此时日志系统刚配置，且这是面向用户的致命错误
+        from src.config import load_config, get_api_key, get_base_url
+        app_config = load_config()
+        api_key = get_api_key(app_config)
+        base_url = get_base_url(app_config)
+        self.model = app_config.model.name
+        self.status_bar = StatusBar(model=self.model, context_window=1_000_000)  # 延迟创建
+        if not api_key:
+            import sys
+            print("[错误] 未设置 API Key，请检查 .env 或配置文件")
+            sys.exit(1)
+
+        # ── 8. LLM Provider 客户端 ──
+        # 构建调用链：OpenAI SDK 客户端 → ProviderOpenAIClient 封装 → model_caller 可调用对象
+        # ProviderOpenAIClient 封装了重试、错误分类、debug 日志等横切关注点
+        # build_caller() 返回一个可调用对象，屏蔽了 SDK 细节，供 ConversationLoop 使用
+        from openai import OpenAI
+        from src.provider.openai_client import OpenAIClient as ProviderOpenAIClient
+        client = OpenAI(api_key=api_key, base_url=base_url)
+        provider_client = ProviderOpenAIClient(client, self.model, debug=self.debug)
+        self.model_caller = provider_client.build_caller()
+
+        # ── 9. 工具系统 ──
+        # init_all_tools() 触发所有工具模块的加载，每个模块在导入时自动注册
+        # exclude_deferred=True 只获取非延迟工具（6 个核心工具），延迟工具通过 search_tools 按需发现
+        # tool_categories_info 用于启动横幅按类别展示工具列表
+        from src.tools.registry import ToolRegistry, get_tool_schemas
+        from src.tools.dispatcher import dispatch as tool_dispatch_func
+        ToolRegistry.init_all_tools()
+        self.tool_dispatch = tool_dispatch_func
+        self.tool_schemas = get_tool_schemas(exclude_deferred=True)
+        self.tool_categories_info = ToolRegistry.get_tool_categories_with_info()
+
+        # ── 10. 技能系统 ──
+        # SkillManager 加载 SKILL.md 文件并管理技能的启用/禁用状态
+        # skill_categories 按类别分组，用于启动横幅展示和系统提示注入
+        from src.skills.manager import SkillManager
+        self.skill_manager = SkillManager()
+        self.skill_categories = self.skill_manager.get_skills_by_category()
+
+        # ── 11. 会话存储（双存储） ──
+        # SessionDB (SQLite): 会话元数据 + FTS5 全文搜索 + 统计分析
+        # JsonlSessionStore: 完整消息历史（保留 tool_calls 等结构化字段）
+        # session_id 初始为 "new_session"，在 run() 中首次用户输入前创建实际记录
+        from src.session.session_db import SessionDB
+        from src.session.jsonl_store import JsonlSessionStore
+        db_path = Path.home() / ".nanohermes" / "sessions.db"
+        self.session_db = SessionDB(db_path)
+        self.jsonl_store = JsonlSessionStore()
+        self.session_id = "new_session"
+
+        # ── 12. 记忆系统 ──
+        # MemoryManager 支持多提供者架构（当前只注册 FileMemoryProvider）
+        # FileMemoryProvider 读写 ~/.nanohermes/ 下的 MEMORY.md 和 USER.md
+        # 记忆在对话中通过 MemoryEventHandler 自动检索和刷写
+        from src.memory import MemoryManager, FileMemoryProvider
+        self.memory_manager = MemoryManager()
+        hermes_home = str(Path.home() / ".nanohermes")
+        file_provider = FileMemoryProvider(hermes_home)
+        self.memory_manager.add_provider(file_provider)
+
+        from src.conversation.assembler import PromptAssembler
+        assembler = PromptAssembler(
+            tool_registry=ToolRegistry,
+            skill_manager=self.skill_manager,
+        )
+        system_prompt_result = assembler.build_system_prompt(
+            model=self.model,
+            include_memory=True,
+            include_user_profile=True,
+        )
+        self.system_prompt = system_prompt_result.full_text
+        # 系统提示组装完成，追加到消息列表开头（步骤 6 时 system_prompt 尚为空）
+        if self.system_prompt:
+            self.messages.insert(0, {"role": "system", "content": self.system_prompt})
+
+        # ── 14. 初始化完成 ──
+        # 同步 session_id 到状态管理器，供事件处理器和 UI 组件使用
+        self.state.session_id = self.session_id
         logger.info("TUIApp 初始化完成")
 
     @property
@@ -294,6 +375,13 @@ class TUIApp:
         return Panel(banner_text, title="NanoHermes", border_style="yellow")
 
     def _render_conversation(self) -> Panel:
+        """渲染对话面板，将所有对话行组合为一个 Rich Panel。
+
+        设计理由：
+        - 使用 Text 对象逐行追加而非字符串拼接，因为 Text 对象保留每行的独立样式信息
+        - Panel 提供视觉边框，将对话区域与其他 UI 元素（横幅、状态栏）分隔
+        - conversation_lines 是预渲染的 Text 列表，此方法只做组合，不做样式计算
+        """
         conversation_text = Text()
         for line in self.conversation_lines:
             conversation_text.append(line)
@@ -301,6 +389,13 @@ class TUIApp:
         return Panel(conversation_text, title="Conversation", border_style="blue")
 
     def print_banner(self) -> None:
+        """打印启动横幅和使用提示。
+
+        设计理由：
+        - 横幅展示模型、工具、技能等运行时信息，帮助用户确认环境配置
+        - 提示信息独立于横幅面板，避免面板内容过于密集
+        - 使用 console.print() 而非 logger，因为这是用户界面输出而非日志
+        """
         self.console.print(self._render_banner())
         self.console.print()
         self.console.print("Type /quit to exit, /clear to clear history")
@@ -308,6 +403,23 @@ class TUIApp:
         self.console.print()
 
     def add_message(self, role: str, content: str, is_tool: bool = False) -> None:
+        """添加一条消息到对话显示区域并持久化存储。
+
+        设计理由：
+        - 同时完成 UI 渲染和存储持久化，保证显示与存储的一致性
+        - is_tool 参数优先于 role 判断，因为工具消息可能以不同 role 出现
+        - 使用 Rich Text 对象而非纯字符串，保留样式信息供后续渲染
+        - 不同 role 使用不同前缀和颜色：
+          - user: "> " 绿色（输入提示感）
+          - assistant: "Hermes: " 白色（品牌标识）
+          - tool: "⚡ " 青色（视觉突出）
+          - system: 无前缀，dim 样式（辅助信息不抢视觉焦点）
+
+        Args:
+            role: 消息角色（user/assistant/system/tool）。
+            content: 消息文本内容。
+            is_tool: 是否为工具执行消息，优先于 role 使用工具样式。
+        """
         line = Text()
         if is_tool:
             line.append(f"⚡ {content}", style="cyan")
@@ -372,12 +484,39 @@ class TUIApp:
         self.console.print()
 
     def show_tool_start(self, tool_name: str, action: str) -> None:
+        """显示工具开始执行的状态信息。
+
+        设计理由：
+        - 委托给 ActivityFeed 格式化，保持工具状态展示风格统一
+        - 即时反馈让用户知道工具已开始执行，避免"卡住"的错觉
+        """
         self.console.print(ActivityFeed.format_start(tool_name, action))
 
     def show_tool_complete(self, tool_name: str, action: str, elapsed: float) -> None:
+        """显示工具执行完成的状态信息，包含耗时。
+
+        设计理由：
+        - elapsed 参数由调用方计算，此方法只负责展示，遵循单一职责
+        - 耗时信息帮助用户判断工具性能，识别慢操作
+        """
         self.console.print(ActivityFeed.format_complete(tool_name, action, elapsed))
 
     def show_tool_result_summary(self, tool_name: str, result: str) -> None:
+        """根据工具类型解析结果并显示摘要信息。
+
+        设计理由：
+        - 不同工具的结果结构不同，需要按工具名分别解析关键字段
+        - 使用 JSON 解析结果，因为工具返回值统一为 JSON 格式
+        - 解析失败时降级为通用"completed"提示，而非报错：
+          1. 结果摘要不是关键信息，失败不应中断对话
+          2. 某些工具可能返回非 JSON 格式（如纯文本错误信息）
+        - 各工具的摘要策略：
+          - read_file: 显示读取行数（用户关心文件大小）
+          - write_file: 显示写入字节数（确认写入成功）
+          - search_files: 显示匹配文件数（评估搜索效果）
+          - terminal: 显示退出码（判断命令是否成功）
+          - todo: 委托给 _show_todo_list 专用渲染
+        """
         try:
             data = json.loads(result)
             if tool_name == "read_file":
@@ -474,14 +613,34 @@ class TUIApp:
         self.console.print()
 
     def show_separator(self, agent_name: str = "NanoHermes") -> None:
+        """显示分隔线，标记 AI 回复的开始位置。
+
+        设计理由：
+        - 在工具执行日志和 AI 最终回复之间提供视觉分隔
+        - 使用固定宽度 50 字符的横线，确保在不同终端宽度下都有良好表现
+        - agent_name 参数化支持多 Agent 场景（如委托任务时显示子 Agent 名称）
+        """
         self.console.print(f"┌─ {agent_name} " + "─" * 50, style="bold yellow")
 
     def clear_conversation(self) -> None:
+        """清空对话显示区域和消息历史，保留系统提示。
+
+        设计理由：
+        - 保留 system role 的消息，因为系统提示是模型行为的基础配置
+        - 清空 _last_reasoning 避免旧思考内容影响后续 debug 输出
+        - conversation_lines 和 messages 同步清空，保持显示与数据一致
+        """
         self.conversation_lines.clear()
         self.messages = [m for m in self.messages if m.get("role") == "system"]
         self._last_reasoning = ""
 
     def _print_status_bar(self) -> None:
+        """渲染并打印状态栏，显示 token 使用量等运行时指标。
+
+        设计理由：
+        - 在每次消息处理后调用，让用户实时了解资源消耗
+        - 额外打印空行，为下一次用户输入提供视觉间距
+        """
         self.console.print(self.status_bar.render())
         self.console.print()
 
@@ -623,6 +782,22 @@ class TUIApp:
         await self._check_auto_compress(result[0])
 
     async def _handle_command(self, command: str) -> bool:
+        """处理斜杠命令，返回是否成功识别并处理了命令。
+
+        设计理由：
+        - 返回 bool 而非抛出异常，因为未识别的命令应交给对话循环处理（作为普通消息）
+        - 使用 lower().strip() 标准化输入，容忍大小写和前后空格差异
+        - /quit 和 /exit 同时支持带斜杠和不带斜杠形式，兼容用户习惯
+        - 带参数的命令（/resume, /compress, /title）使用 split(None, 1) 拆分：
+          - None 表示按任意空白字符分割（容忍多余空格）
+          - 1 表示最多拆分一次（保留参数中的空格，如标题 "my project"）
+
+        Args:
+            command: 用户输入的原始命令字符串。
+
+        Returns:
+            True 表示命令已处理（不应作为普通消息发送），False 表示未识别。
+        """
         cmd = command.lower().strip()
 
         if cmd in ("/quit", "/exit", "quit", "exit"):
@@ -689,6 +864,19 @@ class TUIApp:
         return False
 
     async def process_message(self, message: str) -> None:
+        """处理用户输入的消息或命令，是主循环的核心分发点。
+
+        设计理由：
+        - 以 "/" 开头判定为命令，否则为普通对话消息
+        - 命令处理后立即打印状态栏，因为命令可能改变状态（如 /clear、/compress）
+        - 普通消息先 add_message 再进入对话循环：
+          1. add_message 同时完成 UI 显示和持久化
+          2. 对话循环内部会将消息追加到 self.messages 列表
+        - 对话完成后打印状态栏，反映最新的 token 使用量
+
+        Args:
+            message: 用户输入的原始文本（已 strip）。
+        """
         if message.startswith("/"):
             await self._handle_command(message)
             self._print_status_bar()
@@ -773,6 +961,13 @@ class TUIApp:
             await self.shutdown()
 
     def _show_welcome_message(self) -> None:
+        """显示欢迎消息（当前为空实现，预留扩展点）。
+
+        设计理由：
+        - 预留 hook 方法，子类或未来版本可覆盖实现自定义欢迎消息
+        - 当前不显示额外欢迎消息，因为 print_banner() 已提供足够的启动信息
+        - state.welcomed 标志确保此方法只在首次循环时调用
+        """
         pass
 
     async def _cmd_sessions(self) -> None:
@@ -1084,6 +1279,15 @@ class TUIApp:
         self.console.print()
 
     async def shutdown(self) -> None:
+        """执行 TUI 关闭时的清理操作。
+
+        设计理由：
+        - 在 finally 块中调用，确保无论何种退出方式（正常/Ctrl+C/异常）都执行清理
+        - 清理顺序：停止标志 → 状态持久化 → 事件处理器清理
+          1. 先设置 running=False，防止其他协程继续发起新操作
+          2. 保存状态（如 session_id），支持下次启动时恢复
+          3. 清理事件处理器订阅，避免内存泄漏（事件总线持有回调引用）
+        """
         logger.info("TUI 正在关闭...")
         self.state.running = False
         self.state.save()
@@ -1092,43 +1296,22 @@ class TUIApp:
 
 
 def create_tui(
-    model_caller,
-    tool_dispatch,
-    model: str,
-    session_id: str,
-    tool_schemas: list[dict[str, Any]] | None = None,
-    tool_categories_info: dict[str, list[dict[str, Any]]] | None = None,
-    skill_categories: dict[str, list[str]] | None = None,
-    system_prompt: str = "",
-    config: dict[str, Any] | None = None,
-    session_db=None,
-    jsonl_store=None,
-    memory_manager=None,
-    skill_manager=None,
     debug: bool = False,
+    resume: str | None = None,
+    resume_title: str | None = None,
+    config: dict[str, Any] | None = None,
 ) -> TUIApp:
     """工厂函数：创建 TUIApp 实例。
-    
+
     设计理由：
-    - 工厂函数而非直接构造的原因：
-      1. 简化调用：main.py 可以通过 **config 字典一次性传入所有参数
-      2. 参数验证：未来可以在工厂中添加参数验证逻辑
-      3. 依赖注入容器：可以作为 DI 容器的注册点
-    - 参数与 TUIApp.__init__ 完全一致，只是转发调用
+    - 生产环境只需传 debug/resume/config，TUIApp 内部自动初始化所有依赖
+    - 保留工厂函数而非直接构造的原因：
+      1. 统一入口，便于未来添加参数验证或 DI 容器
+      2. 与 main.py 的调用约定保持一致
     """
     return TUIApp(
-        model_caller=model_caller,
-        tool_dispatch=tool_dispatch,
-        model=model,
-        session_id=session_id,
-        tool_schemas=tool_schemas,
-        tool_categories_info=tool_categories_info,
-        skill_categories=skill_categories,
-        system_prompt=system_prompt,
-        config=config,
-        session_db=session_db,
-        jsonl_store=jsonl_store,
-        memory_manager=memory_manager,
-        skill_manager=skill_manager,
         debug=debug,
+        resume=resume,
+        resume_title=resume_title,
+        config=config,
     )

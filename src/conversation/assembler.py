@@ -762,16 +762,83 @@ class PromptAssembler:
     def build_memory_context(self, memory_data: dict[str, Any] | None = None) -> str:
         """构建记忆上下文。
 
+        读取优先级（从高到低）：
+        1. memory_data 参数：显式传入的记忆数据（用于测试或特殊场景）
+        2. self._memory_context：预加载的记忆数据（通过 set_memory_context 设置）
+        3. 文件读取（按优先级）：
+           a. 项目级：<project_root>/.nanohermes/memory/MEMORY.md
+           b. 用户级：~/.nanohermes/memory/MEMORY.md
+
+        设计理由：
+        - 参数优先：允许调用方覆盖默认行为，便于测试和特殊场景
+        - 项目级优先于用户级：项目特定配置应覆盖全局配置
+        - 文件读取使用 try-except 静默失败，因为记忆文件可能不存在
+
         Args:
-            memory_data: 记忆数据。如果为 None 则使用内部数据。
+            memory_data: 记忆数据。如果为 None 则按优先级读取。
 
         Returns:
             记忆上下文文本。
         """
-        data = memory_data or self._memory_context
-        if not data:
-            return ""
+        # 优先级 1：显式传入的数据
+        if memory_data:
+            return self._format_memory_data(memory_data)
 
+        # 优先级 2：预加载的数据
+        if self._memory_context:
+            return self._format_memory_data(self._memory_context)
+
+        # 优先级 3：从文件读取
+        memory_content = self._read_memory_file()
+        if memory_content:
+            return self._format_memory_content(memory_content)
+
+        return ""
+
+    def _read_memory_file(self) -> str:
+        """按优先级读取 MEMORY.md 文件。
+
+        读取顺序：
+        1. 项目级：<git_root>/.nanohermes/memory/MEMORY.md
+        2. 用户级：~/.nanohermes/memory/MEMORY.md
+
+        Returns:
+            文件内容，如果文件不存在则返回空字符串。
+        """
+        search_paths = []
+
+        # 项目级路径（git root）
+        git_root = self._find_git_root()
+        if git_root:
+            search_paths.append(git_root / ".nanohermes" / "memory" / "MEMORY.md")
+
+        # 项目级路径（cwd）
+        search_paths.append(Path.cwd() / ".nanohermes" / "memory" / "MEMORY.md")
+
+        # 用户级路径
+        search_paths.append(Path.home() / ".nanohermes" / "memory" / "MEMORY.md")
+
+        # 按优先级读取第一个存在的文件
+        for path in search_paths:
+            if path.exists():
+                try:
+                    content = path.read_text(encoding="utf-8").strip()
+                    if content:
+                        return content
+                except (OSError, UnicodeDecodeError):
+                    continue
+
+        return ""
+
+    def _format_memory_data(self, data: dict[str, Any]) -> str:
+        """格式化结构化记忆数据。
+
+        Args:
+            data: 结构化记忆数据（包含 summary, recent_events, key_facts 等字段）。
+
+        Returns:
+            格式化后的记忆文本。
+        """
         parts = [
             "# Memory Context",
             "",
@@ -796,6 +863,31 @@ class PromptAssembler:
 
         return "\n".join(parts)
 
+    def _format_memory_content(self, content: str) -> str:
+        """格式化文件读取的记忆内容。
+
+        Args:
+            content: MEMORY.md 文件的原始内容。
+
+        Returns:
+            格式化后的记忆文本。
+        """
+        # 过滤掉标题行（# Memory 或 # 记忆）
+        lines = content.split("\n")
+        filtered_lines = []
+        for line in lines:
+            stripped = line.strip()
+            # 跳过一级标题
+            if stripped.startswith("# ") and not stripped.startswith("## "):
+                continue
+            filtered_lines.append(line)
+
+        filtered_content = "\n".join(filtered_lines).strip()
+        if not filtered_content:
+            return ""
+
+        return f"# Memory Context\n\n{filtered_content}\n"
+
     def set_memory_context(self, data: dict[str, Any]) -> None:
         """设置记忆上下文数据。
 
@@ -809,16 +901,83 @@ class PromptAssembler:
     def build_user_profile(self, profile: dict[str, Any] | None = None) -> str:
         """构建用户画像。
 
+        读取优先级（从高到低）：
+        1. profile 参数：显式传入的用户画像数据（用于测试或特殊场景）
+        2. self._user_profile：预加载的用户画像数据（通过 set_user_profile 设置）
+        3. 文件读取（按优先级）：
+           a. 项目级：<project_root>/.nanohermes/memory/USER.md
+           b. 用户级：~/.nanohermes/memory/USER.md
+
+        设计理由：
+        - 参数优先：允许调用方覆盖默认行为，便于测试和特殊场景
+        - 项目级优先于用户级：项目特定的用户配置应覆盖全局配置
+        - 文件读取使用 try-except 静默失败，因为用户画像文件可能不存在
+
         Args:
-            profile: 用户画像数据。如果为 None 则使用内部数据。
+            profile: 用户画像数据。如果为 None 则按优先级读取。
 
         Returns:
             用户画像文本。
         """
-        data = profile or self._user_profile
-        if not data:
-            return ""
+        # 优先级 1：显式传入的数据
+        if profile:
+            return self._format_profile_data(profile)
 
+        # 优先级 2：预加载的数据
+        if self._user_profile:
+            return self._format_profile_data(self._user_profile)
+
+        # 优先级 3：从文件读取
+        user_content = self._read_user_file()
+        if user_content:
+            return self._format_user_content(user_content)
+
+        return ""
+
+    def _read_user_file(self) -> str:
+        """按优先级读取 USER.md 文件。
+
+        读取顺序：
+        1. 项目级：<git_root>/.nanohermes/memory/USER.md
+        2. 用户级：~/.nanohermes/memory/USER.md
+
+        Returns:
+            文件内容，如果文件不存在则返回空字符串。
+        """
+        search_paths = []
+
+        # 项目级路径（git root）
+        git_root = self._find_git_root()
+        if git_root:
+            search_paths.append(git_root / ".nanohermes" / "memory" / "USER.md")
+
+        # 项目级路径（cwd）
+        search_paths.append(Path.cwd() / ".nanohermes" / "memory" / "USER.md")
+
+        # 用户级路径
+        search_paths.append(Path.home() / ".nanohermes" / "memory" / "USER.md")
+
+        # 按优先级读取第一个存在的文件
+        for path in search_paths:
+            if path.exists():
+                try:
+                    content = path.read_text(encoding="utf-8").strip()
+                    if content:
+                        return content
+                except (OSError, UnicodeDecodeError):
+                    continue
+
+        return ""
+
+    def _format_profile_data(self, data: dict[str, Any]) -> str:
+        """格式化结构化用户画像数据。
+
+        Args:
+            data: 结构化用户画像数据（包含 name, role, preferences 等字段）。
+
+        Returns:
+            格式化后的用户画像文本。
+        """
         parts = [
             "# User Profile",
             "",
@@ -843,6 +1002,31 @@ class PromptAssembler:
 
         parts.append("")
         return "\n".join(parts)
+
+    def _format_user_content(self, content: str) -> str:
+        """格式化文件读取的用户画像内容。
+
+        Args:
+            content: USER.md 文件的原始内容。
+
+        Returns:
+            格式化后的用户画像文本。
+        """
+        # 过滤掉标题行（# User Profile 或 # 用户画像）
+        lines = content.split("\n")
+        filtered_lines = []
+        for line in lines:
+            stripped = line.strip()
+            # 跳过一级标题
+            if stripped.startswith("# ") and not stripped.startswith("## "):
+                continue
+            filtered_lines.append(line)
+
+        filtered_content = "\n".join(filtered_lines).strip()
+        if not filtered_content:
+            return ""
+
+        return f"# User Profile\n\n{filtered_content}\n"
 
     def set_user_profile(self, profile: dict[str, Any]) -> None:
         """设置用户画像数据。
