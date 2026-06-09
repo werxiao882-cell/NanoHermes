@@ -41,7 +41,7 @@ class ErrorClassification:
 CONNECTION_PATTERNS = [
     re.compile(r"ECONNRESET", re.IGNORECASE),
     re.compile(r"EPIPE", re.IGNORECASE),
-    re.compile(r"Connection (?:refused|reset|timed?out)", re.IGNORECASE),
+    re.compile(r"Connection (?:refused|reset|timed\s*out|timed?out)", re.IGNORECASE),
     re.compile(r"Broken pipe", re.IGNORECASE),
     re.compile(r"Network is unreachable", re.IGNORECASE),
 ]
