@@ -47,6 +47,8 @@ class Skill:
         author: 作者。
         license: 许可证。
         platforms: 支持的平台列表。
+        trigger: 触发规则列表，定义何时应该使用此技能。
+        skip: 跳过规则列表，定义何时不应使用此技能。
         body: 技能正文内容。
         path: SKILL.md 文件路径。
     """
@@ -56,6 +58,8 @@ class Skill:
     author: str = ""
     license: str = ""
     platforms: list[str] | None = None
+    trigger: list[str] | None = None
+    skip: list[str] | None = None
     body: str = ""
     path: str = ""
 
@@ -101,6 +105,19 @@ class SkillLoader:
         elif platforms is not None and not isinstance(platforms, list):
             platforms = [str(platforms)]
 
+        # 处理 trigger/skip 字段（触发/跳过规则）
+        trigger = frontmatter.get("trigger")
+        if isinstance(trigger, str):
+            trigger = [t.strip() for t in trigger.split(";") if t.strip()]
+        elif trigger is not None and not isinstance(trigger, list):
+            trigger = [str(trigger)]
+
+        skip = frontmatter.get("skip")
+        if isinstance(skip, str):
+            skip = [s.strip() for s in skip.split(";") if s.strip()]
+        elif skip is not None and not isinstance(skip, list):
+            skip = [str(skip)]
+
         return Skill(
             name=name,
             description=description,
@@ -108,6 +125,8 @@ class SkillLoader:
             author=frontmatter.get("author", ""),
             license=frontmatter.get("license", ""),
             platforms=platforms,
+            trigger=trigger,
+            skip=skip,
             body=body,
             path=str(path),
         )

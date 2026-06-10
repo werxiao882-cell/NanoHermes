@@ -77,8 +77,8 @@ class TestLocalEnvironment:
     def test_execute_with_timeout(self):
         """测试超时保护。"""
         env = LocalEnvironment()
-        # Windows 上使用 ping -n 11 来模拟延迟（约 10 秒）
-        result = env.execute("ping -n 11 127.0.0.1 > nul", timeout=2.0)
+        # Linux 上使用 sleep 10 来模拟延迟
+        result = env.execute("sleep 10", timeout=2.0)
         assert result.timed_out is True
 
     def test_execute_successful_command(self):

@@ -83,7 +83,16 @@ class ContextAwareCompleter(Completer):
 
     def get_completions(self, document: Document, complete_event) -> list[Completion]:
         text = document.text_before_cursor
-        if text.startswith("/"):
+        # Determine if this looks like a command or file path
+        if text.startswith("/") and len(text) > 1:
+            first_word = text.split()[0] if text.split() else text
+            after_slash = first_word[1:]  # everything after the leading /
+            # If the part after / contains another /, it's a file path (e.g. /tmp/foo)
+            # If after_slash is empty (just "/"), treat as command
+            if "/" not in after_slash:
+                yield from self.command_completer.get_completions(document, complete_event)
+                return
+        elif text == "/":
             yield from self.command_completer.get_completions(document, complete_event)
             return
         yield from self.file_completer.get_completions(document, complete_event)

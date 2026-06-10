@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from src.auxiliary.client import AuxiliaryClient
-from src.config import AuxiliaryConfig
+from src.config.models import AuxiliaryConfig
 
 
 class TestAuxiliaryConfig:

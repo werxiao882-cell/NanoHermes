@@ -55,8 +55,8 @@ class TestSessionStorageLifecycle:
         # 验证 JSONL 存储
         messages_jsonl = jsonl_store.load_messages(session_id)
         assert len(messages_jsonl) == 2
-        assert messages_jsonl[0]["type"] == "user"
-        assert messages_jsonl[1]["type"] == "assistant"
+        assert messages_jsonl[0]["role"] == "user"
+        assert messages_jsonl[1]["role"] == "assistant"
 
     def test_list_sessions_after_save(self, temp_storage):
         """测试保存后可列出会话。"""
@@ -140,7 +140,8 @@ class TestTUISessionStorage:
         session_id = db.create_session(title="TUI 测试")
 
         with patch("src.cli.tui.PromptSession", return_value=MagicMock()):
-            app = TUIApp(session_db=db, session_id=session_id)
+            app = TUIApp(session_db=db)
+            app.session_id = session_id
             app.jsonl_store = jsonl_store
 
             # 模拟添加用户消息并保存
@@ -162,7 +163,8 @@ class TestTUISessionStorage:
         session_id = db.create_session(title="TUI 助手测试")
 
         with patch("src.cli.tui.PromptSession", return_value=MagicMock()):
-            app = TUIApp(session_db=db, session_id=session_id)
+            app = TUIApp(session_db=db)
+            app.session_id = session_id
             app.jsonl_store = jsonl_store
 
             # 模拟添加助手消息并保存
@@ -185,7 +187,8 @@ class TestTUISessionStorage:
         db.insert_message(session_id, "assistant", "历史回复 1")
 
         with patch("src.cli.tui.PromptSession", return_value=MagicMock()):
-            app = TUIApp(session_db=db, session_id="new_session")
+            app = TUIApp(session_db=db)
+            app.session_id = "new_session"
 
             # 恢复会话
             await app._cmd_resume(session_id)

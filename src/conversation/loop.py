@@ -13,6 +13,12 @@
 - 支持 15 种事件类型，覆盖完整生命周期
 - 外部功能通过 loop.events.on() 订阅事件接入
 - Debug 模式通过 DebugHandler 订阅事件实现，与核心循环完全解耦
+
+动态工具管理：
+- 支持 Tool Search 机制：启动时仅加载核心工具，其余通过搜索发现
+- _discovered_tools 存储已发现的延迟加载工具 schema
+- 每轮迭代合并 always_loaded + discovered 传递给模型
+- search_tools 调用结果自动加入 discovered_tools
 """
 
 from __future__ import annotations
@@ -33,6 +39,11 @@ class ConversationLoop:
 
     管理模型调用、工具分发、重试、压缩触发的完整循环。
     通过 EventBus 与外部功能解耦。
+
+    动态工具管理：
+    - 维护 _always_loaded_schemas（始终可见的核心工具）
+    - 维护 _discovered_tools（通过 search_tools 发现的工具）
+    - 每轮合并两者传递给模型，实现按需加载
 
     Attributes:
         max_iterations: 最大迭代次数。
@@ -61,6 +72,10 @@ class ConversationLoop:
         self._interrupted = False
         self.events = EventBus()
 
+        # 动态工具管理状态
+        self._always_loaded_schemas: list[dict[str, Any]] = []
+        self._discovered_tools: dict[str, dict[str, Any]] = {}
+
         # debug 模式：注册 DebugHandler 订阅事件输出调试日志
         if debug:
             from src.conversation.debug_handler import DebugHandler
@@ -75,11 +90,15 @@ class ConversationLoop:
 
         Args:
             messages: 消息列表。
-            tools: 工具 schema 列表。
+            tools: 工具 schema 列表（always loaded tools）。
 
         Returns:
             包含最终响应和元数据的字典。
         """
+        # 初始化 always loaded schemas
+        self._always_loaded_schemas = tools or []
+        self._discovered_tools.clear()
+
         iteration = 0
         start_time = time.time()
 
@@ -96,6 +115,9 @@ class ConversationLoop:
 
             iteration += 1
 
+            # 合并 always_loaded + discovered tools
+            current_tools = self._get_current_tools()
+
             self.events.emit(EventType.ITERATION_START, {
                 "iteration": iteration,
                 "messages": messages,
@@ -106,10 +128,10 @@ class ConversationLoop:
             try:
                 self.events.emit(EventType.MODEL_REQUEST, {
                     "messages": messages,
-                    "tools": tools,
+                    "tools": current_tools,
                     "iteration": iteration,
                 })
-                response = self._call_model(messages, tools)
+                response = self._call_model(messages, current_tools)
                 model_elapsed = time.time() - model_start
 
                 self.events.emit(EventType.MODEL_RESPONSE, {
@@ -170,6 +192,10 @@ class ConversationLoop:
                             "elapsed": tool_elapsed,
                         })
                         result = json.dumps({"error": str(e)})
+
+                    # search_tools 调用：解析结果并添加到 discovered tools
+                    if tool_name == "search_tools":
+                        self._process_search_result(result)
 
                     tool_elapsed = time.time() - tool_start
 
@@ -235,6 +261,41 @@ class ConversationLoop:
     # ========================================================================
     # 内部方法
     # ========================================================================
+
+    def _get_current_tools(self) -> list[dict[str, Any]] | None:
+        """获取当前轮次的工具集。
+
+        合并 always_loaded + discovered tools，去重（discovered 覆盖 always_loaded）。
+
+        Returns:
+            合并后的工具 schema 列表。如果为空返回 None。
+        """
+        if not self._always_loaded_schemas and not self._discovered_tools:
+            return None
+
+        # 构建合并后的工具列表（discovered 覆盖 always_loaded）
+        tool_map = {}
+        for schema in self._always_loaded_schemas:
+            tool_map[schema.get("name", "")] = schema
+        for name, schema in self._discovered_tools.items():
+            tool_map[name] = schema
+
+        return list(tool_map.values())
+
+    def _process_search_result(self, result: str) -> None:
+        """处理 search_tools 调用结果，添加到 discovered tools。
+
+        Args:
+            result: search_tools 返回的 JSON 字符串。
+        """
+        try:
+            schemas = json.loads(result)
+            if isinstance(schemas, list):
+                for schema in schemas:
+                    if isinstance(schema, dict) and "name" in schema:
+                        self._discovered_tools[schema["name"]] = schema
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.debug(f"解析 search_tools 结果失败: {e}")
 
     def _call_model(
         self,

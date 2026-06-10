@@ -12,7 +12,7 @@ from src.mcp.bridge import (
 
 
 # 测试用 Pydantic model
-class TestParams(BaseModel):
+class SampleParams(BaseModel):
     name: str = Field(description="名称")
     count: int = Field(description="数量")
 
@@ -49,7 +49,7 @@ class TestFormatErrorResponse:
 
 class TestPydanticToJsonSchema:
     def test_conversion(self):
-        schema = pydantic_to_json_schema(TestParams)
+        schema = pydantic_to_json_schema(SampleParams)
         assert "properties" in schema
         assert "name" in schema["properties"]
         assert "count" in schema["properties"]
@@ -80,7 +80,7 @@ class TestBridgeTool:
 
 class TestBridgeToolWithSchema:
     def test_with_pydantic(self):
-        name, fn, schema = bridge_tool_with_schema(sample_tool_fn, TestParams)
+        name, fn, schema = bridge_tool_with_schema(sample_tool_fn, SampleParams)
         assert name == "sample-tool-fn"
         assert "properties" in schema
 

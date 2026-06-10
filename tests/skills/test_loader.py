@@ -165,6 +165,88 @@ class TestSkillLoader:
         assert frontmatter["description"] == "Test"
 
 
+class TestSkillTriggerRules:
+    """Tests for trigger/skip fields in Skill and SkillLoader."""
+
+    def test_skill_trigger_skip_defaults(self):
+        """Test default trigger/skip are None."""
+        skill = Skill(name="test", description="Test")
+        assert skill.trigger is None
+        assert skill.skip is None
+
+    def test_skill_trigger_skip_custom(self):
+        """Test custom trigger/skip values."""
+        skill = Skill(
+            name="test",
+            description="Test",
+            trigger=["when X", "when Y"],
+            skip=["when Z"],
+        )
+        assert skill.trigger == ["when X", "when Y"]
+        assert skill.skip == ["when Z"]
+
+    def test_load_skill_with_trigger_skip_yaml(self):
+        """Test loading skill with trigger/skip as YAML lists."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skill_file = Path(tmpdir) / "SKILL.md"
+            skill_file.write_text(
+                "---\n"
+                "name: deploy\n"
+                "description: Deploy app\n"
+                "trigger:\n"
+                "  - when user wants to deploy\n"
+                "  - when asked to release\n"
+                "skip:\n"
+                "  - when in dev mode\n"
+                "---\n"
+                "Deploy instructions...",
+                encoding="utf-8",
+            )
+
+            loader = SkillLoader()
+            skill = loader.load(skill_file)
+            assert skill.trigger == ["when user wants to deploy", "when asked to release"]
+            assert skill.skip == ["when in dev mode"]
+
+    def test_load_skill_with_trigger_skip_semicolon(self):
+        """Test loading skill with trigger/skip as semicolon-separated strings."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skill_file = Path(tmpdir) / "SKILL.md"
+            skill_file.write_text(
+                "---\n"
+                "name: test\n"
+                "description: Test\n"
+                "trigger: when X; when Y\n"
+                "skip: when Z\n"
+                "---\n"
+                "Body",
+                encoding="utf-8",
+            )
+
+            loader = SkillLoader()
+            skill = loader.load(skill_file)
+            assert skill.trigger == ["when X", "when Y"]
+            assert skill.skip == ["when Z"]
+
+    def test_load_skill_without_trigger_skip(self):
+        """Test loading skill without trigger/skip fields."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skill_file = Path(tmpdir) / "SKILL.md"
+            skill_file.write_text(
+                "---\n"
+                "name: test\n"
+                "description: Test\n"
+                "---\n"
+                "Body",
+                encoding="utf-8",
+            )
+
+            loader = SkillLoader()
+            skill = loader.load(skill_file)
+            assert skill.trigger is None
+            assert skill.skip is None
+
+
 class TestSlugify:
     """Tests for slugify function."""
 

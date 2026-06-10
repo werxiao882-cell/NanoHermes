@@ -44,56 +44,19 @@ class TestMainModule:
         """测试 main 模块可正常导入。"""
         from src import main
         assert hasattr(main, "main")
-        assert hasattr(main, "test_api")
         assert hasattr(main, "main_chat")
+        assert hasattr(main, "list_sessions_command")
 
-    def test_build_model_caller(self):
-        """测试 build_model_caller 构建正确的调用函数。"""
-        from src.main import build_model_caller
+    def test_main_chat_assembly(self):
+        """测试 main_chat 函数的依赖注入结构。"""
+        # main_chat 是组合根函数，验证其存在且可调用
+        from src.main import main_chat
+        assert callable(main_chat)
 
-        mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = "Hello!"
-        mock_response.choices[0].message.tool_calls = None
-        mock_response.usage.prompt_tokens = 10
-        mock_response.usage.completion_tokens = 5
-        mock_client.chat.completions.create.return_value = mock_response
-
-        caller = build_model_caller(mock_client, "test-model")
-        result = caller([{"role": "user", "content": "Hi"}], None)
-
-        assert result["content"] == "Hello!"
-        assert result["tool_calls"] is None
-        assert result["usage"]["input_tokens"] == 10
-        assert result["usage"]["output_tokens"] == 5
-
-    def test_build_model_caller_with_tool_calls(self):
-        """测试 build_model_caller 处理工具调用响应。"""
-        from src.main import build_model_caller
-
-        mock_client = MagicMock()
-        mock_tool_call = MagicMock()
-        mock_tool_call.id = "call_123"
-        mock_tool_call.type = "function"
-        mock_tool_call.function.name = "terminal"
-        mock_tool_call.function.arguments = '{"command": "echo hello"}'
-
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = None
-        mock_response.choices[0].message.tool_calls = [mock_tool_call]
-        mock_response.usage.prompt_tokens = 20
-        mock_response.usage.completion_tokens = 0
-        mock_client.chat.completions.create.return_value = mock_response
-
-        caller = build_model_caller(mock_client, "test-model")
-        result = caller([{"role": "user", "content": "Run command"}], None)
-
-        assert result["content"] is None
-        assert len(result["tool_calls"]) == 1
-        assert result["tool_calls"][0]["id"] == "call_123"
-        assert result["tool_calls"][0]["function"]["name"] == "terminal"
+    def test_list_sessions_command(self):
+        """测试 list_sessions_command 函数。"""
+        from src.main import list_sessions_command
+        assert callable(list_sessions_command)
 
 
 class TestToolIntegration:
@@ -210,9 +173,9 @@ class TestMemoryIntegration:
         provider = FileMemoryProvider(temp_home)
         provider.initialize({})
 
-        # 验证文件创建
-        assert (temp_home / "MEMORY.md").exists()
-        assert (temp_home / "USER.md").exists()
+        # 验证文件创建 (文件存储在 memory/ 子目录下)
+        assert (temp_home / "memory" / "MEMORY.md").exists()
+        assert (temp_home / "memory" / "USER.md").exists()
 
         # 添加记忆
         provider.add_entry("测试", "这是一条测试记忆")
@@ -240,7 +203,7 @@ class TestPromptAssembly:
 
     def test_three_tier_assembly(self):
         """测试三层提示组装。"""
-        from src.prompt.assembler import PromptAssembler
+        from src.conversation.assembler import PromptAssembler
 
         assembler = PromptAssembler()
         assembler.set_stable(["身份：AI 助手", "工具：terminal"])
@@ -254,7 +217,7 @@ class TestPromptAssembly:
 
     def test_stable_hash_changes(self):
         """测试 stable 层变化时哈希改变。"""
-        from src.prompt.assembler import PromptAssembler
+        from src.conversation.assembler import PromptAssembler
 
         assembler = PromptAssembler()
         assembler.set_stable(["stable text 1"])

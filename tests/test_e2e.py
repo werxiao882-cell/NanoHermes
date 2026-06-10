@@ -15,7 +15,7 @@ def _setup_tools():
 
     # Import modules to trigger auto-registration
     from src.tools.terminal import _register_terminal_tool
-    from src.tools.file_tools import _register_file_tools
+    from src.tools.file_tool import _register_file_tools
 
     _register_terminal_tool()
     _register_file_tools()
@@ -56,7 +56,7 @@ def test_e2e_conversation_with_tools():
         assert "Hello World" in data["content"]
         print(f"    read_file: {data['lines_returned']} lines returned")
 
-        result = dispatch("search_files", {"path": tmpdir, "pattern": "*.txt"})
+        result = dispatch("search_files", {"path": tmpdir, "pattern": "*.txt", "target": "files"})
         data = json.loads(result)
         assert data["total_found"] >= 1
         print(f"    search_files: {data['total_found']} files found")
@@ -133,3 +133,42 @@ def test_e2e_conversation_with_tools():
     print("\n" + "=" * 60)
     print("All end-to-end tests passed!")
     print("=" * 60)
+
+
+def test_main_entry_build_model_caller():
+    """Test OpenAIClient.build_caller method and entry point."""
+    from unittest.mock import MagicMock
+    from openai import OpenAI
+    from src.provider.openai_client import OpenAIClient as ProviderOpenAIClient
+
+    # Create mock client
+    mock_client = MagicMock()
+    mock_chunk = MagicMock()
+    mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta.content = "Hello"
+    mock_chunk.choices[0].delta.reasoning = None
+    mock_chunk.choices[0].delta.tool_calls = None
+    mock_chunk.usage = MagicMock()
+    mock_chunk.usage.prompt_tokens = 10
+    mock_chunk.usage.completion_tokens = 5
+
+    # Mock stream response
+    mock_stream = [mock_chunk]
+    mock_client.chat.completions.create.return_value = iter(mock_stream)
+
+    # Test OpenAIClient.build_caller
+    provider_client = ProviderOpenAIClient(mock_client, "test-model")
+    model_caller = provider_client.build_caller()
+    result = model_caller([{"role": "user", "content": "Hi"}], None)
+
+    assert result["content"] == "Hello"
+    assert result["usage"]["input_tokens"] == 10
+    assert result["usage"]["output_tokens"] == 5
+    assert "stream" in result["request_body"]
+    assert result["request_body"]["stream"] is True
+
+    print("\n[5] Testing OpenAIClient.build_caller...")
+    print(f"    Content: {result['content']}")
+    print(f"    Usage: {result['usage']}")
+    print("    OpenAIClient.build_caller works correctly!")
+

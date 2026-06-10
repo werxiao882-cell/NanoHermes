@@ -88,11 +88,12 @@ class TestProviderRegistryIntegration:
         import src.provider.builtins
         
         with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=True):
-            config = load_config(provider="openai")
-            url = get_base_url(config)
-            
-            # 应从注册表获取 OpenAI 默认 URL
-            assert url == "https://api.openai.com/v1"
+            with mock.patch("src.config.loader.load_dotenv"):
+                config = load_config(provider="openai")
+                url = get_base_url(config)
+                
+                # 应从注册表获取 OpenAI 默认 URL
+                assert url == "https://api.openai.com/v1"
 
     def test_anthropic_base_url_none(self):
         """测试 Anthropic base_url 为 None（使用 SDK 默认）。"""
@@ -101,11 +102,12 @@ class TestProviderRegistryIntegration:
         import src.provider.builtins
         
         with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test"}, clear=True):
-            config = load_config(provider="anthropic")
-            url = get_base_url(config)
-            
-            # Anthropic 无 base_url，返回 None
-            assert url is None
+            with mock.patch("src.config.loader.load_dotenv"):
+                config = load_config(provider="anthropic")
+                url = get_base_url(config)
+                
+                # Anthropic 无 base_url，返回 None
+                assert url is None
 
 
 class TestAuxiliaryClientIntegration:
