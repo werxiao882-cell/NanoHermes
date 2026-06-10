@@ -50,7 +50,7 @@ class JsonlSessionStore:
         """追加一条记录到 JSONL 文件。"""
         file_path = self._get_file_path(session_id)
         with open(file_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False, indent=2) + "\n")
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def start_session(
         self,
@@ -82,8 +82,6 @@ class JsonlSessionStore:
         content: str | None = None,
         tool_calls: list[dict[str, Any]] | None = None,
         tool_call_id: str | None = None,
-        tool_name: str | None = None,
-        tool_args: str | None = None,
         reasoning: str | None = None,
         usage: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
@@ -96,13 +94,12 @@ class JsonlSessionStore:
             content: 消息内容。
             tool_calls: 工具调用列表。
             tool_call_id: 工具调用 ID（tool_result 时设置）。
-            tool_name: 工具名称（tool_call/tool_result 时设置）。
-            tool_args: 工具参数 JSON 字符串（tool_call 时设置）。
             reasoning: 推理内容。
             usage: token 用量。
             metadata: 额外元数据。
         """
         record = {
+            "type": role,
             "role": role,
             "timestamp": time.time(),
         }
@@ -113,10 +110,6 @@ class JsonlSessionStore:
             record["tool_calls"] = tool_calls
         if tool_call_id:
             record["tool_call_id"] = tool_call_id
-        if tool_name:
-            record["tool_name"] = tool_name
-        if tool_args:
-            record["tool_args"] = tool_args
         if reasoning:
             record["reasoning"] = reasoning
         if usage:
@@ -133,7 +126,7 @@ class JsonlSessionStore:
             session_id: 会话 ID。
 
         Returns:
-            消息记录列表，按时间顺序排列（内部格式，含 type 字段）。
+            消息记录列表，按时间顺序排列。
         """
         file_path = self._get_file_path(session_id)
 
@@ -142,25 +135,14 @@ class JsonlSessionStore:
 
         messages = []
         with open(file_path, "r", encoding="utf-8") as f:
-            content = f.read()
-        
-        # 使用 JSONDecoder 解析多个 JSON 对象（支持多行格式化 JSON）
-        decoder = json.JSONDecoder()
-        idx = 0
-        while idx < len(content):
-            # 跳过空白字符
-            while idx < len(content) and content[idx].isspace():
-                idx += 1
-            if idx >= len(content):
-                break
-            
-            try:
-                obj, end_idx = decoder.raw_decode(content, idx)
-                messages.append(obj)
-                idx = end_idx
-            except json.JSONDecodeError:
-                # 跳过无法解析的部分
-                idx += 1
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        record = json.loads(line)
+                        messages.append(record)
+                    except json.JSONDecodeError:
+                        continue
 
         return messages
 
@@ -189,4 +171,13 @@ class JsonlSessionStore:
 
     def get_message_count(self, session_id: str) -> int:
         """获取会话的消息数量。"""
-        return len(self.load_messages(session_id))
+        file_path = self._get_file_path(session_id)
+        if not file_path.exists():
+            return 0
+
+        count = 0
+        with open(file_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    count += 1
+        return count
