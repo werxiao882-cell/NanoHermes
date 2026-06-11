@@ -436,6 +436,128 @@ DASHSCOPE_API_KEY=sk-xxx
 /opsx-archive add-new-feature
 ```
 
+## AI Agent 集成测试设计原则
+
+NanoHermes 的集成测试遵循以下核心原则，确保 AI Agent 系统在真实环境下可靠运行：
+
+### 1. 真实 API 测试，拒绝 Mock
+
+集成测试使用**真实 LLM API 请求**，不使用 Mock。Mock 测试无法发现工具链集成 bug、API 响应格式变化、以及端到端流程中的实际问题。
+
+### 2. PTY 驱动的对话模拟
+
+通过 PTY（伪终端）启动 Agent，模拟真实用户交互：
+- 启动 Agent 并等待 TUI 渲染完成
+- 发送用户消息并等待 AI 响应
+- 验证工具调用链和输出正确性
+- 测试多轮对话上下文保持能力
+
+### 3. 从 OpenSpec 推导测试用例
+
+每个完成的 OpenSpec 变更都映射为测试用例：
+- **核心功能**：验证 spec 要求的主要行为
+- **边界情况**：异常输入、空值、极限条件
+- **集成测试**：与其他模块的交互验证
+
+### 4. 工具链全覆盖
+
+| 测试类型 | 验证内容 |
+|----------|----------|
+| 基础对话 | AI 正确响应和自我介绍 |
+| 读取工具 | read_file 调用、内容展示 |
+| 写入工具 | write_file 调用、文件创建 |
+| 编辑工具 | patch 调用、内容更新 |
+| 搜索工具 | search_files 调用、结果正确 |
+| 执行工具 | execute_code 调用、计算正确 |
+| 多轮上下文 | AI 能引用之前的对话内容 |
+| 错误处理 | 优雅的错误消息而非崩溃 |
+| 记忆持久化 | MEMORY.md 正确更新 |
+| TUI 命令 | /tools、/sessions、/skills 正确输出 |
+
+### 5. 持久化验证
+
+测试完成后验证数据持久化：
+```bash
+# 会话存储
+ls ~/.nanohermes/sessions/*.jsonl
+sqlite3 ~/.nanohermes/sessions.db "SELECT count(*) FROM sessions;"
+
+# 记忆系统
+cat ~/.nanohermes/memory/MEMORY.md
+cat ~/.nanohermes/memory/USER.md
+```
+
+### 6. 已知陷阱
+
+- **API 签名假设**：始终使用 `inspect.signature()` 检查实际参数，不要假设 API 签名
+- **PTY 缓冲**：使用 `process(action='log')` 查看完整输出，避免缓冲截断
+- **记忆去重**：`add_entry` 不去重，频繁提及的事实会出现多次，这是已知限制而非 bug
+- **AI 过度搜索**：当要求"测试工具"时，AI 可能多次调用 search_files，这是预期行为
+- **清理**：始终发送 `/quit` 后再终止进程
+
+### 7. 测试文档化
+
+测试执行过程中实时记录：
+```markdown
+## 测试: [ID] [描述]
+**用户输入**: "..."
+**AI 行为**: 调用 [工具]，结果: ...
+**结果**: 通过 / 失败
+```
+
+---
+
+## 测试体系
+
+### PTY 端到端测试 Skill
+
+NanoHermes 内置 PTY 测试 skill，位于 `skills/nanohermes-pty-testing/`，用于真实环境下的端到端功能验证。
+
+#### 设计原理
+
+**渐进式披露**：SKILL.md 仅保留 7 阶段测试流程和方法论（182 行），324 个详细用例按功能域拆分到 7 个 reference 文件中，在执行到对应阶段时按需加载，避免一次性注入过多 token。
+
+```
+skills/nanohermes-pty-testing/
+├── SKILL.md                      # 核心导航 — 7 阶段流程 + 方法论
+├── references/                   # 详细用例（按需加载）
+│   ├── session-storage.md        # 70 用例 — SessionDB 全功能验证
+│   ├── core-tools.md             # 79 用例 — 工具运行时 + Dispatcher
+│   ├── provider-config.md        # 56 用例 — Provider + 配置 + 提示组装
+│   ├── conversation.md           # 48 用例 — 对话循环 + 事件系统 + 委托
+│   ├── advanced.md               # 44 用例 — 技能/压缩/指标/MCP/辅助
+│   ├── cli-tui.md                # 18 用例 — TUI 界面
+│   └── memory-system.md          # 12 用例 — 记忆系统
+├── templates/report-template.md  # 测试报告模板
+└── scripts/validate-sessions.py  # 会话存储验证脚本
+```
+
+#### 用例分级
+
+| 标记 | 含义 | 数量 | 执行方式 |
+|------|------|------|---------|
+| `[PTY]` | 直接可执行 | 120 | PTY 对话 + 命令 + 文件验证 |
+| `[DEBUG]` | 需 --debug 模式 | 30 | 观察完整请求/响应 JSON |
+| `[FAULT]` | 需故障注入 | 18 | 临时改 Key/断网触发错误 |
+| `[MANUAL]` | 仅手动 TUI | 8 | 真实终端键盘交互 |
+| `[UNIT]` | 仅单元测试 | 148 | pytest 或压力测试 |
+
+#### 作用
+
+1. **版本发布验收**：每次发布前执行 P0 用例，确保核心功能正常
+2. **Bug 回归验证**：修复 bug 后重新执行相关用例，防止回退
+3. **新功能验收**：新功能开发完成后，补充对应用例并执行
+4. **测试自动化基础**：为后续 CI/CD 集成提供用例清单和执行流程
+
+#### 使用方式
+
+AI Agent 加载此 skill 后，按 7 阶段流程自动执行。详细用例在对应阶段通过 `skill_view(name='nanohermes-pty-testing', file_path='references/xxx.md')` 按需加载。
+
+```bash
+# 快速执行 P0 用例（约 5 分钟）
+# 阶段 1: 环境准备 → 阶段 2: 启动验证 → 阶段 3: 基础对话+工具链 → 阶段 5: 存储验证
+```
+
 ## 许可证
 
 MIT

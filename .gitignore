@@ -35,7 +35,6 @@ claude-code-analysis/
 .hermes/
 
 # 测试输出（日志/报告忽略，skill 和脚本保留）
-testing-artifacts/logs/
-testing-artifacts/reports/
+testing-artifacts/
 .nano_progress_state.json
 nul

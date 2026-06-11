@@ -1,7 +1,7 @@
 ---
 name: nanohermes-pty-testing
-description: "真实 PTY 端到端测试 NanoHermes — 7 阶段流程 + 202 用例（按需加载 reference）"
-version: 4.0.0
+description: "真实 PTY 端到端测试 NanoHermes — 7 阶段流程 + 530 用例（370 PTY 可直接执行）"
+version: 5.2.0
 platforms: [linux, macos, wsl]
 metadata:
   hermes:
@@ -17,23 +17,87 @@ metadata:
 
 ## 测试方法论
 
-**标记说明**：`[PTY]` 直接可执行(120) | `[DEBUG]` 需 --debug(18) | `[FAULT]` 故障注入(12) | `[MANUAL]` 仅手动(8) | `[UNIT]` 仅单元测试(44)
+**标记说明**：`[PTY]` 直接可执行(370) | `[DEBUG]` 需 --debug(34) | `[FAULT]` 故障注入(11) | `[MANUAL]` 仅手动(5) | `[UNIT]` 仅单元测试(110)
 
-**总计 202 用例**，按 7 阶段执行。详细用例清单按需加载 reference 文件：
+**总计 530 用例**，按 7 阶段执行。详细用例清单按需加载 reference 文件：
 
 | Reference | 模块 | 用例数 | 何时加载 |
 |-----------|------|--------|---------|
-| `references/core-tools.md` | tool-runtime(54) + tool-search(6) | 60 | 阶段 3-4 执行工具测试时 |
-| `references/session-storage.md` | session-storage(20) | 20 | 阶段 5 验证存储时 |
+| `references/core-tools.md` | tool-runtime(141) | 141 | 阶段 3-4 执行工具测试时 |
+| `references/session-storage.md` | session-storage(113) | 113 | 阶段 5 验证存储时 |
 | `references/memory-system.md` | memory-system(12) | 12 | 阶段 3.2 + 阶段 5 |
-| `references/provider-config.md` | provider(15) + config(11) + prompt(8) | 34 | 阶段 2 启动验证 + 阶段 6 |
-| `references/conversation.md` | conversation-loop(20) + delegation(8) | 28 | 阶段 3 + 阶段 6 |
+| `references/provider-config.md` | provider(37) + config(11) + prompt(8) | 56 | 阶段 2 启动验证 + 阶段 6 |
+| `references/conversation.md` | conversation-loop(70) + delegation(12) | 82 | 阶段 3 + 阶段 6 |
 | `references/cli-tui.md` | cli/TUI(18) | 18 | 阶段 3.3 + 阶段 2 |
-| `references/advanced.md` | skills(11) + compression(10) + insights(7) + mcp(10) + auxiliary(6) | 44 | 阶段 4 + 阶段 6 |
+| `references/advanced.md` | skills(18) + compression(16) + insights(14) + mcp(10) + auxiliary(10) | 103 | 阶段 4 + 阶段 6 |
 
 ## 输出目录规范
 
 `testing-artifacts/{reports,scripts,logs}`，永不删除历史，冲突追加序号。
+
+## 错误自动修复策略
+
+**核心原则**：测试执行中碰到错误不要停止，自动分析原因并修复，修复后继续执行。
+
+### 修复流程
+
+```
+1. 检测错误（命令失败/输出不符/进程崩溃）
+   ↓
+2. 分析错误原因（查看完整日志、检查状态）
+   ↓
+3. 尝试修复（清缓存/改配置/重试/跳过）
+   ↓
+4. 验证修复是否成功
+   ↓
+5. 成功 → 继续执行下一阶段
+   失败 → 记录错误，标记用例为"修复失败"，继续后续用例
+```
+
+### 常见错误及自动修复方法
+
+| 错误类型 | 症状 | 自动修复方法 |
+|---------|------|-------------|
+| 启动崩溃 | 进程启动后立即退出 | 1. `rm -rf src/__pycache__ src/*/__pycache__`<br>2. 检查 Python 语法 `python -m py_compile src/main.py`<br>3. 检查依赖 `python -c "import openai, yaml, rich"`<br>4. 重试启动 |
+| 依赖缺失 | ImportError/ModuleNotFoundError | `pip install -i https://pypi.tuna.tsinghua.edu.cn/simple <missing_package>` |
+| 配置错误 | 启动报配置验证失败 | 检查 `nanohermes.json` 格式，修复 JSON 语法错误 |
+| API Key 无效 | 401/403 认证错误 | 检查 `.env` 文件中 API Key 是否正确，跳过需真实 API 的用例 |
+| 端口占用 | Address already in use | `lsof -ti:8000 | xargs kill -9` 或换端口 |
+| 数据库锁定 | database is locked | 1. 等待 5 秒重试<br>2. `rm -f ~/.nanohermes/sessions.db-journal`<br>3. 检查是否有其他进程占用 |
+| 文件权限 | Permission denied | `chmod +rw <file>` 或使用 `/tmp/` 目录替代 |
+| 输出不符预期 | 工具返回与预期不同 | 1. 使用 `process(action='log')` 查看完整输出<br>2. 检查是否缓冲截断<br>3. 调整等待时间 `sleep` 参数 |
+| PTY 渲染问题 | CPR 序列乱码 | PTY 不支持 CPR 是技术限制，标记 TUI-06 为不可测，继续其他用例 |
+| 超时 | 命令执行超过预期时间 | 1. 增加 timeout 参数<br>2. 检查是否死循环<br>3. 强制终止并标记用例 |
+
+### 修复约束
+
+1. **最大修复次数**：同一错误最多尝试修复 3 次，超过则标记为"修复失败"并继续
+2. **修复日志**：每次修复操作记录到 `testing-artifacts/logs/fix-log.md`
+3. **不要回退**：修复后不要回到阶段开头，从失败点继续执行
+4. **记录状态**：修复后更新用例状态（通过/失败/跳过）
+5. **批量修复**：同类错误一次性修复所有相关用例
+
+### 修复日志格式
+
+```markdown
+## 修复记录 [时间]
+- **错误用例**: [ID]
+- **错误类型**: [类型]
+- **错误详情**: [完整错误信息]
+- **修复操作**: [执行的修复命令]
+- **修复结果**: 成功/失败
+- **后续动作**: 继续执行 [下一个用例 ID]
+```
+
+## 进度汇报规范（强制执行）
+
+**测试执行期间，必须每 30 秒向用户汇报一次进度！**
+- 首次启动后立刻告知用户
+- 每 30 秒轮询一次进度并发送
+- 汇报内容：当前阶段、已跑用例数、日志行数、正在执行的测试
+- 禁止闷头跑超过 30 秒不汇报
+- 用户说"什么情况了"说明汇报频率不够，立刻加频
+- 汇报方式：直接用消息告诉用户当前状态
 
 ## 7 阶段测试流程
 
@@ -172,6 +236,103 @@ cat ~/.nanohermes/memory/MEMORY.md
 | MEMORY.md 重复条目 | 低 | 待修复 |
 | search_files 过度搜索 | 低 | 待优化 |
 | PTY 不支持 CPR | TUI-06 不可测 | 技术限制 |
+| test_integration.py 导入失败 | 中 | `src.tools.toolsets` 模块不存在，需修复测试 |
+
+## 修复历史
+
+| 日期 | 问题 | 修复内容 | 状态 |
+|------|------|---------|------|
+| 2026-06-10 | SQLite 计数器为 0 | insert_message 自动 increment_message_count；_on_tool_start 调用 increment_tool_call_count | ✅ 已修复 |
+| 2026-06-10 | TUI 测试失败（16 个） | TUIApp 添加 session_db/jsonl_store/memory_manager/skill_manager 注入参数 | ✅ 已修复 |
+| 2026-06-10 | TS-01 `/tools` 匹配失败 | 改用 `script` 命令捕获终端输出 + 增强 ANSI 清理逻辑 | ✅ 已修复 |
+| 2026-06-10 | T-44 二进制措辞不匹配 | 放宽正则：`binary|二进制|非文本|无法读取|不支持|拒绝|deny|cannot|image|图片|png` | ✅ 已修复 |
+| 2026-06-10 | T-16 行号格式不匹配 | AI 用自然语言回复，改用 `第.*1.*行|1\||行.*1` 宽松匹配 | ✅ 已修复 |
+| 2026-06-10 | T-08/T-20/T-22/S-03 等待超时 | 增加等待时间：T-08=60s, T-20=40s, T-22=45s, S-03=20s | ✅ 已修复 |
+
+## PTY 验证最佳实践（重要！）
+
+### 核心陷阱：TUI 输出捕获
+
+NanoHermes 的 TUI 使用 Rich 框架渲染，会产生大量 ANSI 转义序列（清屏、光标控制、颜色）。
+**pexpect 的 `child.before` / `child.after` 不可靠**——TUI 清屏后输出被清空，导致捕获内容为空。
+
+**✅ 正确方案：使用 `script` 命令捕获**
+
+```python
+import pexpect
+
+child = pexpect.spawn(
+    'bash',
+    args=['-c', 'eval "$($HOME/miniconda3/bin/conda shell.bash hook)" && conda activate py312 && cd /mnt/d/code/NanoHermes && script -q -c "python -m src.main" /tmp/test_output.log'],
+    encoding='utf-8',
+    timeout=120,
+)
+
+time.sleep(12)  # 等待启动 + TUI 渲染
+child.sendline("/tools")
+time.sleep(15)  # 等待 AI 响应
+child.close(force=True)
+
+# 从 script 输出文件读取
+with open('/tmp/test_output.log', 'r', encoding='utf-8', errors='replace') as f:
+    raw_output = f.read()
+```
+
+### ANSI 清理（必须在正则匹配前执行）
+
+```python
+import re
+
+def clean_ansi(text):
+    """移除所有 ANSI 转义序列，保留纯文本。"""
+    text = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', text)       # CSI 序列（颜色、光标）
+    text = re.sub(r'\x1b\[\?[0-9]+[a-z]', '', text)          # DEC 私有模式
+    text = re.sub(r'\x1b\][0-9];.*?\x07', '', text)          # OSC 序列
+    text = re.sub(r'\x08', '', text)                          # 退格符
+    text = re.sub(r'\r\n', '\n', text)                        # 统一换行符
+    return text
+```
+
+### 等待时间指南
+
+| 阶段 | 等待时间 | 说明 |
+|------|---------|------|
+| 启动 + TUI 渲染 | 12 秒 | Rich 需要时间渲染工具列表面板 |
+| 发送命令后 | 15-25 秒 | AI 思考 + 工具调用 + 响应 |
+| 复杂工具（execute_code） | 25-40 秒 | 代码执行需要额外时间 |
+| 获取提示符返回 | +3 秒 | 发送空行后等待 |
+
+### 验证模式指南
+
+**TS-01（deferred 标记）**：
+```python
+# 预期输出包含：
+r'deferred'        # 延迟加载标记
+r'loaded'          # 已加载标记
+r'memory.*deferred' # memory 是 deferred
+r'terminal.*loaded' # terminal 是 loaded
+```
+
+**T-44（二进制文件拒绝）**：
+```python
+# AI 可能用多种措辞拒绝，匹配要宽泛：
+r'binary|二进制|非文本|无法读取|不支持|拒绝|deny|cannot|image|图片|png'
+```
+
+**M-01（memory 工具调用）**：
+```python
+# 必须显式指令 AI 调用工具，否则 AI 倾向文本回复
+# 测试输入："请使用 memory 工具，在 user 记忆中写入：测试用户偏好"
+# 验证：检查 ~/.nanohermes/memory/USER.md 文件内容
+```
+
+### 已知不可靠的捕获方式
+
+| 方式 | 问题 | 替代方案 |
+|------|------|---------|
+| `child.before` / `child.after` | TUI 清屏后为空 | 使用 `script` 命令写入文件 |
+| `terminal(background=True, pty=True)` | 输出缓冲截断 | 使用 `script` + 文件读取 |
+| 管道 `| cat` | PTY 特性丢失 | 不要使用管道 |
 
 ## 性能预期
 

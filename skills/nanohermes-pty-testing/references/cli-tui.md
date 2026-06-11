@@ -44,7 +44,7 @@
 
 ## 测试优先级
 
-**P0（阶段 2+3 必测）**：TUI-01, TUI-02, TUI-03, TUI-04, TUI-05, TUI-07, TUI-09~13, TUI-16, TUI-17
+**P0（阶段 2+3 必测）**：TUI-01, TUI-02, TUI-03, TUI-04, TUI-05, TUI-07, TUI-09, TUI-10, TUI-11, TUI-12, TUI-13, TUI-14, TUI-16, TUI-17
 
 **P1（需 --debug）**：TUI-08
 
