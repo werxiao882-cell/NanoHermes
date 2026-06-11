@@ -87,6 +87,8 @@ class JsonlSessionStore:
         reasoning: str | None = None,
         usage: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
+        tool_name: str | None = None,
+        tool_args: str | dict | None = None,
     ) -> None:
         """追加一条消息到 JSONL 文件。
 
@@ -101,6 +103,8 @@ class JsonlSessionStore:
             reasoning: 推理内容。
             usage: token 用量。
             metadata: 额外元数据。
+            tool_name: 工具名称（tool_call/tool_result 时设置）。
+            tool_args: 工具参数（tool_call 时设置）。
         """
         record = {
             "type": role,
@@ -124,6 +128,10 @@ class JsonlSessionStore:
             record["usage"] = usage
         if metadata:
             record["metadata"] = metadata
+        if tool_name:
+            record["tool_name"] = tool_name
+        if tool_args:
+            record["tool_args"] = tool_args
 
         self._append_record(session_id, record)
 

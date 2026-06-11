@@ -22,8 +22,9 @@ logger = logging.getLogger(__name__)
 
 
 class TUIEventHandler:
-    def __init__(self, state: TUIState):
+    def __init__(self, state: TUIState, session_db=None):
         self.state = state
+        self.session_db = session_db
         self.pending_clarification: dict[str, Any] | None = None
 
     async def handle_user_input(self, user_input: str) -> None:
@@ -165,12 +166,14 @@ class ConversationEventHandler:
         status_indicator: StreamingStatusIndicator,
         session_id: str = "",
         jsonl_store=None,
+        session_db=None,
     ):
         self.console = console
         self.status_bar = status_bar
         self.status_indicator = status_indicator
         self.session_id = session_id
         self.jsonl_store = jsonl_store
+        self.session_db = session_db
         self._current_tool_action = "exec"
 
     def register(self, events: EventBus) -> None:
@@ -202,26 +205,39 @@ class ConversationEventHandler:
         self._save_assistant_message(response)
 
     def _save_assistant_message(self, response: dict[str, Any]) -> None:
-        """保存助手回复到 JSONL。"""
+        """保存助手回复到 SQLite 和 JSONL。
+
+        设计理由：
+        - 事件处理器统一负责 assistant 消息的持久化，避免 tui.py 中重复保存
+        - SQLite 存储纯文本内容用于搜索和统计
+        - JSONL 存储完整结构（tool_calls、reasoning、usage）用于历史恢复
+        """
         if not self.session_id or self.session_id == "new_session":
             return
-        if not self.jsonl_store:
-            return
 
-        try:
-            self.jsonl_store.append_message(
-                self.session_id,
-                role="assistant",
-                content=response.get("content", ""),
-                tool_calls=response.get("tool_calls"),
-                reasoning=response.get("reasoning"),
-                usage=response.get("usage"),
-            )
-        except Exception as e:
-            logger.debug(f"Failed to save assistant message to JSONL: {e}")
+        content = response.get("content", "")
+
+        if self.session_db:
+            try:
+                self.session_db.insert_message(self.session_id, "assistant", content)
+            except Exception as e:
+                logger.debug(f"Failed to save assistant message to SQLite: {e}")
+
+        if self.jsonl_store:
+            try:
+                self.jsonl_store.append_message(
+                    self.session_id,
+                    role="assistant",
+                    content=content,
+                    tool_calls=response.get("tool_calls"),
+                    reasoning=response.get("reasoning"),
+                    usage=response.get("usage"),
+                )
+            except Exception as e:
+                logger.debug(f"Failed to save assistant message to JSONL: {e}")
 
     def _on_tool_start(self, data: dict[str, Any]) -> None:
-        """工具开始执行：显示 UI，保存 tool_call 到 JSONL。"""
+        """工具开始执行：显示 UI，保存 tool_call 到 JSONL 和 SQLite。"""
         tool_name = data["tool_name"]
         tool_args = data["tool_args"]
         tool_call = data.get("tool_call", {})
@@ -232,9 +248,19 @@ class ConversationEventHandler:
         self.console.print(ActivityFeed.format_start(tool_name, action))
         self._save_to_jsonl("tool_call", tool_name=tool_name, tool_args=tool_args,
                            tool_call_id=tool_call.get("id", ""))
+        if self.session_db and self.session_id and self.session_id != "new_session":
+            try:
+                self.session_db.insert_message(
+                    self.session_id, role="tool_call",
+                    content=tool_args if isinstance(tool_args, str) else json.dumps(tool_args, ensure_ascii=False),
+                    tool_name=tool_name, tool_call_id=tool_call.get("id", ""),
+                )
+                self.session_db.increment_tool_call_count(self.session_id)
+            except Exception as e:
+                logger.debug(f"Failed to save tool_call to SQLite: {e}")
 
     def _on_tool_end(self, data: dict[str, Any]) -> None:
-        """工具执行结束：显示结果，保存 tool_result 到 JSONL。"""
+        """工具执行结束：显示结果，保存 tool_result 到 JSONL 和 SQLite。"""
         tool_name = data["tool_name"]
         result = data["result"]
         elapsed = data["elapsed"]
@@ -247,6 +273,15 @@ class ConversationEventHandler:
         self._save_to_jsonl("tool_result", tool_call_id=tool_call.get("id", ""),
                            tool_name=tool_name, content=result,
                            metadata={"elapsed": elapsed})
+        if self.session_db and self.session_id and self.session_id != "new_session":
+            try:
+                self.session_db.insert_message(
+                    self.session_id, role="tool_result",
+                    content=result if isinstance(result, str) else json.dumps(result, ensure_ascii=False),
+                    tool_name=tool_name, tool_call_id=tool_call.get("id", ""),
+                )
+            except Exception as e:
+                logger.debug(f"Failed to save tool_result to SQLite: {e}")
 
     def _extract_tool_action(self, tool_name: str, tool_args: str | dict) -> str:
         """提取工具操作的简短描述，用于 UI 展示。"""
