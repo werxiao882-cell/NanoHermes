@@ -1,0 +1,21 @@
+{
+  "model": {
+    "provider": "openai",
+    "name": "qwen3.6-plus"
+  },
+  "providers": {
+    "openai": {
+      "base_url_env": "OPENAI_BASE_URL",
+      "api_key_env": "OPENAI_API_KEY"
+    },
+    "dashscope": {
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "api_key_env": "DASHSCOPE_API_KEY"
+    }
+  },
+  "tui": {
+    "typing_speed": 10,
+    "show_tool_panel": true,
+    "tool_panel_position": "right"
+  }
+}
