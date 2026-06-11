@@ -64,13 +64,13 @@ class TestToolIntegration:
 
     def test_terminal_tool_registered(self):
         """测试 terminal 工具已注册到注册表。"""
-        from src.tools.registry import ToolRegistry, register_tool
-        from src.tools.terminal import _register_terminal_tool
+        from src.tools.core.registry import ToolRegistry, register_tool
+        from src.tools.impls.terminal import _register_terminal_tool
 
         ToolRegistry.clear()
         _register_terminal_tool()
 
-        from src.tools.registry import get_tool
+        from src.tools.core.registry import get_tool
         tool = get_tool("terminal")
         assert tool is not None
         assert tool.name == "terminal"
@@ -78,9 +78,9 @@ class TestToolIntegration:
 
     def test_tool_dispatch_terminal_command(self):
         """测试通过分发器执行终端命令。"""
-        from src.tools.registry import ToolRegistry
-        from src.tools.terminal import _register_terminal_tool
-        from src.tools.dispatcher import dispatch
+        from src.tools.core.registry import ToolRegistry
+        from src.tools.impls.terminal import _register_terminal_tool
+        from src.tools.core.dispatcher import dispatch
 
         ToolRegistry.clear()
         _register_terminal_tool()
@@ -93,9 +93,9 @@ class TestToolIntegration:
 
     def test_tool_dispatch_dangerous_command(self):
         """测试危险命令返回审批请求。"""
-        from src.tools.registry import ToolRegistry
-        from src.tools.terminal import _register_terminal_tool
-        from src.tools.dispatcher import dispatch
+        from src.tools.core.registry import ToolRegistry
+        from src.tools.impls.terminal import _register_terminal_tool
+        from src.tools.core.dispatcher import dispatch
 
         ToolRegistry.clear()
         _register_terminal_tool()

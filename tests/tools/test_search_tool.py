@@ -11,8 +11,8 @@ import json
 import sys
 import pytest
 
-from src.tools.registry import ToolEntry, ToolRegistry, register_tool, get_deferred_tools, get_tool_schemas
-from src.tools.search_tool import ToolSearch
+from src.tools.core.registry import ToolEntry, ToolRegistry, register_tool, get_deferred_tools, get_tool_schemas
+from src.tools.core.search_tool import ToolSearch
 
 
 @pytest.fixture(autouse=True)
@@ -335,7 +335,7 @@ class TestSelectFallback:
 
     def test_search_tools_with_select(self, clean_registry):
         """search_tools 工具支持 select 语法。"""
-        from src.tools.search_tool import search_tools
+        from src.tools.core.search_tool import search_tools
 
         register_tool(
             name="execute_code",
@@ -392,7 +392,7 @@ class TestSearchToolsTool:
 
     def test_returns_json_array(self, clean_registry):
         """search_tools 返回 JSON 数组。"""
-        from src.tools.search_tool import search_tools
+        from src.tools.core.search_tool import search_tools
 
         # 注册一个延迟工具
         register_tool(
@@ -411,13 +411,13 @@ class TestSearchToolsTool:
 
     def test_empty_query_returns_empty_array(self):
         """空查询返回空数组。"""
-        from src.tools.search_tool import search_tools
+        from src.tools.core.search_tool import search_tools
         result = search_tools(query="")
         assert json.loads(result) == []
 
     def test_no_deferred_tools_returns_empty(self, clean_registry):
         """没有延迟工具时返回空数组。"""
-        from src.tools.search_tool import search_tools
+        from src.tools.core.search_tool import search_tools
         result = search_tools(query="anything")
         assert json.loads(result) == []
 

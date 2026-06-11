@@ -91,6 +91,23 @@ class AuxiliaryConfig(BaseModel):
 
 
 # ============================================================================
+# 工具 DFX 配置
+# ============================================================================
+
+class ToolsConfig(BaseModel):
+    """工具 DFX（Design for Excellence）配置段。
+
+    设计理由：
+    - max_tool_concurrency: 控制工具并行执行数量，防止系统过载
+    - tool_result_budget: 截断大型工具结果，防止占满 LLM 上下文窗口
+    - 两者均可通过环境变量覆盖（NANOHERMES_MAX_TOOL_CONCURRENCY / NANOHERMES_TOOL_RESULT_BUDGET）
+    - 配置优先级：环境变量 > 配置文件 > 默认值
+    """
+    max_tool_concurrency: int | None = None
+    tool_result_budget: int | None = None
+
+
+# ============================================================================
 # 根配置
 # ============================================================================
 
@@ -101,6 +118,7 @@ class Config(BaseModel):
     mcp: McpConfig = Field(default_factory=McpConfig)
     tui: TuiConfig = Field(default_factory=TuiConfig)
     auxiliary: AuxiliaryConfig = Field(default_factory=AuxiliaryConfig)
+    tools: ToolsConfig = Field(default_factory=ToolsConfig)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Config:

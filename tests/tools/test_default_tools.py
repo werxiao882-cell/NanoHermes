@@ -11,19 +11,19 @@ import pytest
 def _setup_default_tools():
     """Setup and register default tools before each test."""
     import importlib
-    from src.tools.registry import ToolRegistry
+    from src.tools.core.registry import ToolRegistry
     ToolRegistry.clear()
 
     # Reload all tool modules to trigger re-registration
-    from src.tools import clarify_tool
-    from src.tools import code_execution_tool
-    from src.tools import cronjob_tool
-    from src.tools import delegation_tool
-    from src.tools import memory_tool
-    from src.tools import session_search_tool
-    from src.tools import skills_tool
-    from src.tools import process_tool
-    from src.tools import file_tool
+    from src.tools.impls import clarify_tool
+    from src.tools.impls import code_execution_tool
+    from src.tools.impls import cronjob_tool
+    from src.tools.impls import delegation_tool
+    from src.tools.impls import memory_tool
+    from src.tools.impls import session_search_tool
+    from src.tools.impls import skills_tool
+    from src.tools.impls import process_tool
+    from src.tools.impls import file_tool
 
     importlib.reload(clarify_tool)
     importlib.reload(code_execution_tool)
@@ -45,7 +45,7 @@ class TestDefaultTools:
 
     def test_clarify_tool_registered(self):
         """Test clarify tool is registered."""
-        from src.tools.registry import get_tool
+        from src.tools.core.registry import get_tool
         tool = get_tool("clarify")
         assert tool is not None
         assert tool.name == "clarify"
@@ -53,7 +53,7 @@ class TestDefaultTools:
 
     def test_execute_code_tool_registered(self):
         """Test execute_code tool is registered."""
-        from src.tools.registry import get_tool
+        from src.tools.core.registry import get_tool
         tool = get_tool("execute_code")
         assert tool is not None
         assert tool.name == "execute_code"
@@ -61,7 +61,7 @@ class TestDefaultTools:
 
     def test_cronjob_tool_registered(self):
         """Test cronjob tool is registered."""
-        from src.tools.registry import get_tool
+        from src.tools.core.registry import get_tool
         tool = get_tool("cronjob")
         assert tool is not None
         assert tool.name == "cronjob"
@@ -69,7 +69,7 @@ class TestDefaultTools:
 
     def test_delegate_task_tool_registered(self):
         """Test delegate_task tool is registered."""
-        from src.tools.registry import get_tool
+        from src.tools.core.registry import get_tool
         tool = get_tool("delegate_task")
         assert tool is not None
         assert tool.name == "delegate_task"
@@ -77,7 +77,7 @@ class TestDefaultTools:
 
     def test_memory_tool_registered(self):
         """Test memory tool is registered."""
-        from src.tools.registry import get_tool
+        from src.tools.core.registry import get_tool
         tool = get_tool("memory")
         assert tool is not None
         assert tool.name == "memory"
@@ -85,7 +85,7 @@ class TestDefaultTools:
 
     def test_session_search_tool_registered(self):
         """Test session_search tool is registered."""
-        from src.tools.registry import get_tool
+        from src.tools.core.registry import get_tool
         tool = get_tool("session_search")
         assert tool is not None
         assert tool.name == "session_search"
@@ -93,7 +93,7 @@ class TestDefaultTools:
 
     def test_skill_manage_tool_registered(self):
         """Test skill_manage tool is registered."""
-        from src.tools.registry import get_tool
+        from src.tools.core.registry import get_tool
         tool = get_tool("skill_manage")
         assert tool is not None
         assert tool.name == "skill_manage"
@@ -101,7 +101,7 @@ class TestDefaultTools:
 
     def test_skill_view_tool_registered(self):
         """Test skill_view tool is registered."""
-        from src.tools.registry import get_tool
+        from src.tools.core.registry import get_tool
         tool = get_tool("skill_view")
         assert tool is not None
         assert tool.name == "skill_view"
@@ -109,7 +109,7 @@ class TestDefaultTools:
 
     def test_skills_list_tool_registered(self):
         """Test skills_list tool is registered."""
-        from src.tools.registry import get_tool
+        from src.tools.core.registry import get_tool
         tool = get_tool("skills_list")
         assert tool is not None
         assert tool.name == "skills_list"
@@ -117,7 +117,7 @@ class TestDefaultTools:
 
     def test_process_tool_registered(self):
         """Test process tool is registered."""
-        from src.tools.registry import get_tool
+        from src.tools.core.registry import get_tool
         tool = get_tool("process")
         assert tool is not None
         assert tool.name == "process"
@@ -125,7 +125,7 @@ class TestDefaultTools:
 
     def test_patch_tool_registered(self):
         """Test patch tool is registered."""
-        from src.tools.registry import get_tool
+        from src.tools.core.registry import get_tool
         tool = get_tool("patch")
         assert tool is not None
         assert tool.name == "patch"
@@ -137,7 +137,7 @@ class TestDefaultToolExecution:
 
     def test_clarify_execution(self):
         """Test clarify tool execution."""
-        from src.tools.dispatcher import dispatch
+        from src.tools.core.dispatcher import dispatch
         result = dispatch("clarify", {"question": "What do you mean?"})
         data = json.loads(result)
         assert data["status"] == "clarification_requested"
@@ -145,42 +145,42 @@ class TestDefaultToolExecution:
 
     def test_execute_code_execution(self):
         """Test execute_code tool execution."""
-        from src.tools.dispatcher import dispatch
+        from src.tools.core.dispatcher import dispatch
         result = dispatch("execute_code", {"code": "print('hello')"})
         data = json.loads(result)
         assert data["status"] in ("code_execution_requested", "success", "error")
 
     def test_cronjob_list_execution(self):
         """Test cronjob list execution."""
-        from src.tools.dispatcher import dispatch
+        from src.tools.core.dispatcher import dispatch
         result = dispatch("cronjob", {"action": "list"})
         data = json.loads(result)
         assert data["status"] in ("success", "error")
 
     def test_delegate_task_execution(self):
         """Test delegate_task tool execution."""
-        from src.tools.dispatcher import dispatch
+        from src.tools.core.dispatcher import dispatch
         result = dispatch("delegate_task", {"goal": "Fix the bug"})
         data = json.loads(result)
         assert data["status"] in ("delegation_requested", "success", "error")
 
     def test_memory_execution(self):
         """Test memory tool execution."""
-        from src.tools.dispatcher import dispatch
+        from src.tools.core.dispatcher import dispatch
         result = dispatch("memory", {"action": "add", "content": "User likes Python"})
         data = json.loads(result)
         assert data["status"] in ("memory_requested", "success", "error")
 
     def test_session_search_execution(self):
         """Test session_search tool execution."""
-        from src.tools.dispatcher import dispatch
+        from src.tools.core.dispatcher import dispatch
         result = dispatch("session_search", {"query": "Python"})
         data = json.loads(result)
         assert data.get("status") in ("search_requested", "success", "error") or "error" in data
 
     def test_skills_list_execution(self):
         """Test skills_list tool execution."""
-        from src.tools.dispatcher import dispatch
+        from src.tools.core.dispatcher import dispatch
         result = dispatch("skills_list", {})
         data = json.loads(result)
         assert data.get("success") is True or data["status"] in ("success", "error")
@@ -188,7 +188,7 @@ class TestDefaultToolExecution:
 
     def test_process_execution(self):
         """Test process tool execution."""
-        from src.tools.dispatcher import dispatch
+        from src.tools.core.dispatcher import dispatch
         result = dispatch("process", {"action": "list"})
         data = json.loads(result)
         assert data["status"] in ("process_requested", "success", "error")
@@ -199,7 +199,7 @@ class TestPatchTool:
 
     def test_patch_file_success(self, tmp_path):
         """Test patch tool successfully replaces string."""
-        from src.tools.dispatcher import dispatch
+        from src.tools.core.dispatcher import dispatch
 
         test_file = tmp_path / "test.txt"
         test_file.write_text("Hello World\nHello Python", encoding="utf-8")
@@ -218,7 +218,7 @@ class TestPatchTool:
 
     def test_patch_file_not_found(self):
         """Test patch tool with non-existent file."""
-        from src.tools.dispatcher import dispatch
+        from src.tools.core.dispatcher import dispatch
         result = dispatch("patch", {
             "path": "/nonexistent/file.txt",
             "old_string": "test",
@@ -229,7 +229,7 @@ class TestPatchTool:
 
     def test_patch_string_not_found(self, tmp_path):
         """Test patch tool with string not found."""
-        from src.tools.dispatcher import dispatch
+        from src.tools.core.dispatcher import dispatch
 
         test_file = tmp_path / "test.txt"
         test_file.write_text("Hello World", encoding="utf-8")

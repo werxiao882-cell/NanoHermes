@@ -20,7 +20,7 @@ class TestToolErrorClassifier:
 
     def test_connection_error_reconnect(self):
         """连接错误应分类为可重试 + reconnect。"""
-        from src.tools.retry_classifier import (
+        from src.tools.dfx.retry_classifier import (
             ToolErrorClassifier, RecoveryAction
         )
         classifier = ToolErrorClassifier()
@@ -40,7 +40,7 @@ class TestToolErrorClassifier:
 
     def test_rate_limit_backoff(self):
         """限流错误应分类为可重试 + backoff。"""
-        from src.tools.retry_classifier import (
+        from src.tools.dfx.retry_classifier import (
             ToolErrorClassifier, RecoveryAction
         )
         classifier = ToolErrorClassifier()
@@ -59,7 +59,7 @@ class TestToolErrorClassifier:
 
     def test_auth_error_refresh_credentials(self):
         """认证错误应分类为可重试 + refresh_credentials。"""
-        from src.tools.retry_classifier import (
+        from src.tools.dfx.retry_classifier import (
             ToolErrorClassifier, RecoveryAction
         )
         classifier = ToolErrorClassifier()
@@ -77,7 +77,7 @@ class TestToolErrorClassifier:
 
     def test_non_retryable_errors(self):
         """工具逻辑错误应分类为不可重试。"""
-        from src.tools.retry_classifier import (
+        from src.tools.dfx.retry_classifier import (
             ToolErrorClassifier, RecoveryAction
         )
         classifier = ToolErrorClassifier()
@@ -96,7 +96,7 @@ class TestToolErrorClassifier:
 
     def test_unknown_error_non_retryable(self):
         """未知错误应保守视为不可重试。"""
-        from src.tools.retry_classifier import (
+        from src.tools.dfx.retry_classifier import (
             ToolErrorClassifier, RecoveryAction
         )
         classifier = ToolErrorClassifier()
@@ -107,7 +107,7 @@ class TestToolErrorClassifier:
 
     def test_exponential_backoff_with_jitter(self):
         """退避延迟应指数增长且包含抖动。"""
-        from src.tools.retry_classifier import ToolErrorClassifier, BASE_DELAY_MS
+        from src.tools.dfx.retry_classifier import ToolErrorClassifier, BASE_DELAY_MS
 
         classifier = ToolErrorClassifier(base_delay_ms=100, max_delay_ms=10000)
 
@@ -134,7 +134,7 @@ class TestToolErrorClassifier:
 
     def test_retry_after_extraction(self):
         """应能从错误信息中提取 Retry-After 值。"""
-        from src.tools.retry_classifier import ToolErrorClassifier
+        from src.tools.dfx.retry_classifier import ToolErrorClassifier
         import re
         classifier = ToolErrorClassifier()
 
@@ -147,7 +147,7 @@ class TestToolErrorClassifier:
 
     def test_retry_after_from_headers(self):
         """应能从 HTTP 头中提取 Retry-After。"""
-        from src.tools.retry_classifier import ToolErrorClassifier
+        from src.tools.dfx.retry_classifier import ToolErrorClassifier
         classifier = ToolErrorClassifier()
 
         headers = {"Retry-After": "60"}
@@ -156,7 +156,7 @@ class TestToolErrorClassifier:
 
     def test_should_retry_whitelist(self):
         """白名单外的工具不应重试。"""
-        from src.tools.retry_classifier import ToolErrorClassifier
+        from src.tools.dfx.retry_classifier import ToolErrorClassifier
         classifier = ToolErrorClassifier()
 
         # ValueError 不可重试
@@ -176,7 +176,7 @@ class TestToolErrorClassifier:
 
     def test_max_retries_exceeded(self):
         """超过最大重试次数不应再重试。"""
-        from src.tools.retry_classifier import ToolErrorClassifier
+        from src.tools.dfx.retry_classifier import ToolErrorClassifier
         classifier = ToolErrorClassifier(max_retries=3)
 
         assert classifier.should_retry(
@@ -195,7 +195,7 @@ class TestResultBudget:
 
     def test_small_result_no_truncation(self):
         """小结果不应截断。"""
-        from src.tools.result_budget import (
+        from src.tools.dfx.result_budget import (
             apply_tool_result_budget, DEFAULT_RESULT_BUDGET_TOKENS
         )
         result = "hello world"
@@ -204,7 +204,7 @@ class TestResultBudget:
 
     def test_large_result_truncated(self):
         """大结果应头尾保留截断。"""
-        from src.tools.result_budget import apply_tool_result_budget
+        from src.tools.dfx.result_budget import apply_tool_result_budget
         result = "A" * 20000
         truncated = apply_tool_result_budget(result, budget=1000)
 
@@ -215,7 +215,7 @@ class TestResultBudget:
 
     def test_truncated_preserves_head_and_tail(self):
         """截断应保留头部和尾部。"""
-        from src.tools.result_budget import apply_tool_result_budget
+        from src.tools.dfx.result_budget import apply_tool_result_budget
         result = "HEAD" + "X" * 20000 + "TAIL"
         truncated = apply_tool_result_budget(result, budget=1000)
 
@@ -224,19 +224,19 @@ class TestResultBudget:
 
     def test_terminal_budget_default(self):
         """terminal 工具应使用更严格的预算。"""
-        from src.tools.result_budget import get_result_budget
+        from src.tools.dfx.result_budget import get_result_budget
         assert get_result_budget("terminal") == 4000
         assert get_result_budget("read_file") == 8000
 
     def test_custom_budget_override(self):
         """自定义预算应覆盖默认值。"""
-        from src.tools.result_budget import get_result_budget
+        from src.tools.dfx.result_budget import get_result_budget
         assert get_result_budget("terminal", tool_budget=2000) == 2000
 
     def test_env_variable_budget(self):
         """环境变量应覆盖默认预算。"""
         import os
-        from src.tools.result_budget import get_result_budget
+        from src.tools.dfx.result_budget import get_result_budget
 
         os.environ["NANOHERMES_TOOL_RESULT_BUDGET"] = "5000"
         try:
@@ -246,7 +246,7 @@ class TestResultBudget:
 
     def test_error_result_not_truncated(self):
         """JSON 错误结果不应截断。"""
-        from src.tools.result_budget import apply_budget_to_dispatch_result
+        from src.tools.dfx.result_budget import apply_budget_to_dispatch_result
         import json
         error_result = json.dumps({"error": "something went wrong"})
         result = apply_budget_to_dispatch_result(error_result, "terminal")
@@ -254,7 +254,7 @@ class TestResultBudget:
 
     def test_estimate_tokens(self):
         """Token 估算应大致准确。"""
-        from src.tools.result_budget import estimate_tokens
+        from src.tools.dfx.result_budget import estimate_tokens
         text = "hello world"
         tokens = estimate_tokens(text)
         assert tokens > 0
@@ -270,27 +270,27 @@ class TestExecutionTracker:
 
     def setup_method(self):
         """每个测试前重置追踪器。"""
-        from src.tools.execution_tracker import ToolExecutionTracker
+        from src.tools.dfx.execution_tracker import ToolExecutionTracker
         tracker = ToolExecutionTracker()
         tracker.reset()
 
     def test_mark_start(self):
         """标记开始应成功。"""
-        from src.tools.execution_tracker import ToolExecutionTracker
+        from src.tools.dfx.execution_tracker import ToolExecutionTracker
         tracker = ToolExecutionTracker()
         assert tracker.mark_start("call_1", "read_file") is True
         assert tracker.is_in_progress("call_1") is True
 
     def test_prevent_reentry(self):
         """防重入应拒绝重复执行。"""
-        from src.tools.execution_tracker import ToolExecutionTracker
+        from src.tools.dfx.execution_tracker import ToolExecutionTracker
         tracker = ToolExecutionTracker()
         assert tracker.mark_start("call_1", "read_file") is True
         assert tracker.mark_start("call_1", "read_file") is False
 
     def test_mark_complete(self):
         """标记完成应更新状态。"""
-        from src.tools.execution_tracker import (
+        from src.tools.dfx.execution_tracker import (
             ToolExecutionTracker, ToolExecutionStatus
         )
         tracker = ToolExecutionTracker()
@@ -304,7 +304,7 @@ class TestExecutionTracker:
 
     def test_mark_failed(self):
         """标记失败应记录错误。"""
-        from src.tools.execution_tracker import (
+        from src.tools.dfx.execution_tracker import (
             ToolExecutionTracker, ToolExecutionStatus
         )
         tracker = ToolExecutionTracker()
@@ -316,7 +316,7 @@ class TestExecutionTracker:
 
     def test_mark_timeout(self):
         """标记超时应记录超时状态。"""
-        from src.tools.execution_tracker import (
+        from src.tools.dfx.execution_tracker import (
             ToolExecutionTracker, ToolExecutionStatus
         )
         tracker = ToolExecutionTracker()
@@ -327,7 +327,7 @@ class TestExecutionTracker:
 
     def test_get_active_count(self):
         """活跃计数应正确。"""
-        from src.tools.execution_tracker import ToolExecutionTracker
+        from src.tools.dfx.execution_tracker import ToolExecutionTracker
         tracker = ToolExecutionTracker()
         assert tracker.get_active_count() == 0
         tracker.mark_start("call_1", "read_file")
@@ -338,7 +338,7 @@ class TestExecutionTracker:
 
     def test_statistics(self):
         """统计信息应正确。"""
-        from src.tools.execution_tracker import ToolExecutionTracker
+        from src.tools.dfx.execution_tracker import ToolExecutionTracker
         tracker = ToolExecutionTracker()
         tracker.mark_start("call_1", "read_file")
         tracker.mark_complete("call_1")
@@ -352,7 +352,7 @@ class TestExecutionTracker:
 
     def test_history_limit(self):
         """历史记录应限制大小。"""
-        from src.tools.execution_tracker import ToolExecutionTracker, MAX_HISTORY_SIZE
+        from src.tools.dfx.execution_tracker import ToolExecutionTracker, MAX_HISTORY_SIZE
         tracker = ToolExecutionTracker()
         for i in range(MAX_HISTORY_SIZE + 10):
             tracker.mark_start(f"call_{i}", "read_file")
@@ -363,7 +363,7 @@ class TestExecutionTracker:
 
     def test_thread_safety(self):
         """多线程并发操作应安全。"""
-        from src.tools.execution_tracker import ToolExecutionTracker
+        from src.tools.dfx.execution_tracker import ToolExecutionTracker
         tracker = ToolExecutionTracker()
 
         def worker(n):
@@ -390,7 +390,7 @@ class TestConcurrencyLimiter:
 
     def test_get_max_tool_concurrency_default(self):
         """默认并发数应为 10。"""
-        from src.tools.concurrency_limiter import (
+        from src.tools.dfx.concurrency_limiter import (
             get_max_tool_concurrency, DEFAULT_MAX_CONCURRENCY
         )
         assert get_max_tool_concurrency() == DEFAULT_MAX_CONCURRENCY
@@ -398,7 +398,7 @@ class TestConcurrencyLimiter:
     def test_get_max_tool_concurrency_env(self):
         """环境变量应覆盖默认值。"""
         import os
-        from src.tools.concurrency_limiter import get_max_tool_concurrency
+        from src.tools.dfx.concurrency_limiter import get_max_tool_concurrency
 
         os.environ["NANOHERMES_MAX_TOOL_CONCURRENCY"] = "5"
         try:
@@ -408,7 +408,7 @@ class TestConcurrencyLimiter:
 
     def test_register_tool(self):
         """注册工具应创建信号量。"""
-        from src.tools.concurrency_limiter import (
+        from src.tools.dfx.concurrency_limiter import (
             ToolConcurrencyLimiter, ToolConcurrencyConfig
         )
         limiter = ToolConcurrencyLimiter(max_concurrency=5)
@@ -418,7 +418,7 @@ class TestConcurrencyLimiter:
 
     def test_partition_tool_calls(self):
         """工具调用应正确分组。"""
-        from src.tools.concurrency_limiter import (
+        from src.tools.dfx.concurrency_limiter import (
             ToolConcurrencyLimiter, ToolConcurrencyConfig
         )
         limiter = ToolConcurrencyLimiter(max_concurrency=5)
@@ -447,7 +447,7 @@ class TestConcurrencyLimiter:
 
     def test_status_tracking(self):
         """限流器应正确追踪活跃工具。"""
-        from src.tools.concurrency_limiter import ToolConcurrencyLimiter
+        from src.tools.dfx.concurrency_limiter import ToolConcurrencyLimiter
         limiter = ToolConcurrencyLimiter(max_concurrency=5)
         limiter.register_tool("read_file", is_concurrency_safe=True)
 

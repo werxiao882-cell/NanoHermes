@@ -9,7 +9,7 @@ import threading
 import time
 from unittest import mock
 
-from src.tools.dispatcher import (
+from src.tools.core.dispatcher import (
     _async_bridge,
     _run_in_persistent_loop,
     _run_in_new_thread,
@@ -55,7 +55,7 @@ class TestPersistentLoop:
 
     def test_creates_loop_on_first_call(self):
         """测试首次调用创建持久事件循环。"""
-        import src.tools.dispatcher as dispatcher
+        import src.tools.core.dispatcher as dispatcher
         
         # 重置持久循环状态
         with dispatcher._persistent_loop_lock:
@@ -73,7 +73,7 @@ class TestPersistentLoop:
 
     def test_reuses_existing_loop(self):
         """测试复用已存在的持久事件循环。"""
-        import src.tools.dispatcher as dispatcher
+        import src.tools.core.dispatcher as dispatcher
         
         # 确保已有循环
         with dispatcher._persistent_loop_lock:
@@ -123,7 +123,7 @@ class TestIntegration:
 
     def test_dispatch_calls_async_bridge_for_async_tools(self):
         """测试分发器对异步工具调用桥接。"""
-        from src.tools.registry import ToolRegistry, register_tool
+        from src.tools.core.registry import ToolRegistry, register_tool
         
         # 注册临时异步工具
         async def temp_async_handler(**kwargs):
@@ -138,7 +138,7 @@ class TestIntegration:
         )
         
         try:
-            from src.tools.dispatcher import dispatch
+            from src.tools.core.dispatcher import dispatch
             result = dispatch("temp_async", {"msg": "test"})
             assert "async_dispatch: test" in result
         finally:

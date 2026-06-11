@@ -46,16 +46,23 @@ import logging
 import threading
 from typing import Any
 
-from src.tools.registry import ToolRegistry
-from src.tools.availability import check_tool_availability
-from src.tools.result_budget import apply_budget_to_dispatch_result
-from src.tools.execution_tracker import ToolExecutionTracker
-from src.tools.concurrency_limiter import ToolConcurrencyLimiter
+import time
+
+from src.tools.core.registry import ToolRegistry
+from src.tools.core.availability import check_tool_availability
+from src.tools.dfx.result_budget import apply_budget_to_dispatch_result
+from src.tools.dfx.execution_tracker import ToolExecutionTracker
+from src.tools.dfx.concurrency_limiter import ToolConcurrencyLimiter
+from src.tools.dfx.retry_classifier import ToolErrorClassifier, RecoveryAction
+from src.tools.dfx.retry_manager import DEFAULT_RETRYABLE_TOOLS
 
 logger = logging.getLogger(__name__)
 
 # 执行追踪器单例
 _tracker = ToolExecutionTracker()
+
+# 错误分类器单例（无状态，可安全复用）
+_classifier = ToolErrorClassifier()
 
 # 持久事件循环（CLI 路径复用）
 # 为什么需要全局持久循环？
@@ -151,48 +158,82 @@ def dispatch(
             "error": f"工具调用 '{tool_call_id}' ({name}) 已在执行中"
         })
 
-    # 步骤 4: 执行 handler
-    try:
-        if entry.is_async:
-            # 异步工具通过桥接执行
-            # 为什么不能直接 await？
-            # - dispatch() 是同步函数，不能使用 await 语法
-            # - 需要通过桥接层在同步上下文中安全执行异步代码
-            result = _async_bridge(entry.handler, call_args, task_id)
-        else:
-            # 同步工具直接调用
-            # 为什么注入 task_id？
-            # - 工具可能需要记录日志或关联会话
-            # - 统一注入避免每个工具手动处理
-            result = entry.handler(**call_args, task_id=task_id)
+    # 步骤 4: 执行 handler（含重试逻辑）
+    # 设计理由：
+    # - 只读工具（read_file, search_files 等）可安全重试，无副作用
+    # - 写操作工具（write_file, terminal 等）不可重试，避免重复执行
+    # - 使用同步重试（time.sleep）而非异步，因为 dispatch() 是同步函数
+    max_retries = _classifier.max_retries if name in DEFAULT_RETRYABLE_TOOLS else 0
+    last_error: Exception | None = None
 
-        # 步骤 4.5: 应用结果预算（DFX: result budget）
-        # 在返回前截断大型工具结果，防止占满上下文
-        result = apply_budget_to_dispatch_result(
-            result=result,
-            tool_name=name,
-            tool_budget=entry.max_result_tokens,
-        )
+    for attempt in range(1, max_retries + 2):  # +1 为首次执行
+        try:
+            if entry.is_async:
+                result = _async_bridge(entry.handler, call_args, task_id)
+            else:
+                result = entry.handler(**call_args, task_id=task_id)
 
-        # 步骤 4.6: 标记执行完成（DFX: execution tracking）
-        _tracker.mark_complete(tool_call_id, result_length=len(result))
+            # 检查 JSON 错误响应（工具返回 {"error": ...} 格式）
+            try:
+                data = json.loads(result)
+                if isinstance(data, dict) and "error" in data:
+                    # 可重试工具遇到错误时尝试重试
+                    if attempt <= max_retries:
+                        error_msg = data["error"]
+                        classification = _classifier.classify(RuntimeError(error_msg))
+                        if classification.is_retryable:
+                            delay = classification.delay_ms / 1000
+                            logger.info(
+                                f"工具 '{name}' 第 {attempt}/{max_retries} 次重试 "
+                                f"({classification.reason}, 等待 {delay:.1f}s)"
+                            )
+                            time.sleep(delay)
+                            continue
+            except (json.JSONDecodeError, TypeError):
+                pass  # 非 JSON 结果，视为成功
 
-        return result
+            # 步骤 4.5: 应用结果预算（DFX: result budget）
+            result = apply_budget_to_dispatch_result(
+                result=result,
+                tool_name=name,
+                tool_budget=entry.max_result_tokens,
+            )
 
-    except Exception as e:
-        # 步骤 5: 错误包装
-        # 为什么捕获所有异常？
-        # - 工具实现可能有各种 bug（网络错误、解析错误、权限问题等）
-        # - 主循环需要稳定的返回值格式（JSON 字符串）
-        # - exc_info=True 记录完整堆栈，便于调试
+            # 步骤 4.6: 标记执行完成（DFX: execution tracking）
+            _tracker.mark_complete(tool_call_id, result_length=len(result))
 
-        # 标记执行失败（DFX: execution tracking）
-        _tracker.mark_failed(tool_call_id, error=f"{type(e).__name__}: {e}")
+            return result
 
-        logger.error(f"工具执行失败 '{name}': {e}", exc_info=True)
-        return json.dumps({
-            "error": f"工具执行失败: {type(e).__name__}: {e}"
-        })
+        except Exception as e:
+            last_error = e
+
+            # 检查是否应该重试
+            if attempt <= max_retries:
+                classification = _classifier.classify(e)
+                if classification.is_retryable:
+                    delay = classification.delay_ms / 1000
+                    logger.info(
+                        f"工具 '{name}' 第 {attempt}/{max_retries} 次重试 "
+                        f"({classification.reason}, 等待 {delay:.1f}s)"
+                    )
+                    time.sleep(delay)
+                    continue
+
+            # 不可重试或超过重试次数
+            _tracker.mark_failed(tool_call_id, error=f"{type(e).__name__}: {e}")
+            logger.error(f"工具执行失败 '{name}': {e}", exc_info=True)
+            return json.dumps({
+                "error": f"工具执行失败: {type(e).__name__}: {e}"
+            })
+
+    # 超过最大重试次数
+    error_msg = f"{type(last_error).__name__}: {last_error}" if last_error else "未知错误"
+    _tracker.mark_failed(tool_call_id, error=f"重试耗尽: {error_msg}")
+    logger.error(f"工具 '{name}' 超过最大重试次数 {max_retries}: {last_error}")
+    return json.dumps({
+        "error": f"工具执行失败（已重试 {max_retries} 次）: {error_msg}",
+        "retries_exhausted": True,
+    })
 
 
 def _async_bridge(
@@ -449,9 +490,9 @@ def dispatch_batch(
 
     设计理由：
     - LLM 可能一次返回多个 tool_use（parallel tool calling）
-    - 逐个 dispatch() 调用可行，但 dispatch_batch() 提供统一的批量入口
-    - 集成 ToolConcurrencyLimiter 的分组逻辑，为后续异步并发预留接口
-    - 同步路径下顺序执行即可，真正的并发执行由 async execute_batch 处理
+    - 通过 ToolConcurrencyLimiter 自动分组（并发安全工具 vs 串行工具）
+    - 同步路径使用 execute_batch_sync()，保留分组逻辑
+    - dispatch() 内部已集成重试、追踪和结果预算，无需在此重复
 
     Args:
         tool_calls: [(name, args), ...] 工具调用列表。
@@ -469,7 +510,6 @@ def dispatch_batch(
     ]
 
     # 步骤 2: 构建并发配置并注册到 limiter
-    # 从注册表读取每个工具的并发属性
     limiter = ToolConcurrencyLimiter()
     for name, _ in tool_calls:
         entry = ToolRegistry.get_tool(name)
@@ -480,35 +520,7 @@ def dispatch_batch(
                 is_concurrency_safe=entry.is_concurrency_safe,
             )
 
-    # 步骤 3: 分组（并发组 vs 串行组）
-    # 同步路径：组间串行，组内也串行（dispatch 本身是同步函数）
-    # 异步路径：可改用 limiter.execute_batch() 实现组内并发
-    batches = limiter.partition_tool_calls(call_dicts)
-
-    # 步骤 4: 按组执行
-    # 使用结果映射保持原始顺序
-    all_results: list[str | None] = [None] * len(tool_calls)
-    idx = 0
-
-    for batch in batches:
-        calls = batch["calls"]
-
-        for call in calls:
-            name = call["name"]
-            args = call.get("args")
-            result = dispatch(name, args)
-
-            # 应用结果预算（dispatch 内部已应用，这里做二次保障）
-            entry = ToolRegistry.get_tool(name)
-            result = apply_budget_to_dispatch_result(
-                result=result,
-                tool_name=name,
-                tool_budget=entry.max_result_tokens if entry else None,
-            )
-
-            all_results[idx] = result
-            idx += 1
-
-    # 步骤 5: 返回结果
-    # 理论上 all_results 不会有 None，但做防御性检查
-    return [r for r in all_results if r is not None]
+    # 步骤 3: 通过 limiter 的同步批量接口执行
+    # execute_batch_sync() 内部调用 partition_tool_calls() 分组后逐个 dispatch()
+    # dispatch() 已集成重试、追踪和结果预算，无需在此重复
+    return limiter.execute_batch_sync(call_dicts, dispatch)

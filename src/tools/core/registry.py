@@ -82,13 +82,12 @@ class ToolEntry:
                   分发器根据此标记决定调用方式。
         description: 人类可读的工具描述。
                      用于调试、日志和 UI 展示。
-        defer_loading: 是否延迟加载。True 时工具不在启动时加载到上下文，
-                       只能通过 search_tools 工具动态发现。
+        defer_loading: 是否延迟加载（通过 search_tools 按需发现）。
         retryable: 失败时是否可自动重试（默认 False）。
         max_retries: 最大重试次数（默认 3）。
-        max_concurrent_instances: 该工具最大并发实例数（默认 1）。
-        is_concurrency_safe: 是否可与其他工具并发执行（默认 False）。
-        max_result_tokens: 结果预算 token 数（None 时使用全局默认）。
+        max_concurrent_instances: 该工具最大并发实例数（DFX: 并发限流）。
+        is_concurrency_safe: 是否可与其他工具并发执行（DFX: 并发分组）。
+        max_result_tokens: 工具结果预算覆盖（None 使用全局默认值）。
     """
     name: str
     toolset: str
@@ -208,11 +207,10 @@ class ToolRegistry:
         Args:
             toolset_filter: 工具集名称集合，只返回属于这些工具集的工具。
                            None 表示返回所有工具的 schema。
-            exclude_deferred: 是否排除延迟加载的工具。True 时只返回
-                             defer_loading=False 的工具（用于初始上下文）。
+            exclude_deferred: 是否排除延迟加载的工具（defer_loading=True）。
 
         Returns:
-            OpenAI 格式的工具 schema 列表。
+            OpenAI 格式的工具 schema 列表，每个 schema 包含 defer_loading 字段。
         """
         schemas = []
         for entry in cls._tools.values():
@@ -220,7 +218,8 @@ class ToolRegistry:
                 continue
             if toolset_filter and entry.toolset not in toolset_filter:
                 continue
-            schemas.append(entry.schema)
+            schema = {**entry.schema, "defer_loading": entry.defer_loading}
+            schemas.append(schema)
         return schemas
 
     @classmethod
@@ -258,23 +257,21 @@ class ToolRegistry:
         """
         import importlib
 
-        # 所有工具模块列表
-        # 维护说明：新增工具时添加到此列表
-        # 如果工具使用顶层 register_tool() 调用，discover_tools() 会自动发现
-        # 此列表主要用于 AST 无法检测的场景（如 terminal.py）
+        # 所有工具模块列表（文件名使用单数形式）
         tool_modules = [
-            "src.tools.terminal",
-            "src.tools.file_tool",
-            "src.tools.clarify_tool",
-            "src.tools.code_execution_tool",
-            "src.tools.cronjob_tool",
-            "src.tools.delegation_tool",
-            "src.tools.memory_tool",
-            "src.tools.session_search_tool",
-            "src.tools.skills_tool",
-            "src.tools.process_tool",
-            "src.tools.todo_tool",
-            "src.tools.tool_search",
+            "src.tools.impls.terminal",
+            "src.tools.impls.file_tool",
+            "src.tools.impls.clarify_tool",
+            "src.tools.impls.code_execution_tool",
+            "src.tools.impls.cronjob_tool",
+            "src.tools.impls.delegation_tool",
+            "src.tools.impls.memory_tool",
+            "src.tools.impls.session_search_tool",
+            "src.tools.impls.skills_tool",
+            "src.tools.impls.process_tool",
+            "src.tools.impls.todo_tool",
+            "src.tools.impls.web_search_tool",
+            "src.tools.core.search_tool",
         ]
 
         for module_name in tool_modules:
@@ -315,18 +312,12 @@ class ToolRegistry:
 
     @classmethod
     def get_tool_categories_with_info(cls) -> dict[str, list[dict[str, Any]]]:
-        """按工具集分类所有已注册的工具，包含详细信息。
+        """按工具集分类，返回包含描述和 defer_loading 信息的工具列表。
 
-        返回结构示例：
-        {
-            "terminal": [
-                {"name": "terminal", "description": "执行 shell 命令", "defer_loading": False},
-                {"name": "process", "description": "后台进程管理", "defer_loading": True},
-            ],
-        }
+        用于启动横幅展示和系统提示中的延迟工具分组。
 
         Returns:
-            工具集名称到工具信息列表的映射，每个工具包含 name、description、defer_loading。
+            {toolset: [{"name": ..., "description": ..., "defer_loading": ...}, ...]}
         """
         categories: dict[str, list[dict[str, Any]]] = {}
         for tool in cls._tools.values():
@@ -335,10 +326,11 @@ class ToolRegistry:
                 categories[category] = []
             categories[category].append({
                 "name": tool.name,
-                "description": tool.description or "",
+                "description": tool.description or tool.schema.get("description", ""),
                 "defer_loading": tool.defer_loading,
             })
         return categories
+
 
 
 def register_tool(
@@ -350,6 +342,9 @@ def register_tool(
     is_async: bool = False,
     description: str = "",
     defer_loading: bool = False,
+    retryable: bool = False,
+    max_retries: int = 3,
+    max_result_tokens: int | None = None,
 ) -> None:
     """便捷函数：注册一个工具。
 
@@ -372,15 +367,17 @@ def register_tool(
         )
 
     Args:
-        name: 工具名称。必须唯一，重复注册会覆盖并记录警告。
-        toolset: 工具集名称。用于分组和权限控制（如 "terminal", "file"）。
-        schema: OpenAI 格式的工具 schema。直接传递给 LLM API。
-        handler: 工具执行函数。接受 args dict 和可选 task_id，返回字符串。
-        check_fn: 可用性检查函数（可选）。返回 True 表示工具可用。
-        is_async: 是否为异步工具。影响分发器的调用方式。
-        description: 人类可读描述。用于调试和日志。
-        defer_loading: 是否延迟加载。True 时工具不在启动时加载到上下文，
-                      只能通过 search_tools 工具动态发现。默认 False。
+        name: 工具名称。
+        toolset: 工具集名称。
+        schema: OpenAI 格式的工具 schema。
+        handler: 工具执行函数。
+        check_fn: 可用性检查函数（可选）。
+        is_async: 是否为异步工具。
+        description: 人类可读描述。
+        defer_loading: 是否延迟加载（True 则不出现在初始 LLM 上下文中）。
+        retryable: 失败时是否可自动重试。
+        max_retries: 最大重试次数。
+        max_result_tokens: 工具结果的最大 token 数（None 使用全局默认值）。
     """
     entry = ToolEntry(
         name=name,
@@ -391,6 +388,9 @@ def register_tool(
         is_async=is_async,
         description=description,
         defer_loading=defer_loading,
+        retryable=retryable,
+        max_retries=max_retries,
+        max_result_tokens=max_result_tokens,
     )
     ToolRegistry.register(entry)
 
@@ -405,7 +405,10 @@ def get_all_tools() -> list[ToolEntry]:
     return ToolRegistry.get_all_tools()
 
 
-def get_tool_schemas(toolset_filter: set[str] | None = None, exclude_deferred: bool = False) -> list[dict[str, Any]]:
+def get_tool_schemas(
+    toolset_filter: set[str] | None = None,
+    exclude_deferred: bool = False,
+) -> list[dict[str, Any]]:
     """便捷函数：获取工具 schema 列表。"""
     return ToolRegistry.get_tool_schemas(toolset_filter, exclude_deferred)
 
@@ -446,8 +449,7 @@ def discover_tools(tools_dir: str | None = None) -> None:
     from pathlib import Path
 
     if tools_dir is None:
-        # 使用当前文件所在目录作为默认工具目录
-        tools_dir = str(Path(__file__).parent)
+        tools_dir = str(Path(__file__).parent.parent)
 
     tools_path = Path(tools_dir)
     if not tools_path.is_dir():
@@ -465,29 +467,46 @@ def discover_tools(tools_dir: str | None = None) -> None:
     skip_files = {"__init__.py", "registry.py", "dispatcher.py", "toolsets.py",
                   "availability.py", "async_bridge.py", "terminal.py", "search_tool.py"}
 
-    for py_file in sorted(tools_path.glob("*.py")):
-        if py_file.name in skip_files:
-            continue
-        if py_file.name.startswith("_"):
-            # 跳过私有文件（如 _utils.py）
+    # 扫描子目录：impls/ 和 core/
+    scan_dirs = [tools_path / "impls", tools_path / "core"]
+    # 兼容旧结构：也扫描根目录
+    if any(tools_path.glob("*.py")):
+        scan_dirs.insert(0, tools_path)
+
+    for scan_dir in scan_dirs:
+        if not scan_dir.is_dir():
             continue
 
-        # AST 解析检查是否包含顶层 register_tool() 调用
-        # 这是"约定优于配置"的核心：文件名即工具标识
+        # 构建模块前缀
         try:
-            if _module_registers_tools(py_file):
-                # 动态导入模块，触发模块加载时的 register_tool() 调用
-                spec = importlib.util.spec_from_file_location(
-                    f"src.tools.{py_file.stem}",
-                    py_file,
-                )
-                if spec and spec.loader:
-                    module = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(module)
-                    logger.debug(f"已导入工具模块: {py_file.stem}")
-        except Exception as e:
-            # 捕获所有异常，避免单个工具失败影响其他工具
-            logger.warning(f"导入工具模块失败 {py_file.name}: {e}")
+            rel = scan_dir.relative_to(tools_path)
+            if str(rel) == ".":
+                module_prefix = "src.tools"
+            else:
+                module_prefix = f"src.tools.{rel.as_posix().replace('/', '.')}"
+        except ValueError:
+            module_prefix = "src.tools"
+
+        for py_file in sorted(scan_dir.glob("*.py")):
+            if py_file.name in skip_files:
+                continue
+            if py_file.name.startswith("_"):
+                continue
+
+            # AST 解析检查是否包含顶层 register_tool() 调用
+            try:
+                if _module_registers_tools(py_file):
+                    module_name = f"{module_prefix}.{py_file.stem}"
+                    spec = importlib.util.spec_from_file_location(
+                        module_name,
+                        py_file,
+                    )
+                    if spec and spec.loader:
+                        module = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(module)
+                        logger.debug(f"已导入工具模块: {module_name}")
+            except Exception as e:
+                logger.warning(f"导入工具模块失败 {py_file.name}: {e}")
 
 
 def _module_registers_tools(filepath: Path) -> bool:

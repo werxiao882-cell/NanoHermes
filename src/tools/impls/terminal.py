@@ -235,7 +235,7 @@ def execute_command(
 # ============================================================================
 def _register_terminal_tool() -> None:
     """注册终端工具到全局注册表。"""
-    from src.tools.registry import register_tool
+    from src.tools.core.registry import register_tool
 
     register_tool(
         name="terminal",

@@ -3,8 +3,8 @@
 import json
 import pytest
 
-from src.tools.registry import register_tool, ToolRegistry, ToolEntry
-from src.tools.dispatcher import dispatch, dispatch_batch
+from src.tools.core.registry import register_tool, ToolRegistry, ToolEntry
+from src.tools.core.dispatcher import dispatch, dispatch_batch
 
 
 @pytest.fixture(autouse=True)
@@ -211,7 +211,7 @@ class TestConcurrencyIntegration:
 
     def test_partition_respects_concurrency_flags(self):
         """并发安全工具被分组到一起。"""
-        from src.tools.concurrency_limiter import ToolConcurrencyLimiter
+        from src.tools.dfx.concurrency_limiter import ToolConcurrencyLimiter
 
         self._register_tool("safe_read", is_concurrency_safe=True)
         self._register_tool("safe_search", is_concurrency_safe=True)
@@ -239,7 +239,7 @@ class TestConcurrencyIntegration:
 
     def test_non_consecutive_safe_tools_separate(self):
         """不连续的安全工具不合并。"""
-        from src.tools.concurrency_limiter import ToolConcurrencyLimiter
+        from src.tools.dfx.concurrency_limiter import ToolConcurrencyLimiter
 
         self._register_tool("safe1", is_concurrency_safe=True)
         self._register_tool("unsafe", is_concurrency_safe=False)
@@ -266,7 +266,7 @@ class TestConcurrencyIntegration:
 
     def test_execute_batch_sync_preserves_order(self):
         """execute_batch_sync 保持结果顺序。"""
-        from src.tools.concurrency_limiter import ToolConcurrencyLimiter
+        from src.tools.dfx.concurrency_limiter import ToolConcurrencyLimiter
 
         self._register_tool("a")
         self._register_tool("b")

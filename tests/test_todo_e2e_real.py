@@ -27,9 +27,9 @@ def test_todo_tool_real_conversation():
     from src.config import load_config, get_api_key, get_base_url
     from openai import OpenAI
     from src.provider.openai_client import OpenAIClient as ProviderOpenAIClient
-    from src.tools.registry import ToolRegistry
-    from src.tools.dispatcher import dispatch
-    from src.tools.todo_tool import reset_todo_store
+    from src.tools.core.registry import ToolRegistry
+    from src.tools.core.dispatcher import dispatch
+    from src.tools.impls.todo_tool import reset_todo_store
     from src.conversation.loop import ConversationLoop
 
     # Reset todo store
@@ -165,9 +165,9 @@ def test_todo_tool_complex_workflow():
     from src.config import load_config, get_api_key, get_base_url
     from openai import OpenAI
     from src.provider.openai_client import OpenAIClient as ProviderOpenAIClient
-    from src.tools.registry import ToolRegistry
-    from src.tools.dispatcher import dispatch
-    from src.tools.todo_tool import reset_todo_store
+    from src.tools.core.registry import ToolRegistry
+    from src.tools.core.dispatcher import dispatch
+    from src.tools.impls.todo_tool import reset_todo_store
     from src.conversation.loop import ConversationLoop
 
     # Reset

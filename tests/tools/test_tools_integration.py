@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 from unittest import mock
 
-from src.tools.registry import (
+from src.tools.core.registry import (
     ToolRegistry,
     ToolEntry,
     register_tool,
@@ -18,7 +18,7 @@ from src.tools.registry import (
     get_all_tools,
     get_tool_schemas,
 )
-from src.tools.dispatcher import dispatch
+from src.tools.core.dispatcher import dispatch
 from src.tools.toolsets import (
     TOOLSETS,
     resolve_toolset,
@@ -118,7 +118,7 @@ class TestTerminalToolIntegration:
     def test_terminal_tool_available(self):
         """测试终端工具可用（通过导入验证）。"""
         # 导入终端模块
-        from src.tools.terminal import DANGEROUS_PATTERNS, LocalEnvironment
+        from src.tools.impls.terminal import DANGEROUS_PATTERNS, LocalEnvironment
         
         # DANGEROUS_PATTERNS 应已定义
         assert len(DANGEROUS_PATTERNS) > 0
@@ -130,7 +130,7 @@ class TestTerminalToolIntegration:
 
     def test_terminal_environment_interface(self):
         """测试终端环境接口。"""
-        from src.tools.terminal import LocalEnvironment
+        from src.tools.impls.terminal import LocalEnvironment
         
         env = LocalEnvironment()
         
@@ -149,7 +149,7 @@ class TestDangerousCommandApproval:
 
     def test_dangerous_patterns_defined(self):
         """测试危险命令模式已定义。"""
-        from src.tools.terminal import DANGEROUS_PATTERNS
+        from src.tools.impls.terminal import DANGEROUS_PATTERNS
         
         # 应有危险模式列表
         assert len(DANGEROUS_PATTERNS) > 0
@@ -165,7 +165,7 @@ class TestDangerousCommandApproval:
     def test_dangerous_command_detection(self):
         """测试危险命令检测。"""
         import re
-        from src.tools.terminal import DANGEROUS_PATTERNS
+        from src.tools.impls.terminal import DANGEROUS_PATTERNS
         
         # 检查各种危险命令
         dangerous_commands = [
@@ -184,7 +184,7 @@ class TestDangerousCommandApproval:
     def test_safe_command_not_flagged(self):
         """测试安全命令不被标记。"""
         import re
-        from src.tools.terminal import DANGEROUS_PATTERNS
+        from src.tools.impls.terminal import DANGEROUS_PATTERNS
         
         safe_commands = [
             "ls -la",

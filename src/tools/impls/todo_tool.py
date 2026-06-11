@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from src.tools.registry import register_tool
+from src.tools.core.registry import register_tool
 
 
 # 有效的任务状态值

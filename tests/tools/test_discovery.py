@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 from unittest import mock
 
-from src.tools.registry import (
+from src.tools.core.registry import (
     ToolRegistry,
     discover_tools,
     _module_registers_tools,
@@ -32,7 +32,7 @@ class TestModuleRegistersTools:
         """测试检测顶层 register_tool() 调用 - AST 解析验证。"""
         # 直接验证 AST 解析逻辑，不依赖临时文件
         code = '''
-from src.tools.registry import register_tool
+from src.tools.core.registry import register_tool
 register_tool(name="test", toolset="t", schema={}, handler=lambda: "ok")
 '''
         import ast
@@ -50,7 +50,7 @@ register_tool(name="test", toolset="t", schema={}, handler=lambda: "ok")
     def test_detects_toolregistry_register_call(self):
         """测试检测 ToolRegistry.register() 调用 - AST 解析验证。"""
         code = '''
-from src.tools.registry import ToolRegistry
+from src.tools.core.registry import ToolRegistry
 ToolRegistry.register(entry)
 '''
         import ast
@@ -121,7 +121,7 @@ import sys
 # 添加项目路径以便导入
 sys.path.insert(0, "/home/liaozhenhua/.hermes/profiles/boss/home/NanoHermes")
 
-from src.tools.registry import register_tool
+from src.tools.core.registry import register_tool
 
 def my_handler(**kwargs):
     return "discovered"
@@ -214,7 +214,7 @@ class TestDiscoveryIntegration:
     def test_ast_detects_multiple_register_calls(self):
         """测试 AST 检测多个 register_tool 调用。"""
         code = '''
-from src.tools.registry import register_tool
+from src.tools.core.registry import register_tool
 register_tool(name="a", toolset="t", schema={}, handler=lambda: "a")
 register_tool(name="b", toolset="t", schema={}, handler=lambda: "b")
 '''

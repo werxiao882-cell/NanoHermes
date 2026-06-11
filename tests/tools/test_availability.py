@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.tools.availability import check_tool_availability, clear_check_cache
+from src.tools.core.availability import check_tool_availability, clear_check_cache
 
 
 @pytest.fixture(autouse=True)

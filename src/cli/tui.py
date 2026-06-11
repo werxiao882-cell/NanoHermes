@@ -66,7 +66,11 @@ class TUIApp:
         debug: bool = False,
         resume: str | None = None,
         resume_title: str | None = None,
-        config: dict[str, Any] | None = None
+        config: dict[str, Any] | None = None,
+        session_db=_UNSET,
+        jsonl_store=_UNSET,
+        memory_manager=_UNSET,
+        skill_manager=_UNSET,
     ):
         """初始化 TUI 应用。
 
@@ -81,6 +85,9 @@ class TUIApp:
             resume_title: 通过标题恢复会话。
             config: UI 配置覆盖（typing_speed, show_tool_panel 等）。
             session_db: 会话数据库。_UNSET=自动初始化，None=无数据库，实例=使用注入的数据库。
+            jsonl_store: JSONL 存储。_UNSET=自动初始化，None=无存储，实例=使用注入的存储。
+            memory_manager: 记忆管理器。_UNSET=自动初始化，None=无记忆，实例=使用注入的管理器。
+            skill_manager: 技能管理器。_UNSET=自动初始化，None=无技能，实例=使用注入的管理器。
         """
         # ── 1. 参数保存 ──
         # 将构造参数保存为实例属性，供后续初始化阶段和运行时使用
@@ -88,6 +95,10 @@ class TUIApp:
         self._resume = resume
         self._resume_title = resume_title
         self.config = config or {}
+        self._injected_session_db = session_db
+        self._injected_jsonl_store = jsonl_store
+        self._injected_memory_manager = memory_manager
+        self._injected_skill_manager = skill_manager
 
         # ── 2. 日志配置 ──
         # 使用局部导入 logging，避免与模块级 logger 冲突
@@ -184,8 +195,8 @@ class TUIApp:
         # init_all_tools() 触发所有工具模块的加载，每个模块在导入时自动注册
         # exclude_deferred=True 只获取非延迟工具（6 个核心工具），延迟工具通过 search_tools 按需发现
         # tool_categories_info 用于启动横幅按类别展示工具列表
-        from src.tools.registry import ToolRegistry, get_tool_schemas
-        from src.tools.dispatcher import dispatch as tool_dispatch_func
+        from src.tools.core.registry import ToolRegistry, get_tool_schemas
+        from src.tools.core.dispatcher import dispatch as tool_dispatch_func
         ToolRegistry.init_all_tools()
         self.tool_dispatch = tool_dispatch_func
         self.tool_schemas = get_tool_schemas(exclude_deferred=True)
@@ -195,7 +206,10 @@ class TUIApp:
         # SkillManager 加载 SKILL.md 文件并管理技能的启用/禁用状态
         # skill_categories 按类别分组，用于启动横幅展示和系统提示注入
         from src.skills.manager import SkillManager
-        self.skill_manager = SkillManager()
+        if self._injected_skill_manager is not _UNSET:
+            self.skill_manager = self._injected_skill_manager
+        else:
+            self.skill_manager = SkillManager()
         self.skill_categories = self.skill_manager.get_skills_by_category()
 
         # ── 11. 会话存储（双存储） ──
@@ -204,9 +218,15 @@ class TUIApp:
         # session_id 初始为 "new_session"，在 run() 中首次用户输入前创建实际记录
         from src.session.session_db import SessionDB
         from src.session.jsonl_store import JsonlSessionStore
-        db_path = Path.home() / ".nanohermes" / "sessions.db"
-        self.session_db = SessionDB(db_path)
-        self.jsonl_store = JsonlSessionStore()
+        if self._injected_session_db is not _UNSET:
+            self.session_db = self._injected_session_db
+        else:
+            db_path = Path.home() / ".nanohermes" / "sessions.db"
+            self.session_db = SessionDB(db_path)
+        if self._injected_jsonl_store is not _UNSET:
+            self.jsonl_store = self._injected_jsonl_store
+        else:
+            self.jsonl_store = JsonlSessionStore()
         self.session_id = "new_session"
 
         # ── 12. 记忆系统 ──
@@ -214,10 +234,13 @@ class TUIApp:
         # FileMemoryProvider 读写 ~/.nanohermes/ 下的 MEMORY.md 和 USER.md
         # 记忆在对话中通过 MemoryEventHandler 自动检索和刷写
         from src.memory import MemoryManager, FileMemoryProvider
-        self.memory_manager = MemoryManager()
-        hermes_home = str(Path.home() / ".nanohermes")
-        file_provider = FileMemoryProvider(hermes_home)
-        self.memory_manager.add_provider(file_provider)
+        if self._injected_memory_manager is not _UNSET:
+            self.memory_manager = self._injected_memory_manager
+        else:
+            self.memory_manager = MemoryManager()
+            hermes_home = str(Path.home() / ".nanohermes")
+            file_provider = FileMemoryProvider(hermes_home)
+            self.memory_manager.add_provider(file_provider)
 
         from src.conversation.assembler import PromptAssembler
         assembler = PromptAssembler(
@@ -678,7 +701,6 @@ class TUIApp:
             return
 
         self.messages.append({"role": "user", "content": user_input})
-        self._save_message_to_storage("user", user_input)
 
         self._current_loop = ConversationLoop(
             model_call=self.model_caller,
@@ -694,6 +716,7 @@ class TUIApp:
             status_indicator=self.status_indicator,
             session_id=self.session_id,
             jsonl_store=self.jsonl_store,
+            session_db=self.session_db,
         )
         conversation_handler.register(loop.events)
 
@@ -776,7 +799,6 @@ class TUIApp:
             self.console.print(final_response)
             self.console.print()
             self.messages.append({"role": "assistant", "content": final_response})
-            self._save_message_to_storage("assistant", final_response)
 
         # 自动压缩检查（任务 12.21）
         await self._check_auto_compress(result[0])
@@ -1167,13 +1189,7 @@ class TUIApp:
             self.messages = compressed
             self.console.print(f"[green]✓ 压缩完成：{len(self.messages) + saved} -> {len(self.messages)} 条消息（减少 {saved} 条）[/green]")
 
-            # 保存压缩后的消息
-            if self.session_db and self.session_id and self.session_id != "new_session":
-                for msg in compressed[-min(5, len(compressed)):]:
-                    role = msg.get("role", "user")
-                    content = msg.get("content", "")
-                    if role in ("user", "assistant"):
-                        self._save_message_to_storage(role, content)
+
 
         except Exception as e:
             self.console.print(f"[red]压缩失败: {e}[/red]")
@@ -1249,7 +1265,7 @@ class TUIApp:
 
     async def _cmd_tools(self) -> None:
         """处理 /tools 命令，列出所有可用工具。"""
-        from src.tools.registry import ToolRegistry
+        from src.tools.core.registry import ToolRegistry
 
         tools = ToolRegistry.get_all_tools()
         if not tools:

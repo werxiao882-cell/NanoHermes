@@ -8,16 +8,16 @@ import pytest
 @pytest.fixture(autouse=True)
 def _setup_todo_tool():
     """Setup and register todo tool before each test."""
-    from src.tools.registry import ToolRegistry
-    from src.tools.todo_tool import reset_todo_store
+    from src.tools.core.registry import ToolRegistry
+    from src.tools.impls.todo_tool import reset_todo_store
 
     ToolRegistry.clear()
     reset_todo_store()
 
     # Re-import module to trigger auto-registration
     import importlib
-    import src.tools.todo_tool
-    importlib.reload(src.tools.todo_tool)
+    import src.tools.impls.todo_tool
+    importlib.reload(src.tools.impls.todo_tool)
 
     yield
 
@@ -27,7 +27,7 @@ def _setup_todo_tool():
 
 def test_todo_tool_read_empty():
     """Test reading todo when list is empty."""
-    from src.tools.dispatcher import dispatch
+    from src.tools.core.dispatcher import dispatch
 
     result = dispatch("todo", {})
     data = json.loads(result)
@@ -46,7 +46,7 @@ def test_todo_tool_read_empty():
 
 def test_todo_tool_write_replace():
     """Test writing todos in replace mode."""
-    from src.tools.dispatcher import dispatch
+    from src.tools.core.dispatcher import dispatch
 
     todos = [
         {"id": "1", "content": "Write unit tests", "status": "pending"},
@@ -72,7 +72,7 @@ def test_todo_tool_write_replace():
 
 def test_todo_tool_merge_update():
     """Test merging todos - update existing and add new."""
-    from src.tools.dispatcher import dispatch
+    from src.tools.core.dispatcher import dispatch
 
     # First, create initial list
     initial = [
@@ -109,7 +109,7 @@ def test_todo_tool_merge_update():
 
 def test_todo_tool_status_transitions():
     """Test task status transitions."""
-    from src.tools.dispatcher import dispatch
+    from src.tools.core.dispatcher import dispatch
 
     # Create a task
     dispatch("todo", {"todos": [{"id": "1", "content": "Test task", "status": "pending"}], "merge": False})
@@ -133,7 +133,7 @@ def test_todo_tool_status_transitions():
 
 def test_todo_tool_cancel_task():
     """Test cancelling a task."""
-    from src.tools.dispatcher import dispatch
+    from src.tools.core.dispatcher import dispatch
 
     # Create and cancel a task
     dispatch("todo", {"todos": [{"id": "1", "content": "Will cancel this", "status": "pending"}], "merge": False})
@@ -150,7 +150,7 @@ def test_todo_tool_cancel_task():
 
 def test_todo_tool_invalid_status():
     """Test that invalid status defaults to pending."""
-    from src.tools.dispatcher import dispatch
+    from src.tools.core.dispatcher import dispatch
 
     result = dispatch("todo", {"todos": [{"id": "1", "content": "Bad status", "status": "invalid_status"}], "merge": False})
     data = json.loads(result)
@@ -164,7 +164,7 @@ def test_todo_tool_invalid_status():
 
 def test_todo_tool_deduplication():
     """Test that duplicate IDs are deduplicated."""
-    from src.tools.dispatcher import dispatch
+    from src.tools.core.dispatcher import dispatch
 
     # Write same ID twice - should keep last
     todos = [
@@ -185,7 +185,7 @@ def test_todo_tool_deduplication():
 
 def test_todo_tool_format_for_display():
     """Test formatting todos for display."""
-    from src.tools.todo_tool import get_todo_store
+    from src.tools.impls.todo_tool import get_todo_store
 
     store = get_todo_store()
     store.write([
@@ -208,7 +208,7 @@ def test_todo_tool_format_for_display():
 
 def test_todo_tool_full_workflow():
     """Test complete todo workflow: create, update, complete."""
-    from src.tools.dispatcher import dispatch
+    from src.tools.core.dispatcher import dispatch
 
     print("\n[9] Test complete workflow...")
 
@@ -267,8 +267,8 @@ def test_todo_tool_full_workflow():
 
 def test_todo_tool_integration_with_conversation_loop():
     """Test todo tool works within conversation loop."""
-    from src.tools.registry import ToolRegistry
-    from src.tools.dispatcher import dispatch
+    from src.tools.core.registry import ToolRegistry
+    from src.tools.core.dispatcher import dispatch
     from src.conversation.loop import ConversationLoop
 
     print("\n[10] Test integration with conversation loop...")

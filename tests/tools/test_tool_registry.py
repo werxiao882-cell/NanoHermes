@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.tools.registry import (
+from src.tools.core.registry import (
     ToolEntry,
     ToolRegistry,
     register_tool,

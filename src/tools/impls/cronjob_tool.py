@@ -27,7 +27,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from src.tools.registry import register_tool
+from src.tools.core.registry import register_tool
 
 logger = logging.getLogger(__name__)
 

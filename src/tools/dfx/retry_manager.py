@@ -22,7 +22,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Callable
 
-from src.tools.retry_classifier import (
+from src.tools.dfx.retry_classifier import (
     ToolErrorClassifier,
     RecoveryAction,
     ErrorClassification,

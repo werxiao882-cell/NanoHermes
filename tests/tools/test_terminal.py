@@ -3,7 +3,7 @@
 import json
 import pytest
 
-from src.tools.terminal import (
+from src.tools.impls.terminal import (
     detect_dangerous_command,
     execute_command,
     LocalEnvironment,

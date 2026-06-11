@@ -4,7 +4,7 @@ import pytest
 import json
 from unittest.mock import patch
 
-from src.tools.clarify_tool import (
+from src.tools.impls.clarify_tool import (
     clarify,
     get_pending_clarification,
     respond_to_clarification,
@@ -104,10 +104,10 @@ class TestClarifyIntegration:
 
     def test_clarify_via_dispatcher(self):
         """Test clarify tool via dispatcher."""
-        from src.tools.registry import ToolRegistry
-        from src.tools import clarify_tool
+        from src.tools.core.registry import ToolRegistry
+        from src.tools.impls import clarify_tool
         import importlib
-        from src.tools.dispatcher import dispatch
+        from src.tools.core.dispatcher import dispatch
 
         ToolRegistry.clear()
         importlib.reload(clarify_tool)

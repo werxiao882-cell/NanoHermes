@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from src.tools.registry import register_tool
+from src.tools.core.registry import register_tool
 
 # 全局存储澄清请求，等待用户响应
 _pending_clarification: dict[str, Any] | None = None

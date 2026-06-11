@@ -61,8 +61,8 @@ def create_server(name: str = "nanohermes-mcp") -> FastMCP:
 
 def register_pilot_tools(mcp: FastMCP) -> None:
     """注册试点工具到 MCP 服务器"""
-    from src.tools.file_tool import read_file
-    from src.tools.terminal import execute_command
+    from src.tools.impls.file_tool import read_file
+    from src.tools.impls.terminal import execute_command
 
     tools_to_register = [
         ("read-file", read_file, {"path": "文件路径", "offset": "起始行号", "limit": "最大行数"}),

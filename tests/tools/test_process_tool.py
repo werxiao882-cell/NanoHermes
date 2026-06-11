@@ -3,7 +3,7 @@
 import pytest
 import json
 
-from src.tools.process_tool import process
+from src.tools.impls.process_tool import process
 
 
 class TestProcessTool:
@@ -23,10 +23,10 @@ class TestProcessTool:
 
     def test_process_via_dispatcher(self):
         """Test process tool via dispatcher."""
-        from src.tools.registry import ToolRegistry
-        from src.tools import process_tool
+        from src.tools.core.registry import ToolRegistry
+        from src.tools.impls import process_tool
         import importlib
-        from src.tools.dispatcher import dispatch
+        from src.tools.core.dispatcher import dispatch
 
         ToolRegistry.clear()
         importlib.reload(process_tool)

@@ -3,7 +3,7 @@
 import pytest
 import json
 
-from src.tools.session_search_tool import session_search
+from src.tools.impls.session_search_tool import session_search
 
 
 class TestSessionSearch:
@@ -28,10 +28,10 @@ class TestSessionSearch:
 
     def test_session_search_via_dispatcher(self):
         """Test session_search tool via dispatcher."""
-        from src.tools.registry import ToolRegistry
-        from src.tools import session_search_tool
+        from src.tools.core.registry import ToolRegistry
+        from src.tools.impls import session_search_tool
         import importlib
-        from src.tools.dispatcher import dispatch
+        from src.tools.core.dispatcher import dispatch
 
         ToolRegistry.clear()
         importlib.reload(session_search_tool)

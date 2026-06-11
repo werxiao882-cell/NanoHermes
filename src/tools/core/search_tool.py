@@ -408,7 +408,7 @@ def search_tools(query: str = "", mode: str = "auto", task_id=None, **kwargs) ->
         return json.dumps([], ensure_ascii=False)
 
     # 直接从注册表读取延迟加载的工具，构建搜索引擎
-    from src.tools.registry import get_deferred_tools
+    from src.tools.core.registry import get_deferred_tools
 
     deferred_tools = get_deferred_tools()
     if not deferred_tools:
@@ -434,7 +434,7 @@ def check_search_tools_requirements() -> bool:
 # 注册 search_tools 工具（始终可见，不延迟加载）
 def _register_search_tools() -> None:
     """注册 search_tools 内置工具。"""
-    from src.tools.registry import register_tool
+    from src.tools.core.registry import register_tool
 
     register_tool(
         name="search_tools",

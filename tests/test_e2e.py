@@ -10,12 +10,12 @@ import pytest
 @pytest.fixture(autouse=True)
 def _setup_tools():
     """Setup and register all tools before each test."""
-    from src.tools.registry import ToolRegistry
+    from src.tools.core.registry import ToolRegistry
     ToolRegistry.clear()
 
     # Import modules to trigger auto-registration
-    from src.tools.terminal import _register_terminal_tool
-    from src.tools.file_tool import _register_file_tools
+    from src.tools.impls.terminal import _register_terminal_tool
+    from src.tools.impls.file_tool import _register_file_tools
 
     _register_terminal_tool()
     _register_file_tools()
@@ -27,8 +27,8 @@ def _setup_tools():
 
 def test_e2e_conversation_with_tools():
     """End-to-end test: full conversation loop with tool calls and debug mode."""
-    from src.tools.registry import ToolRegistry, get_tool_schemas
-    from src.tools.dispatcher import dispatch
+    from src.tools.core.registry import ToolRegistry, get_tool_schemas
+    from src.tools.core.dispatcher import dispatch
 
     tools = ToolRegistry.get_all_tools()
     tool_names = [t.name for t in tools]
