@@ -6,9 +6,9 @@
 ## 2. SessionDB 核心实现
 
 - [x] 2.1 实现 SessionDB 类 __init__ 方法，包含数据库连接和目录创建
-- [x] 2.2 实现 _apply_wal 方法，包含 WAL 模式设置和 NFS/SMB 回退
+- [x] 2.2 实现 _apply_wal_with_fallback 方法，包含 WAL 模式设置和 NFS/SMB 回退
 - [x] 2.3 实现 SCHEMA_SQL 常量，包含 sessions、messages、state_meta 表定义
-- [x] 2.4 实现 init_schema 方法，执行 schema 创建
+- [x] 2.4 实现 _init_schema 方法，执行 schema 创建
 - [x] 2.5 实现 _execute_write 方法，包含 BEGIN IMMEDIATE + 抖动重试逻辑
 - [x] 2.6 实现 _try_wal_checkpoint 方法，定期执行 PASSIVE checkpoint
 - [x] 2.7 实现 close 方法，包含最终 checkpoint 和连接关闭
@@ -31,7 +31,7 @@
 
 - [x] 3.1 实现 FTS_SQL 常量，包含 messages_fts 虚拟表和触发器
 - [x] 3.2 实现 FTS_TRIGRAM_SQL 常量，包含 trigram 分词器虚拟表和触发器
-- [x] 3.3 在 init_schema 中创建 FTS 虚拟表和触发器
+- [x] 3.3 在 _init_schema 中创建 FTS 虚拟表和触发器
 - [x] 3.4 实现 search_messages 方法，支持关键词搜索和会话过滤
 - [x] 3.5 编写 FTS 搜索的单元测试，包含 CJK 子串搜索
   - [x] 3.5.1 测试创建标准 FTS5 表
@@ -51,7 +51,7 @@
 ## 4. 声明式 Schema 协调
 
 - [x] 4.1 实现 _parse_schema_columns 方法，使用内存 SQLite 解析期望列
-- [x] 4.2 实现 _reconcile_schema 方法，对比 live 列和期望列
+- [x] 4.2 实现 _reconcile_columns 方法，对比 live 列和期望列
 - [x] 4.3 实现列类型表达式重建逻辑
 - [x] 4.4 实现延迟索引创建，在协调之后创建依赖新列的索引
 - [x] 4.5 编写 schema 协调的单元测试
