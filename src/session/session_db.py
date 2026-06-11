@@ -114,6 +114,12 @@ class SessionDB:
         if self.conn is None:
             return
 
+        # 迁移：移除旧的 title UNIQUE 索引（已有数据可能存在重复标题）
+        try:
+            self.conn.execute("DROP INDEX IF EXISTS idx_sessions_title_unique")
+        except sqlite3.OperationalError:
+            pass
+
         # 创建核心表
         self.conn.executescript(SCHEMA_SQL)
 
@@ -508,6 +514,9 @@ class SessionDB:
             token_count, finish_reason, codex_reasoning_items, codex_message_items,
             platform_message_id, 1 if observed else 0,
         ))
+        # 自动递增会话计数器（user/assistant/system 消息计入 message_count）
+        if role in ("user", "assistant", "system"):
+            self.increment_message_count(session_id)
         return cursor.lastrowid
 
     def get_messages(self, session_id: str) -> list[dict[str, Any]]:
