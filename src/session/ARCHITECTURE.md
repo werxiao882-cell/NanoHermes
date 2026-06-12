@@ -28,6 +28,11 @@ SQLite 会话持久化存储，支持 WAL 并发、FTS5 全文搜索、JSONL 完
 │  │    codex_message_items, platform_message_id, observed  │  │
 │  │  - state_meta: key, value                              │  │
 │  │  - schema_version: version                             │  │
+│  │                                                        │  │
+│  │  索引:                                                 │  │
+│  │  - idx_sessions_source, idx_sessions_parent            │  │
+│  │  - idx_sessions_started (DESC), idx_sessions_title     │  │
+│  │  - idx_messages_session (session_id, timestamp)        │  │
 │  └────────────────────────────────────────────────────────┘  │
 │                                                              │
 │  ┌────────────────────────────────────────────────────────┐  │
@@ -112,7 +117,7 @@ SQLite 会话持久化存储，支持 WAL 并发、FTS5 全文搜索、JSONL 完
 
 ### 会话生命周期
 1. **创建**: `create_session()` → INSERT OR IGNORE → 返回 session_id
-2. **保存消息**: `insert_message()` → messages 表插入 → FTS5 触发器自动更新索引
+2. **保存消息**: `insert_message()` → messages 表插入 → message_count 自动递增 → FTS5 触发器自动更新索引
 3. **更新 token**: `update_token_counts(incremental=True)` → 增量累加
 4. **结束会话**: `end_session(reason)` → WHERE ended_at IS NULL → 防重复
 5. **压缩延续**: `branch_session(parent_id)` → 新会话 parent_session_id 指向父会话
@@ -144,6 +149,8 @@ SQLite 会话持久化存储，支持 WAL 并发、FTS5 全文搜索、JSONL 完
 | **parent_session_id 血缘链** | 形成可追溯的会话 lineage。started_at >= ended_at 条件区分压缩延续和委托子节点 |
 | **INSERT OR IGNORE 幂等创建** | 相同 session_id 重复创建不产生错误，支持恢复场景 |
 | **end_session WHERE ended_at IS NULL** | 防止重复结束，第一次的 end_reason 获胜 |
+| **title 索引（非 UNIQUE）** | 支持同名会话（如恢复后分支），通过 `get_next_title_in_lineage()` 生成编号变体区分 |
+| **insert_message 自动递增 message_count** | 避免应用层手动维护计数，减少不一致风险 |
 
 ## Dependencies
 - Internal: None（自包含模块）

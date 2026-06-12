@@ -25,6 +25,7 @@ src/config/
 | `McpServerConfig` | 单个 MCP 服务器（name, transport, command/args/url） |
 | `TuiConfig` | TUI 配置（typing_speed, show_tool_panel, tool_panel_position） |
 | `AuxiliaryConfig` | 辅助 LLM 配置（provider, model, max_tokens, temperature） |
+| `ToolsConfig` | 工具 DFX 配置（max_tool_concurrency, tool_result_budget） |
 
 ## 配置优先级
 

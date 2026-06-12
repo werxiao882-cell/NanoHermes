@@ -74,7 +74,7 @@
   - **Reason**: 防止审查 Agent 执行危险操作
 
 ## Dependencies
-- Internal: src/provider/, src/tools/, src/session/, src/memory/, src/config/
+- Internal: src/provider/, src/tools/core/, src/session/, src/config/
 - External: openai SDK
 
 ---
@@ -179,5 +179,5 @@
   - 严重程度分级帮助优先处理关键威胁
 
 ## Dependencies
-- Internal: src/memory/managers.py (volatile 层记忆注入), src/config/ (配置模块)
+- Internal: src/config/ (配置模块), 直接读取 ~/.nanohermes/memory/ 文件（volatile 层记忆注入）
 - External: None

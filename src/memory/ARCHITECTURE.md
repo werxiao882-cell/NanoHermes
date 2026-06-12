@@ -132,8 +132,33 @@
 | **上下文隔离标签** | `<memory-context>` 标签 + 系统注释防止 Agent 将注入记忆误认为用户输入 |
 | **流式清洗状态机** | 处理可能被分割跨 chunk 的标签，flush 时仍在 span 内丢弃（比泄露更安全） |
 
+## 目录结构
+
+```
+src/memory/
+├── __init__.py          # 模块入口
+├── provider.py          # MemoryProvider ABC 抽象基类
+├── manager.py           # MemoryManager 编排器（完整版，Fan-out 容错）
+├── managers.py          # MemoryManager 精简版（基础编排）
+├── file_provider.py     # FileMemoryProvider（MEMORY.md / USER.md）
+├── context_fencing.py   # 上下文隔离（标签清洗、流式清洗器）
+└── event_handler.py     # MemoryEventHandler（EventBus 订阅桥接）
+```
+
+### MemoryEventHandler
+
+通过订阅 `ConversationLoop` 的 `EventBus` 事件，在对话循环关键节点调用 MemoryManager：
+
+| 事件 | 动作 |
+|------|------|
+| LOOP_START | 初始化所有 memory providers |
+| ITERATION_START（首次） | on_turn_start + prefetch_all，注入记忆上下文 |
+| LOOP_END | sync_all + queue_prefetch_all（仅完成的轮次） |
+| INTERRUPT | 跳过 sync（中断的轮次不同步） |
+| PRE_COMPRESS | on_pre_compress，压缩前提取信息 |
+
 ## Dependencies
-- Internal: None（自包含模块）
+- Internal: src/conversation/events.py (EventBus), src/config/ (配置模块)
 - External: 无（Python 标准库）
 
 ## Configuration Constants
