@@ -73,3 +73,53 @@
 - [x] 7.9 实现 skills_list 工具（列出技能，支持关键词过滤）
 - [x] 7.10 重构 skills_tools.py 使其只负责工具注册和调用
 - [x] 7.11 编写技能管理工具的单元测试
+
+---
+
+## Phase 2：高级能力增强
+
+## 8. 渐进式披露架构（skill-progressive-disclosure）
+
+- [x] 8.1 实现 SkillProgressiveDisclosure 类
+- [x] 8.2 实现 build_system_prompt_index 方法（Tier 1：分类索引）
+- [x] 8.3 实现两层缓存（内存 LRU + 磁盘快照 .skills_prompt_snapshot.json）
+- [x] 8.4 实现 _skill_should_show 方法（条件激活 + 平台过滤组合评估）
+- [x] 8.5 实现 skill_matches_platform 函数（linux/macos/windows/termux）
+- [x] 8.6 重构 prompt_builder 使用渐进式披露
+- [x] 8.7 编写单元测试
+  - [x] 8.7.1 测试系统提示索引生成
+  - [x] 8.7.2 测试缓存命中/失效
+  - [x] 8.7.3 测试条件激活逻辑（requires_toolsets/fallback_for_tools）
+  - [x] 8.7.4 测试平台匹配和 Termux 回退
+
+## 9. 安全体系（skill-security）
+
+- [x] 9.1 实现 SkillGuard 类（正则静态分析）
+- [x] 9.2 定义安全检测正则模式（exfiltration/injection/destructive/persistence）
+- [x] 9.3 实现 scan 方法（递归扫描技能目录所有文件）
+- [x] 9.4 实现信任级别策略（builtin/trusted/community）
+- [x] 9.5 实现 SkillProvenance 类（来源追踪）
+- [x] 9.6 实现 write_origin ContextVar（区分 user/background_review）
+- [x] 9.7 实现 mark_agent_created / is_curator_eligible 方法
+- [x] 9.8 集成来源追踪到 Curator（只管理 agent-created 技能）
+- [x] 9.9 实现 SkillAstAuditor 类（AST 深度审计）
+- [x] 9.10 实现动态 import/属性访问检测
+- [x] 9.11 集成 SkillGuard 到 skill_manage
+- [x] 9.12 编写单元测试
+  - [x] 9.12.1 测试检测注入攻击/数据泄露/破坏性命令
+  - [x] 9.12.2 测试信任级别策略
+  - [x] 9.12.3 测试标记 agent-created
+  - [x] 9.12.4 测试 Curator 跳过 bundled/hub/manual
+  - [x] 9.12.5 测试 AST 审计检测动态 import
+
+## 10. 技能预处理（skill-preprocessing）
+
+- [x] 10.1 实现 SkillPreprocessor 类
+- [x] 10.2 实现 _substitute_variables 方法（${VAR_NAME} 替换）
+- [x] 10.3 实现 _expand_shell_commands 方法（`!`command`` 展开）
+- [x] 10.4 实现安全限制（超时 5s + 危险命令黑名单）
+- [x] 10.5 集成到 skill_view 加载流程
+- [x] 10.6 编写单元测试
+  - [x] 10.6.1 测试变量替换
+  - [x] 10.6.2 测试 shell 展开
+  - [x] 10.6.3 测试超时和黑名单
