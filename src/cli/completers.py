@@ -16,26 +16,99 @@ from prompt_toolkit.document import Document
 class CommandCompleter(Completer):
     COMMANDS = {
         "/help": "显示帮助信息",
-        "/clear": "清空屏幕",
-        "/quit": "退出 TUI",
-        "/resume": "恢复会话",
+        "/clear": "清空对话",
         "/status": "显示当前状态",
-        "/tools": "显示工具调用历史",
+        "/sessions": "列出历史会话",
+        "/resume": "恢复历史会话",
+        "/title": "设置会话标题",
+        "/skills": "列出所有技能",
+        "/skills enable": "启用技能",
+        "/skills disable": "禁用技能",
+        "/tools": "列出所有工具",
+        "/compress": "压缩上下文",
+        "/reasoning": "切换推理模式",
+        "/quit": "退出",
+        "/exit": "退出",
     }
+
+    def __init__(self, skill_manager=None):
+        self._skill_manager = skill_manager
 
     def get_completions(self, document: Document, complete_event) -> list[Completion]:
         text = document.text_before_cursor
-        if text.startswith("/"):
-            parts = text.split()
-            cmd = parts[0]
-            for command, description in self.COMMANDS.items():
-                if command.startswith(cmd):
+        if not text.startswith("/"):
+            return
+
+        parts = text.split()
+
+        # /skills enable <partial> 或 /skills disable <partial> → 补全技能名
+        # 处理 "/skills enable " (末尾空格) 和 "/skills enable ar" (部分输入)
+        if len(parts) >= 2 and parts[0] == "/skills" and parts[1] in ("enable", "disable"):
+            if len(parts) == 2 and text.endswith(" "):
+                # "/skills enable " → 显示所有技能名
+                yield from self._complete_skill_names("")
+                return
+            elif len(parts) == 3:
+                # "/skills enable ar" → 按前缀过滤
+                yield from self._complete_skill_names(parts[2])
+                return
+            elif len(parts) == 2 and not text.endswith(" "):
+                # "/skills enable" (无空格) → 补全子命令
+                pass
+            else:
+                return
+
+        # /skills enable|disable → 补全子命令
+        if len(parts) == 2 and parts[0] == "/skills":
+            sub = parts[1]
+            for action in ("enable", "disable"):
+                if action.startswith(sub):
                     yield Completion(
-                        command,
-                        start_position=-len(cmd),
-                        display=command,
-                        display_meta=description,
+                        f"/skills {action}",
+                        start_position=-len(text),
+                        display=f"/skills {action}",
+                        display_meta="启用技能" if action == "enable" else "禁用技能",
                     )
+            return
+
+        # 普通命令补全
+        stripped = text.rstrip()
+        for command, description in self.COMMANDS.items():
+            if command.startswith(stripped):
+                yield Completion(
+                    command,
+                    start_position=-len(text),
+                    display=command,
+                    display_meta=description,
+                )
+
+        # 技能名作为斜杠命令补全（/skill-name）
+        if self._skill_manager and len(parts) == 1:
+            prefix = parts[0][1:]  # 去掉开头的 /
+            for entry in self._skill_manager.list_skills(enabled_only=True):
+                name = entry.skill.name
+                if name.startswith(prefix):
+                    yield Completion(
+                        f"/{name}",
+                        start_position=-len(text),
+                        display=f"/{name}",
+                        display_meta=f"[skill] {entry.skill.description[:40]}",
+                    )
+
+    def _complete_skill_names(self, prefix: str) -> list[Completion]:
+        """补全技能名称。"""
+        if not self._skill_manager:
+            return
+        for entry in self._skill_manager.list_skills():
+            name = entry.skill.name
+            if name.startswith(prefix):
+                status = "✓ 已启用" if entry.enabled else "✗ 已禁用"
+                yield Completion(
+                    name,
+                    start_position=-len(prefix),
+                    display=name,
+                    display_meta=f"{status} | {entry.skill.description[:40]}",
+                )
 
 
 class FilePathCompleter(Completer):
@@ -76,9 +149,9 @@ class FilePathCompleter(Completer):
 
 
 class ContextAwareCompleter(Completer):
-    def __init__(self, context_fn: Callable | None = None):
+    def __init__(self, context_fn: Callable | None = None, skill_manager=None):
         self.context_fn = context_fn
-        self.command_completer = CommandCompleter()
+        self.command_completer = CommandCompleter(skill_manager=skill_manager)
         self.file_completer = FilePathCompleter()
 
     def get_completions(self, document: Document, complete_event) -> list[Completion]:

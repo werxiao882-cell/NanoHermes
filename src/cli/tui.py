@@ -42,9 +42,9 @@ logger = logging.getLogger(__name__)
 
 # 支持的斜杠命令列表，用于自动补全
 SLASH_COMMANDS = [
-    "/clear", "/status", "/sessions", "/title",
-    "/skills", "/skills enable", "/skills disable",
-    "/tools", "/compress", "/quit", "/exit",
+    "/help", "/clear", "/status", "/sessions", "/resume", "/title",
+    "/skills", "/skills enable <name>", "/skills disable <name>",
+    "/tools", "/compress", "/reasoning", "/quit", "/exit",
 ]
 
 # 哨兵对象：区分 __init__ 中 session_db 参数"未传" vs "显式传 None"
@@ -211,6 +211,8 @@ class TUIApp:
         else:
             self.skill_manager = SkillManager()
         self.skill_categories = self.skill_manager.get_skills_by_category()
+        # 将 skill_manager 注入补全器，支持 /skills enable|disable 时补全技能名
+        self.completer.command_completer._skill_manager = self.skill_manager
 
         # ── 11. 会话存储（双存储） ──
         # SessionDB (SQLite): 会话元数据 + FTS5 全文搜索 + 统计分析
@@ -867,6 +869,25 @@ class TUIApp:
             await self._cmd_reasoning()
             return True
 
+        # /skill-name → 加载技能并注入对话
+        if cmd.startswith("/") and self.skill_manager:
+            skill_name = cmd[1:]
+            skill = self.skill_manager.get_skill(skill_name)
+            if skill:
+                self.skill_manager.record_use(skill_name)
+                skill_dir = self.skill_manager._find_skill_dir(skill_name)
+                content = skill.body
+                if skill_dir:
+                    try:
+                        from src.skills.preprocessing import preprocess_skill_content
+                        raw = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+                        content = preprocess_skill_content(raw, skill_dir, self.session_id)
+                    except Exception:
+                        pass
+                self.console.print(f"[green]已加载技能: {skill_name}[/green]")
+                # 返回特殊标记，让 process_message 触发对话
+                return f"__skill__:{skill_name}:{content}"
+
         return False
 
     async def process_message(self, message: str) -> None:
@@ -884,9 +905,22 @@ class TUIApp:
             message: 用户输入的原始文本（已 strip）。
         """
         if message.startswith("/"):
-            await self._handle_command(message)
-            self._print_status_bar()
-            return
+            result = await self._handle_command(message)
+            # 检查是否是技能加载，触发对话
+            if isinstance(result, str) and result.startswith("__skill__:"):
+                parts = result.split(":", 2)
+                skill_name = parts[1]
+                content = parts[2] if len(parts) > 2 else ""
+                user_msg = f"[Skill: {skill_name}]\n\n{content}"
+                self.add_message("user", f"已加载技能 {skill_name}")
+                await self._run_conversation_loop(user_msg)
+                self._print_status_bar()
+                return
+            # 已识别的命令，直接返回
+            if result is True:
+                self._print_status_bar()
+                return
+            # 未识别的命令（result=False），作为普通消息触发对话
 
         self.add_message("user", message)
         await self._run_conversation_loop(message)
