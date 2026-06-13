@@ -268,7 +268,7 @@ class ActivityFeed:
         text = Text()
         text.append(f"{ActivityFeed.PREFIX} ")
         text.append("🟦", style="blue")
-        text.append(f" preparing {tool_name}{action_text}...")
+        text.append(f" preparing {tool_name}{action_text}")
         return text
 
     @staticmethod

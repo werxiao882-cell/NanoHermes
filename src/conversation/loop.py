@@ -168,6 +168,20 @@ class ConversationLoop:
 
             # 检查是否有工具调用
             if response.get("tool_calls"):
+                # 将 assistant 消息（含 tool_calls）追加到 messages
+                # OpenAI API 要求 tool 结果之前必须有对应的 assistant(tool_calls) 消息
+                assistant_message = {
+                    "role": "assistant",
+                    "content": response.get("content") or None,
+                    "tool_calls": response["tool_calls"],
+                }
+                messages.append(assistant_message)
+
+                self.events.emit(EventType.MESSAGE_APPEND, {
+                    "message": assistant_message,
+                    "messages": messages,
+                })
+
                 for tool_call in response["tool_calls"]:
                     func = tool_call.get("function", {})
                     tool_name = func.get("name", "unknown")
@@ -221,6 +235,17 @@ class ConversationLoop:
                 continue
 
             # 文本响应，结束循环
+            # 将最终 assistant 消息追加到 messages 并触发持久化
+            final_message = {
+                "role": "assistant",
+                "content": response.get("content", ""),
+            }
+            messages.append(final_message)
+            self.events.emit(EventType.MESSAGE_APPEND, {
+                "message": final_message,
+                "messages": messages,
+            })
+
             total_elapsed = time.time() - start_time
             result = {
                 "final_response": response.get("content", ""),

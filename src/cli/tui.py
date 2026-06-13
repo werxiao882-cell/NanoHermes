@@ -772,21 +772,6 @@ class TUIApp:
         if not result[0]:
             return
 
-        # 注入记忆上下文到消息历史（如果有预取缓存）
-        # 设计理由：记忆上下文需要在用户消息之前插入，作为 system 消息
-        # 这样模型可以在回复时参考记忆内容
-        if memory_handler and memory_handler.prefetch_cache:
-            memory_context = memory_handler.prefetch_cache
-            # 在用户消息之前插入记忆上下文（作为 system 消息）
-            # 找到最后一条用户消息的位置
-            for i in range(len(self.messages) - 1, -1, -1):
-                if self.messages[i].get("role") == "user":
-                    self.messages.insert(i, {
-                        "role": "system",
-                        "content": memory_context,
-                    })
-                    break
-
         # 处理结果
         final_response = result[0].get("final_response", "")
         reasoning = result[0].get("reasoning")
@@ -798,7 +783,6 @@ class TUIApp:
             self.show_separator()
             self.console.print(final_response)
             self.console.print()
-            self.messages.append({"role": "assistant", "content": final_response})
 
         # 自动压缩检查（任务 12.21）
         await self._check_auto_compress(result[0])

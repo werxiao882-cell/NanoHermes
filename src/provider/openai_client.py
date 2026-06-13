@@ -340,28 +340,6 @@ class OpenAIClient:
                     {"type": "function", "function": t} for t in tools
                 ]
 
-            # Debug 模式：输出完整请求体（包括系统提示词）
-            if self._debug:
-                import json
-                print(f"\n{'='*70}")
-                print(f"[DEBUG] >>> 请求体 (Request Body)")
-                print(f"{'='*70}")
-
-                # 单独输出系统提示词
-                for msg in messages:
-                    if msg.get("role") == "system":
-                        content = msg.get("content", "")
-                        print(f"\n[SYSTEM PROMPT] ({len(content)} chars)")
-                        print("-" * 70)
-                        print(content)
-                        print("-" * 70)
-                        break
-
-                # 输出完整请求体 JSON
-                print(f"\n[FULL REQUEST BODY]")
-                print(json.dumps(kwargs, ensure_ascii=False, indent=2))
-                print(f"{'='*70}\n")
-
             # 累积变量：用于构建完整响应
             full_content = ""
             reasoning = ""         # 模型的思考过程（extended thinking / reasoning_content）
