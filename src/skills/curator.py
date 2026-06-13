@@ -95,11 +95,16 @@ class Curator:
 
         遍历所有 Agent 创建的技能，检查活动时间，
         自动转换状态：active → stale → archived。
+        只管理 created_by="agent" 的技能，其他来源受保护。
         """
         usage = self._load_usage()
 
         for skill_name, data in usage.items():
-            entry = SkillUsage(**data)
+            # 来源保护：只管理 agent-created 技能
+            if data.get("created_by") != "agent":
+                continue
+
+            entry = SkillUsage(**{k: v for k, v in data.items() if k != "created_by"})
 
             # pinned 技能豁免
             if entry.pinned:
@@ -109,11 +114,11 @@ class Curator:
 
             if entry.state == "active" and days_inactive > self._stale_after_days:
                 entry.state = "stale"
-                usage[skill_name] = self._entry_to_dict(entry)
+                data.update(self._entry_to_dict(entry))
 
             elif entry.state == "stale" and days_inactive > self._archive_after_days:
                 entry.state = "archived"
-                usage[skill_name] = self._entry_to_dict(entry)
+                data.update(self._entry_to_dict(entry))
 
         self._save_usage(usage)
 

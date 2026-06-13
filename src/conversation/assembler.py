@@ -500,17 +500,10 @@ class PromptAssembler:
     # ── 技能提示（TRIGGER/SKIP 格式） ──
 
     def build_skills_prompt(self, skills: list[str] | None = None) -> str:
-        """构建技能提示文本（Claude Code 风格）。
+        """构建技能提示文本（渐进式披露 Tier 1 索引）。
 
-        格式：
-        # Skills
-        ## Active Skills
-        - <name>: <description> TRIGGER — <rules> SKIP — <rules>
-
-        设计理由：
-        - 优先从 SkillManager 获取技能详细信息（含 trigger/skip）
-        - 如果 SkillManager 不可用，回退到使用传入的 skills 名称列表
-        - TRIGGER/SKIP 规则内联到技能描述，提高模型理解效率
+        优先使用 SkillProgressiveDisclosure 构建紧凑的分类索引，
+        支持条件激活和平台过滤。回退到 SkillManager 的完整条目格式。
 
         Args:
             skills: 技能名称列表（向后兼容，优先使用 skill_manager 动态获取）。
@@ -518,7 +511,20 @@ class PromptAssembler:
         Returns:
             技能提示文本。
         """
-        # 优先从 SkillManager 获取完整技能信息
+        if self._skill_manager:
+            try:
+                from src.skills.progressive_disclosure import SkillProgressiveDisclosure
+                disclosure = SkillProgressiveDisclosure(self._skill_manager.skills_dir)
+                disabled = {
+                    name for name, entry in self._skill_manager._skills.items()
+                    if not entry.enabled
+                }
+                result = disclosure.build_system_prompt_index(disabled=disabled)
+                if result:
+                    return result
+            except Exception:
+                pass
+
         skill_entries = self._get_skill_entries()
         if skill_entries:
             return self._build_skills_from_entries(skill_entries)

@@ -93,10 +93,6 @@ class SkillLoader:
 
         if not name:
             raise ValueError(f"SKILL.md 缺少 name 字段: {path}")
-        if len(description) > 60:
-            raise ValueError(
-                f"SKILL.md description 超过 60 字符 ({len(description)}): {path}"
-            )
 
         # 处理 platforms 字段（可能是字符串或列表）
         platforms = frontmatter.get("platforms")

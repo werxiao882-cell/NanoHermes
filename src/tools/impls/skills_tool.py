@@ -42,6 +42,10 @@ def skill_manage(
 
     if action == "create":
         result = _skill_manager.create_skill(name, content, category if category else None)
+        if result.get("success"):
+            from src.skills.security import is_background_review, SkillProvenance
+            if is_background_review():
+                SkillProvenance(_skill_manager.skills_dir).mark_agent_created(name)
     elif action == "edit":
         result = _skill_manager.edit_skill(name, content)
     elif action == "patch":
@@ -65,8 +69,11 @@ def skill_manage(
     return json.dumps(result, ensure_ascii=False)
 
 
-def skill_view(name: str = "", task_id: str = None, **kwargs) -> str:
-    """查看技能详情。"""
+def skill_view(name: str = "", file_path: str = "", task_id: str = None, **kwargs) -> str:
+    """查看技能详情，支持加载 SKILL.md 或关联文件。"""
+    if file_path:
+        return _load_skill_file(name, file_path)
+
     details = _skill_manager.get_skill_details(name)
     if details is None:
         return json.dumps({
@@ -74,10 +81,44 @@ def skill_view(name: str = "", task_id: str = None, **kwargs) -> str:
             "error": f"Skill '{name}' not found."
         }, ensure_ascii=False)
 
+    skill_dir = _skill_manager._find_skill_dir(name)
+    if skill_dir:
+        skill_md = skill_dir / "SKILL.md"
+        if skill_md.exists():
+            try:
+                from src.skills.preprocessing import preprocess_skill_content
+                content = skill_md.read_text(encoding="utf-8")
+                content = preprocess_skill_content(content, skill_dir)
+                details["content"] = content
+            except Exception:
+                pass
+
     return json.dumps({
         "success": True,
         "skill": details,
     }, ensure_ascii=False)
+
+
+def _load_skill_file(name: str, file_path: str) -> str:
+    """加载技能的关联文件。"""
+    skill_dir = _skill_manager._find_skill_dir(name)
+    if not skill_dir:
+        return json.dumps({"success": False, "error": f"Skill '{name}' not found."}, ensure_ascii=False)
+
+    target = (skill_dir / file_path).resolve()
+    try:
+        target.relative_to(skill_dir.resolve())
+    except ValueError:
+        return json.dumps({"success": False, "error": "Path traversal blocked."}, ensure_ascii=False)
+
+    if not target.exists():
+        return json.dumps({"success": False, "error": f"File '{file_path}' not found."}, ensure_ascii=False)
+
+    try:
+        content = target.read_text(encoding="utf-8")
+        return json.dumps({"success": True, "file": file_path, "content": content}, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
 
 
 def skills_list(category: str = "", task_id: str = None, **kwargs) -> str:

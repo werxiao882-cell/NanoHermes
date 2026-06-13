@@ -199,6 +199,7 @@ class TestCurator:
                     "last_activity_at": time.time() - 86400 * 2,  # 2 days ago
                     "state": "active",
                     "pinned": False,
+                    "created_by": "agent",
                 }
             }
             curator._save_usage(usage)
@@ -221,6 +222,7 @@ class TestCurator:
                     "last_activity_at": time.time() - 86400 * 3,  # 3 days ago
                     "state": "stale",
                     "pinned": False,
+                    "created_by": "agent",
                 }
             }
             curator._save_usage(usage)
@@ -243,6 +245,7 @@ class TestCurator:
                     "last_activity_at": time.time() - 86400 * 2,  # 2 days ago
                     "state": "active",
                     "pinned": True,
+                    "created_by": "agent",
                 }
             }
             curator._save_usage(usage)

@@ -100,7 +100,7 @@ class TestSkillLoader:
                 loader.load(skill_file)
 
     def test_load_description_too_long(self):
-        """Test loading skill with description > 60 chars raises error."""
+        """Test loading skill with long description succeeds (no length limit)."""
         with tempfile.TemporaryDirectory() as tmpdir:
             skill_file = Path(tmpdir) / "SKILL.md"
             skill_file.write_text(
@@ -113,8 +113,9 @@ class TestSkillLoader:
             )
 
             loader = SkillLoader()
-            with pytest.raises(ValueError, match="超过 60 字符"):
-                loader.load(skill_file)
+            skill = loader.load(skill_file)
+            assert skill.name == "test"
+            assert len(skill.description) == 61
 
     def test_load_with_platforms(self):
         """Test loading skill with platforms."""
