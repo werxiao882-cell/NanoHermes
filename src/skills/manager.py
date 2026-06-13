@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -29,6 +30,8 @@ from pathlib import Path
 from typing import Any
 
 from src.skills.loader import Skill, SkillLoader
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================================
@@ -68,6 +71,13 @@ VALID_NAME_RE = re.compile(r'^[a-z0-9][a-z0-9._-]*$')
 #    - scripts: 辅助脚本（Python/Shell 等）
 #    - assets: 静态资源（图片、配置等）
 ALLOWED_SUBDIRS = {"references", "templates", "scripts", "assets"}
+
+# 扫描时排除的目录：隐藏目录、缓存、虚拟环境等
+_EXCLUDED_DIRS = frozenset({
+    ".git", ".github", ".hub", ".archive", ".venv", "venv",
+    "node_modules", "site-packages", "__pycache__", ".tox",
+    ".nox", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+})
 
 
 @dataclass
@@ -143,38 +153,28 @@ class SkillManager:
         """加载技能目录中的所有 SKILL.md 文件。
 
         加载策略：
-        - 仅遍历 skills_dir 的直接子目录（不递归），每个子目录代表一个技能
-        - 技能目录必须包含 SKILL.md 文件才被视为有效技能
+        - 递归扫描 skills_dir 下所有 SKILL.md 文件
+        - 支持扁平结构（skills/my-skill/SKILL.md）和分类结构（skills/category/my-skill/SKILL.md）
         - 使用 skill.name（从 frontmatter 解析）作为字典键，而非目录名
-          这允许目录名和技能名不一致的情况（虽然不推荐）
 
         错误处理：
         - 单个技能加载失败不影响其他技能（容错设计）
-        - 失败时打印警告，便于调试，但不中断启动流程
-        - 常见失败原因：SKILL.md 格式错误、YAML frontmatter 缺失、编码问题
+        - 失败时记录警告日志，不中断启动流程
         """
         if not self.skills_dir.exists():
             return
 
-        # iterdir() 只遍历直接子项，不递归
-        # 这确保了技能目录结构是一层扁平的（或带分类的两层）
-        for skill_dir in self.skills_dir.iterdir():
-            if not skill_dir.is_dir():
-                continue  # 跳过文件，只处理目录
-            skill_file = skill_dir / "SKILL.md"
-            if not skill_file.exists():
-                continue  # 没有 SKILL.md 的目录不是有效技能
+        for skill_file in sorted(self.skills_dir.rglob("SKILL.md")):
+            # 跳过隐藏目录和排除目录
+            rel = skill_file.relative_to(self.skills_dir)
+            if any(p.startswith(".") or p in _EXCLUDED_DIRS for p in rel.parts):
+                continue
 
             try:
                 skill = self._loader.load(skill_file)
-                # 使用 skill.name 作为键，而非目录名
-                # 如果多个技能的 name 相同，后面的会覆盖前面的（最后加载的获胜）
                 self._skills[skill.name] = SkillEntry(skill=skill)
             except Exception as e:
-                # 容错设计：单个技能失败不影响整体加载
-                # 使用 print 而非 logging，因为这是启动时的关键路径，
-                # 确保即使日志系统未初始化也能看到错误
-                print(f"[警告] 加载技能失败 {skill_file}: {e}")
+                logger.warning(f"加载技能失败 {skill_file}: {e}")
 
     def _reload(self) -> None:
         """重新加载所有技能。
@@ -276,32 +276,26 @@ class SkillManager:
             return []
 
         skills = []
-        for skill_dir in self.skills_dir.iterdir():
-            if not skill_dir.is_dir():
-                continue
-            skill_file = skill_dir / "SKILL.md"
-            if not skill_file.exists():
+        for skill_file in sorted(self.skills_dir.rglob("SKILL.md")):
+            rel = skill_file.relative_to(self.skills_dir)
+            if any(p.startswith(".") or p in _EXCLUDED_DIRS for p in rel.parts):
                 continue
 
+            skill_dir = skill_file.parent
             try:
                 skill = self._loader.load(skill_file)
 
-                # 关键词过滤：不区分大小写的子串匹配
-                # 同时搜索技能名称和描述，提高匹配率
                 if query:
                     query_lower = query.lower()
-                    # 使用 and 条件：只要名称或描述包含关键词就匹配
                     if query_lower not in skill.name.lower() and query_lower not in skill.description.lower():
                         continue
 
                 skills.append({
                     "name": skill.name,
                     "description": skill.description,
-                    # 使用 relative_to 获取相对路径，便于 UI 展示
                     "path": str(skill_dir.relative_to(self.skills_dir)),
                 })
             except Exception:
-                # 忽略加载失败的技能，继续处理其他技能
                 continue
 
         return skills
@@ -327,23 +321,15 @@ class SkillManager:
         """
         skill_categories: dict[str, list[str]] = {}
         for entry in self.list_skills():
-            path = entry.skill.path
-            # 从路径中提取分类：查找 "/skills/" 后的第一个目录
-            if "/skills/" in path:
-                # split("/skills/")[1] 获取 "skills/" 之后的部分
-                # split("/") 按目录分隔符分割
-                parts = path.split("/skills/")[1].split("/")
-                # parts[0] 是分类目录名，parts[1] 是技能目录名
-                if len(parts) >= 2:
-                    category = parts[0]
-                else:
-                    category = "other"  # 技能直接在 skills/ 下，无分类
-            else:
-                category = "other"  # 路径不包含 "/skills/"，异常情况
+            skill_path = Path(entry.skill.path)
+            try:
+                rel = skill_path.parent.relative_to(self.skills_dir)
+                parts = rel.parts
+                category = parts[0] if len(parts) >= 2 else "other"
+            except ValueError:
+                category = "other"
 
-            if category not in skill_categories:
-                skill_categories[category] = []
-            skill_categories[category].append(entry.skill.name)
+            skill_categories.setdefault(category, []).append(entry.skill.name)
 
         return skill_categories
 
