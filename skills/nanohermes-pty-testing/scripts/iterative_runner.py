@@ -691,7 +691,7 @@ def needs_more_turns(test_id, output, round_num):
     return False, None
 
 
-def run_single_test(test_id, prompt, patterns, wait_time=15, setup_cmd=None, max_rounds=MAX_ROUNDS):
+def run_single_test(test_id, prompt, patterns, wait_time=15, setup_cmd=None, max_rounds=10):
     """启动独立的 NanoHermes 会话执行单个测试，支持多轮对话。
 
     关键改进：
@@ -828,7 +828,7 @@ def print_progress(current, total, test_id, status, analysis=None):
     print(line, end='', flush=True)
 
 
-def iterative_test(cases, auto_fix=False, max_retries=2):
+def iterative_test(cases, auto_fix=False, max_retries=2, max_rounds=10):
     """迭代式测试：执行→分析→修复→重试。"""
     results = []
     passed = []
@@ -838,7 +838,7 @@ def iterative_test(cases, auto_fix=False, max_retries=2):
     print(f"\n{'='*70}")
     print(f"🔬 NanoHermes PTY 迭代测试 (v9 — 多轮对话)")
     print(f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    print(f"📋 {len(cases)} 个用例 | auto_fix={auto_fix} | max_retries={max_retries} | max_rounds={MAX_ROUNDS}")
+    print(f"📋 {len(cases)} 个用例 | auto_fix={auto_fix} | max_retries={max_retries} | max_rounds={max_rounds}")
     print(f"{'='*70}\n")
 
     start_time = time.time()
@@ -859,7 +859,7 @@ def iterative_test(cases, auto_fix=False, max_retries=2):
             if retries > 0:
                 print(f"\n  🔄 {test_id} 第 {retries} 次重试 (wait={current_wait}s)")
 
-            result = run_single_test(test_id, prompt, current_patterns, current_wait, setup_cmd)
+            result = run_single_test(test_id, prompt, current_patterns, current_wait, setup_cmd, max_rounds=max_rounds)
             last_result = result
 
             if result['status'] == 'PASS':
@@ -1001,9 +1001,7 @@ def main():
     parser.add_argument('--dry-run', action='store_true', help='只列出不执行')
     args = parser.parse_args()
 
-    global MAX_ROUNDS
-    if args.max_rounds:
-        MAX_ROUNDS = args.max_rounds
+    max_rounds = args.max_rounds if args.max_rounds else MAX_ROUNDS
 
     ref_files = {
         'core-tools': REF_DIR / 'core-tools.md',
@@ -1048,7 +1046,7 @@ def main():
     setup_nanohermes()
 
     # 执行迭代测试
-    iterative_test(pty_cases, auto_fix=args.auto_fix, max_retries=args.max_retries)
+    iterative_test(pty_cases, auto_fix=args.auto_fix, max_retries=args.max_retries, max_rounds=max_rounds)
 
 
 if __name__ == "__main__":

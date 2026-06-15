@@ -53,6 +53,16 @@ KNOWN_AI_BEHAVIORS = {
         "description": "AI 可能调用 search_tools 2-3 次（过度搜索）",
         "suggestion": "放宽匹配条件，只要调用了 search_tools 就算通过",
     },
+    "no_py_files": {
+        "pattern": r"未找到.*\.py|没有.*Python|no.*\.py",
+        "description": "AI 搜索 *.py 文件但项目目录下没有（正常行为）",
+        "suggestion": "这是预期行为 — 空搜索结果是正确的，标记为通过",
+    },
+    "chinese_response": {
+        "pattern": r"已成功|内容如下|文件.*不存在|已记住",
+        "description": "AI 用中文回复操作结果，而非英文（如 '16 bytes written'）",
+        "suggestion": "匹配中文语义而非英文字面 — runner 已自动处理",
+    },
 }
 
 # 已知输出截断模式
