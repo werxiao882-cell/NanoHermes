@@ -52,7 +52,7 @@ src/config/
 ```python
 from src.config import load_config, Config
 
-# 基础使用（自动加载配置文件）
+# 基础使用（自动加载配置文件，默认 provider=dashscope, model=qwen3.6-plus）
 config = load_config()
 
 # 显式覆盖

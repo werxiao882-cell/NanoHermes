@@ -2,7 +2,23 @@
 
 ## Responsibility
 统一的 LLM 提供商运行时，处理凭证解析、API 模式路由、客户端构建、回退链。
-支持多提供商（OpenAI, Anthropic, OpenRouter, Custom 等）。
+支持多提供商（DashScope, OpenAI, Anthropic, OpenRouter, Custom 等）。
+
+## 目录结构
+
+```
+src/provider/
+├── __init__.py            # 模块入口
+├── profile.py             # ProviderProfile 数据类 + ProviderRegistry
+├── builtins.py            # 内置提供商注册（openai, anthropic, openrouter, custom）
+├── credentials.py         # 凭证解析（优先级链：显式 > 环境变量 > 配置 > 默认）
+├── api_mode.py            # API 模式路由（chat_completions / anthropic_messages / codex_responses）
+├── client_factory.py      # 客户端工厂（build_client）
+├── openai_client.py       # OpenAI 客户端（流式、build_caller、interruptible_completion）
+├── anthropic_adapter.py   # Anthropic 适配器（system 提取、消息格式转换）
+├── fallback.py            # 回退链（一次性激活，防振荡）
+└── model_metadata.py      # 模型元数据（上下文长度、定价、成本计算）
+```
 
 ## Components
 
@@ -13,6 +29,8 @@
 │  - ProviderProfile: id, name, api_mode, base_url, env_vars  │
 │  - register_provider(), get_provider_profile()              │
 │  - Built-in providers: openai, anthropic, openrouter, custom│
+│  - DashScope 通过 config 配置（默认 provider）              │
+│  - 别名支持: oai→openai, claude→anthropic, or→openrouter   │
 └────────────────────────┬─────────────────────────────────────┘
                          │
                          ▼

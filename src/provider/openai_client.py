@@ -29,6 +29,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from dataclasses import dataclass
 from enum import Enum
@@ -36,6 +37,8 @@ from typing import Any, Generator
 
 from openai import OpenAI, APIError, APIConnectionError
 from openai.types.chat import ChatCompletion, ChatCompletionChunk
+
+logger = logging.getLogger(__name__)
 
 
 class ErrorCategory(Enum):
@@ -83,9 +86,10 @@ class TokenUsage:
         return self.input_tokens + self.output_tokens
 
 
-@dataclass
-class ClassifiedError:
+class ClassifiedError(Exception):
     """分类后的 API 错误。
+
+    继承 Exception 以支持 raise 语句。
 
     Attributes:
         category: 错误分类。
@@ -93,10 +97,19 @@ class ClassifiedError:
         retryable: 是否建议重试（rate_limit 和 server_error 通常可重试）。
         original: 原始异常对象（如果有）。
     """
-    category: ErrorCategory
-    message: str
-    retryable: bool = False
-    original: Exception | None = None
+
+    def __init__(
+        self,
+        category: ErrorCategory,
+        message: str,
+        retryable: bool = False,
+        original: Exception | None = None,
+    ):
+        super().__init__(message)
+        self.category = category
+        self.message = message
+        self.retryable = retryable
+        self.original = original
 
 
 @dataclass
@@ -330,6 +343,11 @@ class OpenAIClient:
         def call_model(messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None) -> dict[str, Any]:
             # 构建请求参数：注意 tools 格式需要包装为 {"type": "function", "function": ...}
             # 这是 OpenAI API 的标准格式，与内部工具定义格式不同
+            
+            # 调试日志：记录发送给 API 的消息
+            message_roles = [m.get("role", "unknown") for m in messages]
+            logger.debug(f"call_model: 消息角色 = {message_roles}, 消息数 = {len(messages)}")
+            
             kwargs: dict[str, Any] = {
                 "model": self._model,
                 "messages": messages,
@@ -432,6 +450,93 @@ class OpenAIClient:
                 },
                 "request_body": kwargs,
             }
+
+        return call_model
+
+    def build_non_stream_caller(self):
+        """构建非流式模型调用函数，用于子 Agent 等后台任务。
+
+        与 build_caller 的区别：
+        - 使用 stream=False，直接获取完整响应
+        - 更简单、更快，适合不需要实时展示的场景
+        - 子 Agent 只需要最终结果，不需要流式输出
+
+        Returns:
+            调用函数: (messages, tools) -> dict，包含 content, tool_calls,
+                     usage, reasoning, request_body 字段。
+        """
+        def call_model(messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None) -> dict[str, Any]:
+            # 构建请求参数
+            message_roles = [m.get("role", "unknown") for m in messages]
+            logger.debug(f"call_model (non-stream): 消息角色 = {message_roles}, 消息数 = {len(messages)}")
+            
+            kwargs: dict[str, Any] = {
+                "model": self._model,
+                "messages": messages,
+                "stream": False,  # 非流式调用
+            }
+            if tools:
+                kwargs["tools"] = [
+                    {"type": "function", "function": t} for t in tools
+                ]
+
+            try:
+                # 非流式调用：直接获取完整响应
+                response = self._client.chat.completions.create(**kwargs)
+                
+                # 提取内容
+                choice = response.choices[0] if response.choices else None
+                if choice is None:
+                    return {
+                        "content": "",
+                        "tool_calls": None,
+                        "reasoning": None,
+                        "usage": {"input_tokens": 0, "output_tokens": 0},
+                        "request_body": kwargs,
+                    }
+                
+                message = choice.message
+                full_content = message.content or ""
+                
+                # 提取 reasoning
+                reasoning = ""
+                if hasattr(message, 'reasoning') and message.reasoning:
+                    reasoning = message.reasoning
+                elif hasattr(message, 'reasoning_content') and message.reasoning_content:
+                    reasoning = message.reasoning_content
+                
+                # 提取工具调用
+                formatted_tool_calls = None
+                if message.tool_calls:
+                    formatted_tool_calls = [
+                        {
+                            "id": tc.id,
+                            "type": tc.type,
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in message.tool_calls
+                    ]
+                
+                # 提取 usage
+                usage = response.usage
+                usage_dict = {
+                    "input_tokens": usage.prompt_tokens if usage else 0,
+                    "output_tokens": usage.completion_tokens if usage else 0,
+                }
+                
+                return {
+                    "content": full_content,
+                    "tool_calls": formatted_tool_calls,
+                    "reasoning": reasoning if reasoning else None,
+                    "usage": usage_dict,
+                    "request_body": kwargs,
+                }
+                
+            except Exception as e:
+                raise classify_error(e)
 
         return call_model
 

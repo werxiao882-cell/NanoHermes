@@ -108,6 +108,40 @@ class ToolsConfig(BaseModel):
 
 
 # ============================================================================
+# 后台任务配置
+# ============================================================================
+
+class MemoryFlushConfig(BaseModel):
+    """记忆刷写任务配置。"""
+    enabled: bool = True
+    min_messages: int = 10
+
+
+class SkillReviewConfig(BaseModel):
+    """技能审查任务配置。"""
+    enabled: bool = True
+    min_turns: int = 10
+    min_interval_minutes: int = 30
+    curator_enabled: bool = True
+
+
+class BackgroundTasksConfig(BaseModel):
+    """后台任务配置段。
+
+    设计理由：
+    - enabled: 全局开关，可一键禁用所有后台任务
+    - max_concurrent: 控制后台任务并发数，防止资源耗尽
+    - task_timeout_seconds: 任务超时时间，防止任务无限运行
+    - memory_flush / skill_review: 各任务的独立配置
+    """
+    enabled: bool = True
+    max_concurrent: int = 2
+    task_timeout_seconds: float = 300.0
+    memory_flush: MemoryFlushConfig = Field(default_factory=MemoryFlushConfig)
+    skill_review: SkillReviewConfig = Field(default_factory=SkillReviewConfig)
+
+
+# ============================================================================
 # 根配置
 # ============================================================================
 
@@ -119,6 +153,7 @@ class Config(BaseModel):
     tui: TuiConfig = Field(default_factory=TuiConfig)
     auxiliary: AuxiliaryConfig = Field(default_factory=AuxiliaryConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    background_tasks: BackgroundTasksConfig = Field(default_factory=BackgroundTasksConfig)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Config:
