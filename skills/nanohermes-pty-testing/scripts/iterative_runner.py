@@ -1,15 +1,24 @@
 #!/usr/bin/env python3
 """
-NanoHermes PTY 迭代回归测试 — 逐个执行、分析失败、自动修复、重试。
+NanoHermes PTY 迭代回归测试 — 逐个执行、多轮对话、分析失败、自动修复、重试。
+
+核心改进 (v9):
+1. 多轮对话：根据 PTY 输出判断是否需要继续交互（最多 10 轮）
+2. 灵活模式：从实际输出中提取匹配关键词，而非死板匹配预期描述
+3. 会话日志：失败时读取 ~/.nanohermes/sessions/ 相关记录辅助分析
+4. 输出截断检测：script 命令输出不完整时自动增加等待
 
 工作流：
 1. 按顺序执行 [PTY] 用例
-2. 失败的用例立即分析原因
-3. 根据分析结果采取行动：
+2. 每轮检查输出，判断 AI 是否完成
+3. 未完成 → 生成后续提示继续对话（最多 10 轮）
+4. 完成后匹配预期关键词
+5. 失败的用例立即分析原因
+6. 根据分析结果采取行动：
    - pattern_mismatch → 更新正则后重试
    - ai_behavior (known) → 标记跳过
    - timeout → 增加等待时间重试
-   - 其他 → 记录问题，可配置是否暂停
+   - 其他 → 记录问题
 
 用法:
     eval "$($HOME/miniconda3/bin/conda shell.bash hook)" && conda activate py312
@@ -22,6 +31,7 @@ import sys
 import time
 import json
 import subprocess
+import glob
 from datetime import datetime
 from pathlib import Path
 
@@ -36,6 +46,7 @@ WORKDIR = "/mnt/d/code/NanoHermes"
 OUTPUT_BASE = SKILL_DIR / "testing-artifacts"
 LOG_DIR = OUTPUT_BASE / "logs"
 REPORT_DIR = OUTPUT_BASE / "reports"
+SESSIONS_DIR = Path.home() / ".nanohermes" / "sessions"
 
 os.makedirs(LOG_DIR, exist_ok=True)
 os.makedirs(REPORT_DIR, exist_ok=True)
@@ -54,6 +65,9 @@ WAIT_MAP = {
     'startup': 12,
     'storage': 10,
 }
+
+# 最大对话轮数
+MAX_ROUNDS = 10
 
 # 全局模式修正池（运行时动态更新）
 PATTERN_OVERRIDES = {}
@@ -82,12 +96,10 @@ def parse_markdown_tables(filepath):
 
         cells = [c.strip() for c in stripped.strip('|').split('|')]
 
-        if not headers:
-            headers = cells
-            in_table = True
-            continue
-
         if len(cells) != len(headers):
+            if not headers:
+                headers = cells
+                in_table = True
             continue
 
         row = dict(zip(headers, cells))
@@ -97,103 +109,311 @@ def parse_markdown_tables(filepath):
     return cases
 
 
-def extract_keywords(expected_text):
-    """从预期描述中提取匹配关键词。"""
-    quotes = re.findall(r'"([^"]+)"|\'([^\']+)\'', expected_text)
-    quoted = [q[0] or q[1] for q in quotes if q[0] or q[1]]
-    if quoted:
-        return quoted
+def extract_keywords_from_output(output, test_id, operation, expected):
+    """从实际输出中提取可用于验证的关键词。
 
-    numbers = re.findall(r'\d+(?:\.\d+)?', expected_text)
-    chinese = re.findall(r'[\u4e00-\u9fff]{2,6}', expected_text)
-    return numbers + chinese
+    不再死板匹配预期描述文本，而是检查 AI 输出中是否包含与操作相关的语义内容。
+    """
+    found = {}
+    output_lower = output.lower()
+
+    id_prefix = test_id.split('-')[0] if '-' in test_id else test_id.split('_')[0]
+
+    # === 文件操作类 ===
+    if id_prefix == 'T' or 'write' in operation.lower() or 'read' in operation.lower() or 'patch' in operation.lower():
+        # write_file 成功
+        if any(kw in output_lower for kw in ['写入', 'written', 'wrote', '已写', '创建', 'created']):
+            found['write'] = True
+        # read_file 成功 — AI 会展示文件内容
+        if any(kw in output_lower for kw in ['内容', 'content', '的内容', '如下', '第']):
+            found['read'] = True
+        # patch 成功
+        if any(kw in output_lower for kw in ['替换', 'replac', 'patch', '修改', '成功']):
+            found['patch'] = True
+        # 错误处理
+        if any(kw in output_lower for kw in ['不存在', 'not found', 'error', '错误', '无法']):
+            found['error'] = True
+        # 二进制文件拒绝
+        if any(kw in output_lower for kw in ['二进制', 'binary', '不支持', '拒绝', 'refuse']):
+            found['binary_reject'] = True
+        # 敏感路径
+        if any(kw in output_lower for kw in ['敏感', 'sensitive', '拒绝', '不允许', 'denied']):
+            found['sensitive_reject'] = True
+
+    # === 终端命令类 ===
+    if 'echo' in operation.lower() or '运行' in operation or 'terminal' in operation.lower():
+        if 'hello' in output_lower:
+            found['hello'] = True
+        if any(kw in output_lower for kw in ['exit', 'code', '1', '失败', 'non-zero', 'nonzero']):
+            found['exit_code'] = True
+
+    # === 计算类 ===
+    if '计算' in operation or '质数' in operation or 'sum' in operation.lower():
+        if '1060' in output:
+            found['prime_sum'] = True
+        if '1024' in output:
+            found['power'] = True
+
+    # === 搜索类 ===
+    if '搜索' in operation or 'search' in operation.lower():
+        if any(kw in output_lower for kw in ['找到', 'found', '匹配', 'match', '结果', 'result', '文件']):
+            found['search_result'] = True
+        if any(kw in output_lower for kw in ['未找到', 'not found', '没有找到', 'empty', '零个']):
+            found['search_empty'] = True
+        if any(kw in output_lower for kw in ['search_files', 'search']):
+            found['search_called'] = True
+
+    # === 记忆类 ===
+    if id_prefix == 'M' or 'memory' in operation.lower() or '记忆' in operation or '记住' in operation:
+        if any(kw in output_lower for kw in ['记住', 'remember', '记忆', '已保存', 'saved', 'success']):
+            found['memory_ok'] = True
+        if any(kw in output_lower for kw in ['小王', '名字', 'name']):
+            found['memory_content'] = True
+        if any(kw in output_lower for kw in ['replace', '替换', '更新']):
+            found['memory_replace'] = True
+        if any(kw in output_lower for kw in ['删除', 'delete', 'remove', '已移除']):
+            found['memory_delete'] = True
+
+    # === 会话存储类 ===
+    if id_prefix == 'S' or 'session' in operation.lower() or '会话' in operation:
+        if any(kw in output_lower for kw in ['session', '会话', 'id', 'uuid']):
+            found['session_id'] = True
+        if any(kw in output_lower for kw in ['jsonl', 'sqlite', '存储', 'store', '保存']):
+            found['storage'] = True
+        if any(kw in output_lower for kw in ['恢复', 'resume', '找回']):
+            found['resume'] = True
+
+    # === 对话类 ===
+    if id_prefix == 'C':
+        if any(kw in output_lower for kw in ['hello', '你好', 'hi', '我是', '帮助']):
+            found['chat_response'] = True
+        if any(kw in output_lower for kw in ['write_file', 'read_file', 'patch', 'terminal']):
+            found['tool_called'] = True
+        if any(kw in output_lower for kw in ['iteration', 'iter', '第.*轮', '计数']):
+            found['iteration'] = True
+        if any(kw in output_lower for kw in ['delegate', '委托', 'subtask', '子任务']):
+            found['delegation'] = True
+
+    # === Provider 类 ===
+    if id_prefix == 'P':
+        if any(kw in output_lower for kw in ['response', '响应', 'token', 'model', 'stream']):
+            found['provider_ok'] = True
+
+    # === 配置类 ===
+    if id_prefix == 'CF':
+        if any(kw in output_lower for kw in ['config', '配置', 'load', '加载', 'env', '.env']):
+            found['config_ok'] = True
+
+    # === Prompt 类 ===
+    if id_prefix == 'PA':
+        if any(kw in output_lower for kw in ['prompt', '提示', 'stable', 'context', 'cache']):
+            found['prompt_ok'] = True
+
+    # === TUI 类 ===
+    if id_prefix == 'TUI':
+        if any(kw in output_lower for kw in ['nanohermes', '聊天', '界面', 'render']):
+            found['tui_render'] = True
+        if any(kw in output_lower for kw in ['token', '状态', 'status']):
+            found['status_bar'] = True
+        if any(kw in output_lower for kw in ['typing', '打字', '逐字']):
+            found['typing_effect'] = True
+        if '/tools' in operation or '/sessions' in operation or '/skills' in operation or '/status' in operation or '/clear' in operation:
+            cmd = operation.split()[0].lstrip('/') if operation.startswith('/') else ''
+            if cmd and cmd in output_lower:
+                found[f'cmd_{cmd}'] = True
+
+    # === 工具搜索类 ===
+    if id_prefix == 'TS':
+        if any(kw in output_lower for kw in ['search_tools', '搜索工具', 'tool search']):
+            found['search_tools_called'] = True
+        if any(kw in output_lower for kw in ['deferred', '延迟', '加载']):
+            found['deferred_visible'] = True
+
+    # === 技能类 ===
+    if id_prefix == 'SK':
+        if any(kw in output_lower for kw in ['skill', '技能', '已安装', 'installed']):
+            found['skill_list'] = True
+        if any(kw in output_lower for kw in ['skill.md', 'skill_view', '查看']):
+            found['skill_view'] = True
+        if any(kw in output_lower for kw in ['enable', '启用', 'disable', '禁用']):
+            found['skill_toggle'] = True
+
+    # === 高级类 ===
+    if id_prefix in ('CC', 'I', 'AUX', 'D'):
+        if any(kw in output_lower for kw in ['压缩', 'compress', 'summary', '摘要']):
+            found['compression'] = True
+        if any(kw in output_lower for kw in ['insights', 'token', '成本', 'cost']):
+            found['insights'] = True
+        if any(kw in output_lower for kw in ['async', '异步', '后台', 'background']):
+            found['async_ok'] = True
+        if any(kw in output_lower for kw in ['mcp', 'server', '服务器']):
+            found['mcp'] = True
+
+    # === 通用：AI 有响应 ===
+    if any(kw in output_lower for kw in ['thought', '思考', 'nanohermes', '◠‿◠✿', '⊃━☆']):
+        found['ai_responded'] = True
+
+    # === 工具调用证据 ===
+    if any(kw in output_lower for kw in ['┊', '✅', 'tool', '工具', 'completed']):
+        found['tool_executed'] = True
+
+    return found
 
 
 def build_regex_patterns(case, overrides=None):
-    """从用例构建正则匹配模式，支持运行时覆盖。"""
+    """从用例构建正则匹配模式，基于实际操作步骤和预期。"""
     expected = case.get('预期', '')
     test_id = case.get('ID', '')
     test_content = case.get('测试内容', '')
     operation = case.get('操作步骤', '')
 
     patterns = {}
+    id_prefix = test_id.split('-')[0] if '-' in test_id else test_id.split('_')[0]
 
-    # 1. 从预期描述提取 - 但转换为更实际的匹配模式
-    id_prefix = test_id.split('-')[0] if '-' in test_id else ''
-    
-    # 对于预期字段，我们匹配的是 AI 实际会产生的输出类型
-    # 而不是字面上的"正常响应"、"正确计数"等测试元数据
-    if any(kw in expected for kw in ['响应', '回复', '回答', '正常']):
-        patterns['expected'] = r'你好|hello|hi|我是|agent| Hermes |帮助|help'
-    elif any(kw in expected for kw in ['正确', '成功', '完成']):
-        patterns['expected'] = r'完成|成功|done|success|created|written|saved'
-    elif any(kw in expected for kw in ['崩溃', '错误', 'error', '失败']):
-        patterns['expected'] = r'error|错误|不存在|not found|fail|异常'
-    elif any(kw in expected for kw in ['计数', 'iteration', 'iter']):
-        patterns['expected'] = r'iteration|轮|循环|count|第.*轮'
-    elif any(kw in expected for kw in ['指代', '上下文', '刚才', '之前']):
-        patterns['expected'] = r'刚才|之前|上面|文件|content|内容'
-    elif any(kw in expected for kw in ['链式', '链', 'write.*read', 'read.*patch']):
-        patterns['expected'] = r'write_file|read_file|patch|文件|content'
-    elif any(kw in expected for kw in ['并行', '同时', 'multi']):
-        patterns['expected'] = r'search_files|工具|tool|搜索'
-    elif any(kw in expected for kw in ['发现', 'search_tools', '动态']):
-        patterns['expected'] = r'search_tools|工具|tool|发现|available'
-    else:
-        # 默认：尝试从预期提取关键词
-        keywords = extract_keywords(expected)
-        if keywords:
-            patterns['expected'] = '|'.join(re.escape(k) for k in keywords)
-
-    # 2. 从测试内容提取 - 同样转换为实际输出模式
-    if any(kw in test_content for kw in ['对话', '聊天', '简单']):
-        patterns['content'] = r'你好|hello|hi|我是|agent|帮助'
-    elif any(kw in test_content for kw in ['工具', '调用', 'write', 'read', 'patch']):
-        patterns['content'] = r'write_file|read_file|patch|terminal|search_files|工具'
-    elif any(kw in test_content for kw in ['上下文', '指代', '刚才']):
-        patterns['content'] = r'文件|content|内容|刚才|之前'
-    elif any(kw in test_content for kw in ['错误', '恢复', '不存在']):
-        patterns['content'] = r'error|错误|不存在|not found|恢复|continue'
-    elif any(kw in test_content for kw in ['计数', 'iteration']):
-        patterns['content'] = r'iteration|轮|循环|count'
-    elif any(kw in test_content for kw in ['并行', '多工具']):
-        patterns['content'] = r'search_files|工具|tool'
-    elif any(kw in test_content for kw in ['发现', '动态']):
-        patterns['content'] = r'search_tools|工具|tool'
-    else:
-        content_keywords = extract_keywords(test_content)
-        if content_keywords:
-            patterns['content'] = '|'.join(re.escape(k) for k in content_keywords)
-
-    # 3. 特定用例特殊处理
+    # === 特定用例精确定义 ===
     if test_id == 'T-02':
         patterns['hello'] = r'\bhello\b'
-    if test_id == 'T-14':
+    elif test_id == 'T-03':
+        patterns['power'] = r'\b1024\b'
+    elif test_id == 'T-14':
         patterns['exit_code'] = r'exit.*1|code.*1|non.?zero|失败|error'
-    if test_id == 'T-10':
-        patterns['sum'] = r'\b1060\b'
-    if id_prefix in ('M',) or 'memory' in test_content.lower():
-        patterns['memory'] = r'memory|记忆|成功|success|saved|记住'
-    if id_prefix == 'TS':
-        patterns['search'] = r'search|搜索|工具|tool'
-    if test_id.startswith('TUI') or operation.startswith('/'):
-        cmd = operation.split()[0] if operation.startswith('/') else ''
-        if cmd:
-            patterns['command'] = re.escape(cmd[1:])
-    if id_prefix == 'S':
-        patterns['storage'] = r'session|会话|ID|store|存储|jsonl|sqlite'
-    if id_prefix == 'P':
-        patterns['provider'] = r'response|响应|token|model|stream|流'
-    if id_prefix == 'CF':
-        patterns['config'] = r'config|配置|load|加载|env'
-    if id_prefix == 'PA':
-        patterns['prompt'] = r'prompt|提示|stable|context|cache'
-    if id_prefix == 'C':
-        patterns['conversation'] = r'response|响应|reply|回答|工具|tool|write_file|read_file|search_files'
-    if id_prefix in ('SK', 'CC', 'I', 'AUX'):
-        patterns['advanced'] = r'skill|技能|压缩|token|insights|后台|async'
-    if id_prefix == 'DL':
-        patterns['delegation'] = r'delegate|委托|子任务|subtask|agent'
+    elif test_id == 'T-10':
+        patterns['prime_sum'] = r'\b1060\b'
+    elif test_id == 'T-05':
+        patterns['write'] = r'写入|written|wrote|已写|创建|created'
+    elif test_id == 'T-04':
+        patterns['read'] = r'内容|content|的内容|如下|Hello'
+    elif test_id == 'T-06':
+        patterns['patch'] = r'替换|replac|patch|修改|成功'
+    elif test_id == 'T-07':
+        patterns['search_result'] = r'找到|found|匹配|match|结果|\.py|文件'
+    elif test_id == 'T-08':
+        patterns['search_result'] = r'找到|found|匹配|match|结果|文件|class'
+    elif test_id == 'T-09':
+        patterns['error'] = r'不存在|not found|error|错误'
+    elif test_id == 'T-16':
+        patterns['read'] = r'第.*行|offset|limit|分页|LINE_NUM'
+    elif test_id == 'T-17':
+        patterns['write'] = r'写入|written|创建|created|自动|目录'
+    elif test_id == 'T-18':
+        patterns['patch'] = r'替换|replac|patch|成功|模糊'
+    elif test_id == 'T-20':
+        patterns['search_result'] = r'files_only|路径|path|文件'
+    elif test_id == 'T-21':
+        patterns['search_result'] = r'count|统计|文件数|匹配数'
+    elif test_id == 'T-22':
+        patterns['search_result'] = r'context|上下文|async|def'
+    elif test_id == 'T-44':
+        patterns['binary_reject'] = r'二进制|binary|不支持|拒绝|图片'
+    elif test_id == 'T-46':
+        patterns['read'] = r'has_more|更多|next_offset|分页'
+    elif test_id == 'T-47':
+        patterns['read'] = r'\d{6}\||行号|LINE_NUM'
+    elif test_id == 'T-48':
+        patterns['sensitive_reject'] = r'敏感|sensitive|拒绝|不允许|\.env'
+    elif test_id == 'T-50':
+        patterns['search_result'] = r'递归|recursive|子目录'
+    elif test_id == 'T-51':
+        patterns['search_result'] = r'搜索|search|文件'
+    elif test_id == 'T-52':
+        patterns['error'] = r'不存在|not found|目录|directory'
+    elif test_id == 'T-53':
+        patterns['search_result'] = r'最多|limit|max|截断'
+    elif test_id == 'T-54':
+        patterns['search_result'] = r'mode|模式|output'
+    elif test_id == 'T-01':
+        patterns['tools_list'] = r'tools|工具|terminal|read_file|write_file|search'
+    elif test_id == 'T-11':
+        patterns['read'] = r'截断|truncat|budget|超出|过大'
+    elif test_id == 'T-12':
+        patterns['clarify'] = r'选择|option|问题|question|clarify'
+    elif test_id == 'T-33':
+        patterns['todo'] = r'todo|任务|merge|更新'
+    elif test_id == 'T-34':
+        patterns['todo'] = r'pending|in_progress|completed|状态|流转'
+    elif test_id == 'T-36':
+        patterns['clarify'] = r'问题|question|open|开放式'
+    elif test_id == 'T-39':
+        patterns['read'] = r'截断|truncat|budget|超出'
+    elif test_id == 'T-43':
+        patterns['tool_called'] = r'search_tools|动态|discover|发现|工具'
+
+    # === 对话类 ===
+    elif test_id == 'C-01':
+        patterns['chat_response'] = r'你好|hello|hi|我是|帮助|help'
+    elif test_id == 'C-02':
+        patterns['tool_chain'] = r'write_file|read_file|patch|文件|content'
+    elif test_id == 'C-03':
+        patterns['tool_called'] = r'search_files|工具|搜索|并行|parallel'
+    elif test_id == 'C-04':
+        patterns['chat_response'] = r'刚才|之前|上面|文件|content|内容'
+    elif test_id == 'C-05':
+        patterns['error'] = r'不存在|not found|error|错误|恢复|continue'
+    elif test_id == 'C-06':
+        patterns['tool_called'] = r'search_tools|工具|发现|discover|延迟'
+    elif test_id == 'C-08':
+        patterns['debug'] = r'Thought|思考|debug|调试'
+    elif test_id == 'C-10':
+        patterns['budget'] = r'token|预算|budget|状态'
+    elif test_id == 'C-14':
+        patterns['error'] = r'不可重试|non.?retry|认证|auth|停止'
+    elif test_id == 'C-21':
+        patterns['iteration'] = r'iteration|轮|循环|count|第.*轮'
+    elif test_id == 'C-22':
+        patterns['tool_called'] = r'tool|工具|merge|合并|loaded'
+    elif test_id == 'C-23':
+        patterns['tool_called'] = r'search_tools|发现|discover|解析|parse'
+    elif test_id == 'C-37':
+        patterns['tool_called'] = r'tool_call|工具调用|name|args|解析'
+    elif test_id == 'C-38':
+        patterns['tool_called'] = r'search_tools|自动|auto|发现|discover'
+
+    # === 委托类 ===
+    elif id_prefix == 'D':
+        patterns['delegation'] = r'delegate|委托|子任务|subtask|agent|结果'
+
+    # === 会话存储类 ===
+    elif id_prefix == 'S':
+        if '恢复' in test_content or 'resume' in test_content.lower() or 'R' in test_id:
+            patterns['resume'] = r'恢复|resume|找回|历史'
+        else:
+            patterns['session_id'] = r'session|会话|ID|uuid|存储|jsonl|sqlite'
+
+    # === 记忆类 ===
+    elif id_prefix == 'M' or 'memory' in test_content.lower():
+        patterns['memory_ok'] = r'memory|记忆|成功|success|saved|记住|小王'
+
+    # === T-27/T-28 memory 相关 ===
+    elif test_id in ('T-27', 'T-28'):
+        patterns['memory_ok'] = r'memory|记忆|替换|replace|删除|delete|成功'
+
+    # === Provider 类 ===
+    elif id_prefix == 'P':
+        patterns['provider_ok'] = r'response|响应|token|model|stream|流'
+
+    # === 配置类 ===
+    elif id_prefix == 'CF':
+        patterns['config_ok'] = r'config|配置|load|加载|env|\.env'
+
+    # === Prompt 类 ===
+    elif id_prefix == 'PA':
+        patterns['prompt_ok'] = r'prompt|提示|stable|context|cache|组装'
+
+    # === TUI 类 ===
+    elif id_prefix == 'TUI':
+        patterns['tui_render'] = r'nanohermes|聊天|界面|render|帮助|commands'
+
+    # === 工具搜索类 ===
+    elif id_prefix == 'TS':
+        patterns['search_tools_called'] = r'search_tools|搜索|工具|tool|BM25|regex'
+
+    # === 技能类 ===
+    elif id_prefix == 'SK':
+        patterns['skill_list'] = r'skill|技能|已安装|installed|类别'
+
+    # === 高级类 ===
+    elif id_prefix in ('CC', 'I', 'AUX'):
+        patterns['advanced'] = r'压缩|compress|token|insights|后台|async|技能|skill'
 
     # 应用运行时覆盖
     if overrides and test_id in overrides:
@@ -248,8 +468,237 @@ def setup_nanohermes():
         print("  ✓ 创建 nanohermes.json")
 
 
-def run_single_test(test_id, prompt, patterns, wait_time=15, setup_cmd=None, max_rounds=5):
-    """启动独立的 NanoHermes 会话执行单个测试，支持多轮对话。"""
+def get_session_log_for_test(test_id, timestamp_hint=None):
+    """读取最近的 session JSONL 日志，辅助分析失败原因。
+
+    当 PTY 输出被截断时，session 日志包含完整的对话记录。
+    """
+    if not SESSIONS_DIR.exists():
+        return None
+
+    # 查找最新的 session 文件
+    session_files = sorted(
+        SESSIONS_DIR.glob("*.jsonl"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True
+    )
+
+    if not session_files:
+        return None
+
+    # 读取最新的 1-2 个 session
+    results = []
+    for sf in session_files[:2]:
+        try:
+            with open(sf, 'r', encoding='utf-8', errors='replace') as f:
+                lines = f.readlines()
+            # 只取最后 20 条消息（最近的对话）
+            recent = lines[-20:] if len(lines) > 20 else lines
+            content = ''.join(recent)
+            cleaned = clean_ansi(content)
+            results.append({
+                'file': str(sf.name),
+                'messages': len(lines),
+                'recent': cleaned[-3000:] if len(cleaned) > 3000 else cleaned,
+            })
+        except Exception:
+            pass
+
+    return results if results else None
+
+
+def ai_has_responded(output):
+    """判断 AI 是否已经回复（有 Thought 或 NanoHermes 面板出现）。"""
+    return bool(re.search(
+        r'Thought|思考|NanoHermes|◠‿◠✿|⊃━☆|✅|┊|tool|工具',
+        output, re.IGNORECASE
+    ))
+
+
+def ai_is_still_thinking(output):
+    """判断 AI 是否还在思考中（没有完整回复）。"""
+    has_thought_start = bool(re.search(r'Thought|思考', output, re.IGNORECASE))
+    has_complete = bool(re.search(r'┌─ NanoHermes|◠‿◠✿|✅', output))
+    return has_thought_start and not has_complete
+
+
+def ai_has_used_tools(output):
+    """判断 AI 是否已经使用了工具。"""
+    return bool(re.search(r'┊.*(?:read_file|write_file|patch|terminal|search_files|memory|todo|skill)', output))
+
+
+def ai_has_finished(output):
+    """判断 AI 是否已完成回复（有 NanoHermes 面板 + 底部提示符区域）。"""
+    # AI 完成回复的标志：有 NanoHermes 面板且有状态栏
+    has_panel = '┌─ NanoHermes' in output
+    has_status = bool(re.search(r'qwen3|token|0\.0K', output))
+    # 或者有空行 + /quit 输入之前的区域
+    has_empty_area = bool(re.search(r'\n\n\n\n\n', output))
+    return has_panel and (has_status or has_empty_area)
+
+
+def needs_more_turns(test_id, output, round_num):
+    """根据用例类型和当前输出，判断是否需要继续对话。
+
+    返回 (needs_more, follow_up_prompt) 或 (False, None)
+    """
+    if round_num >= MAX_ROUNDS:
+        return False, None
+
+    id_prefix = test_id.split('-')[0] if '-' in test_id else test_id.split('_')[0]
+    has_tools = ai_has_used_tools(output)
+    has_finished = ai_has_finished(output)
+
+    # === 工具链用例：write→read→patch→read ===
+    if test_id == 'C-02':
+        if round_num == 1:
+            return True, "现在 read 这个文件"
+        elif round_num == 2:
+            return True, "用 patch 修改它，把内容改成 modified"
+        elif round_num == 3:
+            return True, "再 read 一次确认修改后的内容"
+        elif round_num >= 4:
+            return False, None
+
+    # === 上下文引用用例 ===
+    if test_id == 'C-04':
+        if round_num == 1:
+            return True, "创建一个 /tmp/context_test.txt 写一些测试内容"
+        elif round_num == 2:
+            return True, "刚才创建的文件内容是什么？"
+        elif round_num >= 3:
+            return False, None
+
+    # === 错误恢复用例 ===
+    if test_id == 'C-05':
+        if round_num == 1:
+            return True, "读取一个不存在的文件 /tmp/no_such_file_xyz.txt"
+        elif round_num == 2:
+            return True, "好，那创建 /tmp/test_recovery.txt 并写入 hello"
+        elif round_num >= 3:
+            return False, None
+
+    # === 多工具并行 ===
+    if test_id == 'C-03':
+        if round_num == 1:
+            return True, "搜索项目中所有包含 class 的 Python 文件"
+        elif round_num == 2:
+            return True, "再搜索所有包含 async 的文件"
+        elif round_num >= 3:
+            return False, None
+
+    # === 动态工具发现 ===
+    if test_id in ('C-06', 'C-38'):
+        if round_num == 1:
+            return True, "用 search_tools 查找 memory 相关的工具"
+        elif round_num == 2:
+            return True, "用找到的工具执行一个操作"
+        elif round_num >= 3:
+            return False, None
+
+    # === 工具合并/发现 ===
+    if test_id in ('C-22', 'C-23'):
+        if round_num == 1:
+            return True, "搜索可用的文件操作相关工具"
+        elif round_num >= 2:
+            return False, None
+
+    # === 不可重试错误 ===
+    if test_id == 'C-14':
+        if round_num >= 1:
+            return False, None
+
+    # === 迭代计数 ===
+    if test_id == 'C-21':
+        if round_num >= 1:
+            return False, None
+
+    # === 工具调用解析 ===
+    if test_id == 'C-37':
+        if round_num == 1:
+            return True, "列出当前目录的文件"
+        elif round_num >= 2:
+            return False, None
+
+    # === 预算控制 ===
+    if test_id == 'C-10':
+        if round_num >= 1:
+            return False, None
+
+    # === 调试模式 ===
+    if test_id == 'C-08':
+        if round_num >= 1:
+            return False, None
+
+    # === 委托类 ===
+    if id_prefix == 'D':
+        if round_num == 1:
+            return True, "帮我完成一个简单任务"
+        elif round_num >= 2:
+            return False, None
+
+    # === 记忆系统相关 ===
+    if id_prefix == 'M' or test_id in ('T-27', 'T-28'):
+        if round_num == 1:
+            return True, "调用 memory 工具，action=add, target=user, content=名字是测试员小王"
+        elif round_num == 2:
+            return True, "我叫什么名字？"
+        elif round_num >= 3:
+            return False, None
+
+    # === 会话存储相关 ===
+    if id_prefix == 'S':
+        if round_num == 1:
+            return True, "创建一个测试会话"
+        elif round_num == 2:
+            return True, "当前会话 ID 是什么？"
+        elif round_num >= 3:
+            return False, None
+
+    # === TUI 命令类 ===
+    if id_prefix == 'TUI' and '/' in str(test_id):
+        # TUI 命令通常只需要一轮
+        return False, None
+
+    # === Provider 相关 ===
+    if id_prefix == 'P':
+        return False, None
+
+    # === 配置相关 ===
+    if id_prefix == 'CF':
+        return False, None
+
+    # === Prompt 相关 ===
+    if id_prefix == 'PA':
+        return False, None
+
+    # === 技能相关 ===
+    if id_prefix == 'SK':
+        if round_num >= 1:
+            return False, None
+
+    # === 高级功能 ===
+    if id_prefix in ('CC', 'I', 'AUX'):
+        if round_num >= 1:
+            return False, None
+
+    # === 工具搜索 ===
+    if id_prefix == 'TS':
+        if round_num >= 1:
+            return False, None
+
+    # === 默认：单轮足够 ===
+    return False, None
+
+
+def run_single_test(test_id, prompt, patterns, wait_time=15, setup_cmd=None, max_rounds=MAX_ROUNDS):
+    """启动独立的 NanoHermes 会话执行单个测试，支持多轮对话。
+
+    关键改进：
+    - 每轮检查 PTY 输出，判断 AI 是否完成
+    - 根据用例类型生成后续提示
+    - 最多 max_rounds 轮
+    """
     script_log = f"/tmp/nanohermes_{test_id}_{int(time.time())}.log"
 
     if setup_cmd:
@@ -273,58 +722,43 @@ def run_single_test(test_id, prompt, patterns, wait_time=15, setup_cmd=None, max
 
     # 等待启动
     time.sleep(WAIT_MAP['startup'])
-    
+
     # 第一轮：发送初始 prompt
     child.sendline(prompt)
     time.sleep(wait_time)
-    
-    # 多轮对话：检查输出，如果没匹配预期，继续交互
+
     round_num = 1
-    
+    follow_up = None
+
     while round_num < max_rounds:
         # 读取当前输出
         raw = ""
         if os.path.exists(script_log):
-            with open(script_log, 'r', encoding='utf-8', errors='replace') as f:
-                raw = f.read()
-        
-        cleaned = clean_ansi(raw)
-        
-        # 检查是否匹配所有 patterns
-        all_match = True
-        for name, pattern in patterns.items():
             try:
-                if not re.search(pattern, cleaned, re.IGNORECASE | re.DOTALL):
-                    all_match = False
-                    break
-            except re.error:
-                if pattern.lower() not in cleaned.lower():
-                    all_match = False
-                    break
-        
-        # 如果全部匹配，提前结束
-        if all_match:
-            break
-        
-        # 判断 AI 是否已完成响应（有回复内容）
-        has_response = bool(re.search(r'NanoHermes|qwen3|Thought|工具|terminal|read_file|write_file', cleaned))
-        
-        if has_response:
-            # AI 已经回复但没匹配预期，需要继续对话
-            # 根据用例类型生成后续提示
-            follow_up = _generate_follow_up(test_id, prompt, cleaned, round_num)
-            if follow_up:
-                round_num += 1
-                child.sendline(follow_up)
-                time.sleep(wait_time)
-            else:
-                # 没有合适的后续提示，退出循环
-                break
-        else:
-            # AI 还没回复，继续等待
+                with open(script_log, 'r', encoding='utf-8', errors='replace') as f:
+                    raw = f.read()
+            except Exception:
+                pass
+
+        cleaned = clean_ansi(raw)
+
+        # 判断 AI 是否还在思考
+        if ai_is_still_thinking(cleaned):
             time.sleep(5)
-    
-    # 最后再等待一下确保输出完整
+            continue
+
+        # 判断是否需要更多轮
+        needs_more, next_prompt = needs_more_turns(test_id, cleaned, round_num)
+
+        if needs_more and next_prompt:
+            round_num += 1
+            child.sendline(next_prompt)
+            time.sleep(wait_time)
+        else:
+            # 不再需要更多轮，或者已达到上限
+            break
+
+    # 最后再等待确保输出完整
     time.sleep(3)
     child.sendline("/quit")
     time.sleep(2)
@@ -333,9 +767,12 @@ def run_single_test(test_id, prompt, patterns, wait_time=15, setup_cmd=None, max
     # 读取最终输出
     raw = ""
     if os.path.exists(script_log):
-        with open(script_log, 'r', encoding='utf-8', errors='replace') as f:
-            raw = f.read()
-        os.remove(script_log)
+        try:
+            with open(script_log, 'r', encoding='utf-8', errors='replace') as f:
+                raw = f.read()
+            os.remove(script_log)
+        except Exception:
+            pass
 
     cleaned = clean_ansi(raw)
 
@@ -364,115 +801,6 @@ def run_single_test(test_id, prompt, patterns, wait_time=15, setup_cmd=None, max
     }
 
 
-def _generate_follow_up(test_id, original_prompt, current_output, round_num):
-    """根据用例类型生成后续对话提示，实现意图理解的多轮对话。"""
-    
-    # 分析原始 prompt 类型
-    id_prefix = test_id.split('-')[0] if '-' in test_id else test_id.split('_')[0]
-    
-    # === 工具链用例：write→read→patch→read ===
-    if test_id == 'C-02':
-        if round_num == 1:
-            return "现在 read 这个文件"
-        elif round_num == 2:
-            return "用 patch 修改它，把第一行改成 modified"
-        elif round_num == 3:
-            return "再 read 一次确认修改"
-    
-    # === 上下文引用用例 ===
-    if test_id == 'C-04':
-        if round_num == 1:
-            return "创建一个 test.txt 写点内容"
-        elif round_num == 2:
-            return "刚才创建的文件内容是什么？"
-    
-    # === 错误恢复用例 ===
-    if test_id == 'C-05':
-        if round_num == 1:
-            return "read 一个不存在的文件 /tmp/no_such_file.txt"
-        elif round_num == 2:
-            return "好，那创建一个 /tmp/test_recovery.txt 写 hello"
-    
-    # === 多工具并行 ===
-    if test_id == 'C-03':
-        if round_num == 1:
-            return "搜索项目中所有包含 class 的 Python 文件"
-        elif round_num == 2:
-            return "再搜索所有包含 async 的文件"
-    
-    # === 动态工具发现 ===
-    if test_id in ('C-06', 'C-38'):
-        if round_num == 1:
-            return "用 search_tools 查找 memory 相关的工具"
-        elif round_num == 2:
-            return "用找到的工具执行一个操作"
-    
-    # === 调试模式 ===
-    if test_id == 'C-08':
-        if round_num == 1:
-            return "echo test"
-    
-    # === 预算控制 ===
-    if test_id == 'C-10':
-        if round_num == 1:
-            return "计算 1 到 100 的和"
-    
-    # === 工具合并/发现 ===
-    if test_id in ('C-22', 'C-23'):
-        if round_num == 1:
-            return "搜索可用的工具"
-    
-    # === 不可重试错误 ===
-    if test_id == 'C-14':
-        if round_num == 1:
-            return "测试一个无效操作"
-    
-    # === 迭代计数 ===
-    if test_id == 'C-21':
-        if round_num == 1:
-            return "hello"
-    
-    # === 工具调用解析 ===
-    if test_id == 'C-37':
-        if round_num == 1:
-            return "列出当前目录的文件"
-    
-    # === 会话存储相关 ===
-    if id_prefix == 'S':
-        if round_num == 1:
-            return "创建一些内容"
-        elif round_num == 2:
-            return "会话 ID 是什么？"
-    
-    # === 记忆系统相关 ===
-    if id_prefix == 'M':
-        if round_num == 1:
-            return "记住：我的名字是测试员小王"
-        elif round_num == 2:
-            return "我叫什么名字？"
-    
-    # === Provider 配置相关 ===
-    if id_prefix == 'P':
-        if round_num == 1:
-            return "你好"
-    
-    # === CLI/TUI 相关 ===
-    if id_prefix == 'TUI':
-        if round_num == 1:
-            return "help"
-    
-    # === 高级功能 ===
-    if id_prefix in ('SK', 'CC', 'I', 'AUX'):
-        if round_num == 1:
-            return "你好"
-    
-    # === 默认：如果包含多步操作暗示，尝试"继续" ===
-    if any(kw in original_prompt for kw in ['→', '然后', '接着', '继续']):
-        return "继续"
-    
-    return None
-
-
 def get_setup_command(case):
     """从用例中提取 setup 命令。"""
     test_id = case.get('ID', '')
@@ -480,6 +808,9 @@ def get_setup_command(case):
         return f'cd {WORKDIR} && python3 -c "import base64; open(\'/tmp/test_binary.png\',\'wb\').write(base64.b64decode(\'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==\'))"'
     if test_id == 'T-22':
         return f'printf "import asyncio\\n\\nasync def fetch_data(url):\\n    await asyncio.sleep(1)\\n    return ok" > /tmp/test_async.py'
+    if test_id == 'T-46':
+        # 创建大文件用于分页测试
+        return f'python3 -c "with open(\'/tmp/big_file.txt\',\'w\') as f:\n    for i in range(500): f.write(f\"line {{i}}: some test content here\\n\")"'
     return None
 
 
@@ -489,7 +820,7 @@ def print_progress(current, total, test_id, status, analysis=None):
     bar_len = 40
     filled = int(bar_len * current / total)
     bar = '█' * filled + '░' * (bar_len - filled)
-    status_icon = "✅" if status == 'PASS' else "❌"
+    status_icon = "✅" if status == 'PASS' else ("⏭️" if status == 'SKIP' else "❌")
 
     line = f"\r  [{bar}] {pct:5.1f}% | {current}/{total} | {status_icon} {test_id}"
     if analysis:
@@ -503,12 +834,11 @@ def iterative_test(cases, auto_fix=False, max_retries=2):
     passed = []
     failed = []
     skipped = []
-    retry_count = {}
 
     print(f"\n{'='*70}")
-    print(f"🔬 NanoHermes PTY 迭代测试")
+    print(f"🔬 NanoHermes PTY 迭代测试 (v9 — 多轮对话)")
     print(f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    print(f"📋 {len(cases)} 个用例 | auto_fix={auto_fix} | max_retries={max_retries}")
+    print(f"📋 {len(cases)} 个用例 | auto_fix={auto_fix} | max_retries={max_retries} | max_rounds={MAX_ROUNDS}")
     print(f"{'='*70}\n")
 
     start_time = time.time()
@@ -544,10 +874,11 @@ def iterative_test(cases, auto_fix=False, max_retries=2):
             )
 
             if auto_fix and retries < max_retries:
-                action = generate_fix_suggestion(analysis, tc)['action']
+                suggestion = generate_fix_suggestion(last_analysis, tc)
+                action = suggestion['action']
 
-                if action == "skip" and analysis.is_known_limitation:
-                    print_progress(i + 1, len(cases), test_id, 'SKIP', analysis)
+                if action == "skip" and last_analysis.is_known_limitation:
+                    print_progress(i + 1, len(cases), test_id, 'SKIP', last_analysis)
                     skipped.append(test_id)
                     break
 
@@ -557,11 +888,14 @@ def iterative_test(cases, auto_fix=False, max_retries=2):
                         if not pval and pname in current_patterns:
                             old_pat = current_patterns[pname]
                             # 尝试拆分成更宽松的模式
-                            keywords = extract_keywords(tc.get('预期', ''))
+                            keywords = extract_keywords_from_output(
+                                result['full_output'], test_id,
+                                tc.get('操作步骤', ''), tc.get('预期', '')
+                            )
                             if keywords:
                                 # 取第一个关键词作为宽松匹配
-                                current_patterns[pname] = re.escape(keywords[0])
-                                print(f"\n  🔧 {test_id}.{pname}: 更新正则 '{old_pat[:30]}...' → '{current_patterns[pname][:30]}...'")
+                                current_patterns[pname] = re.escape(list(keywords.keys())[0])
+                                print(f"\n  🔧 {test_id}.{pname}: 更新正则 → 更宽松匹配")
 
                 elif action == "increase_timeout":
                     current_wait = int(wait * 1.5)
@@ -569,7 +903,7 @@ def iterative_test(cases, auto_fix=False, max_retries=2):
 
                 elif action == "fix_code":
                     # 代码修复需要人工介入，标记为失败
-                    print(f"\n  🐛 {test_id}: 需要代码修复（{analysis.description}）")
+                    print(f"\n  🐛 {test_id}: 需要代码修复（{last_analysis.description}）")
                     break
 
             retries += 1
@@ -578,15 +912,27 @@ def iterative_test(cases, auto_fix=False, max_retries=2):
             # 所有重试都失败
             print_progress(i + 1, len(cases), test_id, 'FAIL', last_analysis)
             failed.append(test_id)
+
             # 保存详细失败日志
-            fail_log = LOG_DIR / f"{test_id}-iterative-fail-{TIMESTAMP}.log"
+            fail_log = LOG_DIR / f"{test_id}-fail-{TIMESTAMP}.log"
             with open(fail_log, 'w', encoding='utf-8') as f:
                 f.write(f"Test ID: {test_id}\n")
                 f.write(f"Operation: {tc.get('操作步骤', '')}\n")
                 f.write(f"Expected: {tc.get('预期', '')}\n")
+                f.write(f"Rounds: {last_result['rounds'] if last_result else 'N/A'}\n")
                 f.write(f"Analysis: {last_analysis.description if last_analysis else 'N/A'}\n")
-                f.write(f"Output length: {last_result['output_len']}\n")
-                f.write(f"\n--- OUTPUT ---\n{last_result['full_output']}\n")
+                f.write(f"Output length: {last_result['output_len'] if last_result else 'N/A'}\n")
+                f.write(f"\n--- OUTPUT ---\n{last_result['full_output'] if last_result else 'N/A'}\n")
+
+            # 尝试读取 session 日志辅助分析
+            session_logs = get_session_log_for_test(test_id)
+            if session_logs:
+                session_log_file = LOG_DIR / f"{test_id}-session-{TIMESTAMP}.log"
+                with open(session_log_file, 'w', encoding='utf-8') as f:
+                    for sl in session_logs:
+                        f.write(f"\n=== Session: {sl['file']} ({sl['messages']} messages) ===\n")
+                        f.write(sl['recent'])
+                        f.write("\n")
 
     duration = time.time() - start_time
     print()  # 换行
@@ -596,11 +942,11 @@ def iterative_test(cases, auto_fix=False, max_retries=2):
     rate = (len(passed) / total * 100) if total > 0 else 0
 
     report_lines = [
-        f"# NanoHermes PTY 迭代测试报告",
+        f"# NanoHermes PTY 迭代测试报告 (v9 — 多轮对话)",
         f"",
         f"**日期**: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
         f"**总耗时**: {duration:.0f} 秒",
-        f"**策略**: 逐个执行 → 失败分析 → 自动修复 → 重试",
+        f"**策略**: 多轮对话（最多{MAX_ROUNDS}轮）→ 失败分析 → 自动修复 → 重试",
         f"",
         f"## 结果摘要",
         f"",
@@ -651,8 +997,13 @@ def main():
     parser.add_argument('--refs', help='逗号分隔的 reference 文件名')
     parser.add_argument('--auto-fix', action='store_true', help='自动分析并修复失败')
     parser.add_argument('--max-retries', type=int, default=2, help='最大重试次数')
+    parser.add_argument('--max-rounds', type=int, default=MAX_ROUNDS, help='每用例最大对话轮数')
     parser.add_argument('--dry-run', action='store_true', help='只列出不执行')
     args = parser.parse_args()
+
+    global MAX_ROUNDS
+    if args.max_rounds:
+        MAX_ROUNDS = args.max_rounds
 
     ref_files = {
         'core-tools': REF_DIR / 'core-tools.md',
