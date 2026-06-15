@@ -22,8 +22,19 @@ src/tools/
 │   ├── result_budget.py       - 结果预算管理（头尾保留截断）
 │   └── context_modifier.py    - 上下文修改器（延迟应用 + 去重）
 └── impls/               # 具体工具实现
-    ├── terminal.py, file_tool.py, memory_tool.py, ...
-    └── web_search_tool.py (新增)
+    ├── terminal.py          - 终端工具（subprocess + 危险检测）
+    ├── file_tool.py         - 文件读写（read_file, write_file, patch）
+    ├── memory_tool.py       - 记忆工具（memory）
+    ├── code_execution_tool.py - 代码执行（execute_code）
+    ├── process_tool.py      - 后台进程管理（process）
+    ├── todo_tool.py         - 任务计划（todo）
+    ├── session_search_tool.py - 会话搜索（session_search）
+    ├── clarify_tool.py      - 澄清工具（clarify）
+    ├── skills_tool.py       - 技能管理（skill_manage, skill_view, skills_list）
+    ├── delegation_tool.py   - 子 Agent 委托（delegate_task）
+    ├── cronjob_tool.py      - 定时任务管理（cronjob）
+    ├── web_search_tool.py   - 网页搜索（web_search, DuckDuckGo）
+    └── mcp_client_tool.py   - MCP 客户端接口（call_mcp_tool, list_mcp_tools）
 ```
 
 ## Components

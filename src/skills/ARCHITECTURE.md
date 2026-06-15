@@ -4,6 +4,20 @@
 技能系统，支持 SKILL.md 标准格式、渐进式披露、安全扫描、来源追踪、预处理、Curator 后台自进化。
 使 Agent 能够动态加载技能并自我进化。
 
+## 目录结构
+
+```
+src/skills/
+├── __init__.py                # 模块入口，re-export 核心 API
+├── loader.py                  # SkillLoader（SKILL.md 解析、frontmatter 提取）
+├── manager.py                 # SkillManager（技能编排器，CRUD + 分类 + 提示注入）
+├── curator.py                 # Curator（后台生命周期管理，active→stale→archived）
+├── progressive_disclosure.py  # 渐进式披露（三层加载 + 两层缓存 + 条件激活 + 平台过滤）
+├── security.py                # 安全体系（SkillGuard + SkillProvenance + SkillAstAuditor）
+├── preprocessing.py           # 预处理（模板变量替换 + 内联 shell 展开）
+└── review_task.py             # 技能审查后台任务（BackgroundTaskScheduler 注册）
+```
+
 ## Components
 
 ```
@@ -473,5 +487,13 @@ for skill_file in sorted(self.skills_dir.rglob("SKILL.md")):
 
 ## Dependencies
 
-- Internal: src/tools/impls/skills_tool.py (工具接口), src/conversation/assembler.py (提示集成)
+- Internal: src/tools/impls/skills_tool.py (工具接口), src/conversation/assembler.py (提示集成), src/background/scheduler.py (后台任务调度)
 - External: None
+
+## review_task（技能审查后台任务）
+
+通过 `BackgroundTaskScheduler` 注册，在对话结束后自动审查并创建/更新技能：
+- 触发条件：对话轮数 >= 10 且距离上次审查 >= 30 分钟
+- 使用 `fork_agent` 进行技能审查，支持工具调用循环（skill_manage）
+- 审查最近 20 条消息，每条截断到 500 字符
+- 通过 `_SKILL_REVIEW_PROMPT` 引导 Agent 识别可复用的工作流并创建技能

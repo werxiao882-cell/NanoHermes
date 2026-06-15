@@ -125,21 +125,19 @@ def _scroll(db, session_id: str, around_message_id: int, window: int) -> str:
 def _browse_recent(db, limit: int) -> str:
     """浏览最近会话。"""
     try:
-        # 获取所有会话
         cursor = db.conn.execute(
-            "SELECT * FROM sessions WHERE ended_at IS NOT NULL ORDER BY created_at DESC LIMIT ?",
+            "SELECT id, title, started_at, ended_at, message_count, model "
+            "FROM sessions WHERE ended_at IS NOT NULL ORDER BY started_at DESC LIMIT ?",
             (limit + 5,)
         )
         sessions = [dict(row) for row in cursor.fetchall()]
         
         results = []
         for session in sessions:
-            sid = session.get("session_id")
-            # 获取消息预览
+            sid = session.get("id")
             messages = db.get_messages(sid)
             preview = ""
             if messages:
-                # 取前几条消息作为预览
                 first_msgs = messages[:3]
                 preview = " | ".join([
                     f"{m.get('role')}: {(m.get('content') or '')[:50]}"
@@ -149,9 +147,9 @@ def _browse_recent(db, limit: int) -> str:
             results.append({
                 "session_id": sid,
                 "title": session.get("title") or "Untitled",
-                "created_at": session.get("created_at"),
+                "started_at": session.get("started_at"),
                 "ended_at": session.get("ended_at"),
-                "message_count": len(messages),
+                "message_count": session.get("message_count", len(messages)),
                 "preview": preview[:200],
             })
             
@@ -203,7 +201,7 @@ def _search_discovery(db, query: str, limit: int, role_filter: str = "") -> str:
                 session_results[sid] = {
                     "session_id": sid,
                     "title": session_info.get("title") if session_info else "Untitled",
-                    "created_at": session_info.get("created_at") if session_info else None,
+                    "started_at": session_info.get("started_at") if session_info else None,
                     "matches": [],
                 }
             

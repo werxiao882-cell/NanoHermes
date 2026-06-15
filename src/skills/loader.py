@@ -23,10 +23,13 @@ platforms: [linux, macos]
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # 尝试导入 yaml 库（可选依赖）
 try:
@@ -83,16 +86,17 @@ class SkillLoader:
             解析后的 Skill 实例。
 
         Raises:
-            ValueError: 如果缺少 frontmatter 或格式无效。
+            ValueError: 如果缺少 name 字段且无法推断。
         """
-        text = Path(path).read_text(encoding="utf-8")
-        frontmatter, body = self._parse_frontmatter(text)
+        path = Path(path)
+        text = path.read_text(encoding="utf-8")
+        frontmatter, body = self._parse_frontmatter(text, str(path))
 
         name = frontmatter.get("name", "")
         description = frontmatter.get("description", "")
 
         if not name:
-            raise ValueError(f"SKILL.md 缺少 name 字段: {path}")
+            raise ValueError(f"SKILL.md 缺少 name 字段且无法推断: {path}")
 
         # 处理 platforms 字段（可能是字符串或列表）
         platforms = frontmatter.get("platforms")
@@ -127,7 +131,7 @@ class SkillLoader:
             path=str(path),
         )
 
-    def _parse_frontmatter(self, text: str) -> tuple[dict[str, Any], str]:
+    def _parse_frontmatter(self, text: str, path: str = "") -> tuple[dict[str, Any], str]:
         """解析 YAML frontmatter。
 
         参考 Hermes Agent 实现：
@@ -135,9 +139,11 @@ class SkillLoader:
         2. 查找 --- 分隔符
         3. 优先使用 yaml.safe_load 解析
         4. 回退到简单 key:value 解析
+        5. 如果缺少 frontmatter，从目录名或首个标题推断 name
 
         Args:
             text: SKILL.md 全文。
+            path: 文件路径（用于推断 name）。
 
         Returns:
             (frontmatter_dict, body) 元组。
@@ -148,7 +154,30 @@ class SkillLoader:
         # 查找 frontmatter 分隔符
         match = re.match(r"^---\n(.*?)\n---\n(.*)$", text, re.DOTALL)
         if not match:
-            raise ValueError("SKILL.md 缺少 YAML frontmatter")
+            # 宽松模式：缺少 frontmatter 时，尝试从目录名或首个标题推断 name
+            logger.debug(f"SKILL.md 缺少 YAML frontmatter，将从目录名推断: {path}")
+            frontmatter = {}
+            body = text.strip()
+            
+            # 从目录名推断 name
+            if path:
+                from pathlib import Path
+                dir_name = Path(path).parent.name
+                if dir_name and dir_name != "skills":
+                    frontmatter["name"] = dir_name
+            
+            # 从首个 # 标题推断 name（如果目录名推断失败）
+            if "name" not in frontmatter:
+                title_match = re.search(r"^#\s+(.+)$", body, re.MULTILINE)
+                if title_match:
+                    frontmatter["name"] = slugify(title_match.group(1).strip())
+            
+            # 如果仍然没有 name，使用文件名
+            if "name" not in frontmatter and path:
+                from pathlib import Path
+                frontmatter["name"] = Path(path).stem
+            
+            return frontmatter, body
 
         yaml_text = match.group(1)
         body = match.group(2).strip()
