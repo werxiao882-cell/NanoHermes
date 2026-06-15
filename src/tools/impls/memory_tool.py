@@ -1,15 +1,13 @@
 """Memory 工具：持久记忆。
 
-基于 FileMemoryProvider 实现跨会话持久记忆。
-支持两个目标：
-- memory: Agent 的长期记忆（环境事实、项目约定等）
-- user: 用户画像和偏好
+委托 MemoryStore 执行所有记忆操作，不再直接操作文件。
+通过全局单例访问 MemoryStore（工具注册时无法注入实例），
+FileMemoryProvider 通过构造函数注入同一个 MemoryStore 实例。
 
-操作：
-- add: 添加新条目
-- replace: 替换现有条目
-- remove: 删除条目
-- view: 查看记忆内容
+设计理由：
+memory_tool.py 通过全局单例访问 MemoryStore（工具注册时无法注入实例），
+FileMemoryProvider 通过构造函数注入 MemoryStore（由 TUIApp 创建并传递），
+两者指向同一个 MemoryStore 实例（通过模块级缓存保证）。
 """
 
 from __future__ import annotations
@@ -17,122 +15,37 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from src.tools.core.registry import register_tool
 
 logger = logging.getLogger(__name__)
 
-# 记忆文件存储路径
-MEMORY_DIR = Path.home() / ".nanohermes" / "memory"
-MEMORY_FILE = MEMORY_DIR / "MEMORY.md"
-USER_FILE = MEMORY_DIR / "USER.md"
+_store: Optional[Any] = None
 
 
-def _ensure_memory_dir():
-    """确保记忆目录和文件存在。"""
-    MEMORY_DIR.mkdir(parents=True, exist_ok=True)
-    if not MEMORY_FILE.exists():
-        MEMORY_FILE.write_text("# Agent Memory\n\n", encoding="utf-8")
-    if not USER_FILE.exists():
-        USER_FILE.write_text("# User Profile\n\n", encoding="utf-8")
+def get_memory_store() -> Any:
+    """获取全局 MemoryStore 单例。
+
+    延迟初始化：首次调用时创建 MemoryStore 并从磁盘加载。
+    如果已通过 set_memory_store() 注入，则返回注入的实例。
+    """
+    global _store
+    if _store is None:
+        from src.memory.memory_store import MemoryStore
+        memory_dir = Path.home() / ".nanohermes" / "memory"
+        _store = MemoryStore(memory_dir)
+        _store.load_from_disk()
+    return _store
 
 
-def _get_file_path(target: str) -> Path:
-    """获取目标文件路径。"""
-    if target == "user":
-        return USER_FILE
-    return MEMORY_FILE
+def set_memory_store(store: Any) -> None:
+    """注入 MemoryStore 实例（由 TUIApp 或 FileMemoryProvider 调用）。
 
-
-def _read_file(path: Path) -> str:
-    """读取文件内容。"""
-    if path.exists():
-        return path.read_text(encoding="utf-8")
-    return ""
-
-
-def _write_file(path: Path, content: str):
-    """写入文件内容。"""
-    path.write_text(content, encoding="utf-8")
-
-
-def _add_entry(target: str, content: str) -> dict:
-    """添加记忆条目。"""
-    path = _get_file_path(target)
-    _ensure_memory_dir()
-    
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(f"\n## Entry\n\n{content}\n")
-    
-    return {
-        "status": "success",
-        "action": "add",
-        "target": target,
-        "message": f"Added entry to {target} memory."
-    }
-
-
-def _replace_entry(target: str, old_text: str, new_content: str) -> dict:
-    """替换记忆条目。"""
-    path = _get_file_path(target)
-    content = _read_file(path)
-    
-    if old_text not in content:
-        return {
-            "status": "error",
-            "message": f"Old text not found in {target} memory. Use exact text to identify the entry."
-        }
-    
-    new_content = content.replace(old_text, new_content, 1)
-    _write_file(path, new_content)
-    
-    return {
-        "status": "success",
-        "action": "replace",
-        "target": target,
-        "message": f"Replaced entry in {target} memory."
-    }
-
-
-def _remove_entry(target: str, old_text: str) -> dict:
-    """删除记忆条目。"""
-    path = _get_file_path(target)
-    content = _read_file(path)
-    
-    if old_text not in content:
-        return {
-            "status": "error",
-            "message": f"Old text not found in {target} memory. Use exact text to identify the entry."
-        }
-    
-    new_content = content.replace(old_text, "", 1)
-    _write_file(path, new_content)
-    
-    return {
-        "status": "success",
-        "action": "remove",
-        "target": target,
-        "message": f"Removed entry from {target} memory."
-    }
-
-
-def _view_memory(target: str = "") -> dict:
-    """查看记忆内容。"""
-    result = {}
-    
-    if not target or target == "memory":
-        result["memory"] = _read_file(MEMORY_FILE)
-    
-    if not target or target == "user":
-        result["user"] = _read_file(USER_FILE)
-    
-    return {
-        "status": "success",
-        "action": "view",
-        "content": result,
-        "message": "Current memory contents."
-    }
+    确保 memory_tool.py 和 FileMemoryProvider 共享同一个 MemoryStore 实例。
+    """
+    global _store
+    _store = store
 
 
 def memory(
@@ -145,74 +58,63 @@ def memory(
     **kwargs,
 ) -> str:
     """持久记忆工具。
-    
-    保存跨会话的持久信息。
-    
+
+    保存跨会话的持久信息。委托 MemoryStore 执行所有操作。
+
     何时保存（主动执行，不要等待被要求）：
     - 用户纠正你或说"记住这个"/"别再那样做"
     - 用户分享偏好、习惯或个人信息
     - 发现环境信息（OS、已安装工具、项目结构）
     - 学习到特定用户的约定、API 怪癖或工作流
-    
+
     优先级：用户偏好和纠正 > 环境事实 > 程序性知识
     """
     if target not in ("memory", "user"):
         return json.dumps({
-            "status": "error",
-            "message": f"Invalid target '{target}'. Use 'memory' or 'user'."
+            "success": False,
+            "error": f"Invalid target '{target}'. Use 'memory' or 'user'."
         }, ensure_ascii=False)
-    
+
     try:
+        store = get_memory_store()
+
         if action == "add":
-            if not content:
-                return json.dumps({
-                    "status": "error",
-                    "message": "Content is required for 'add' action."
-                }, ensure_ascii=False)
-            result = _add_entry(target, content)
-            
+            result = store.add(target, content)
+
         elif action == "replace":
-            if not old_text:
-                return json.dumps({
-                    "status": "error",
-                    "message": "old_text is required for 'replace' action."
-                }, ensure_ascii=False)
-            if not content:
-                return json.dumps({
-                    "status": "error",
-                    "message": "content is required for 'replace' action."
-                }, ensure_ascii=False)
-            result = _replace_entry(target, old_text, content)
-            
+            result = store.replace(target, old_text, content)
+
         elif action == "remove":
-            if not old_text:
-                return json.dumps({
-                    "status": "error",
-                    "message": "old_text is required for 'remove' action."
-                }, ensure_ascii=False)
-            result = _remove_entry(target, old_text)
-            
+            result = store.remove(target, old_text)
+
         elif action == "view":
-            result = _view_memory(target)
-            
+            entries_m = store.memory_entries
+            entries_u = store.user_entries
+            result = {
+                "success": True,
+                "action": "view",
+                "memory": entries_m,
+                "user": entries_u,
+                "message": "Current memory contents.",
+            }
+
         else:
             return json.dumps({
-                "status": "error",
-                "message": f"Unknown action '{action}'. Use: add, replace, remove, view"
+                "success": False,
+                "error": f"Unknown action '{action}'. Use: add, replace, remove, view"
             }, ensure_ascii=False)
-        
+
         return json.dumps(result, ensure_ascii=False)
-        
+
     except Exception as e:
         logger.error(f"Memory tool error: {e}", exc_info=True)
         return json.dumps({
-            "status": "error",
-            "message": f"Memory operation failed: {str(e)}"
+            "success": False,
+            "error": f"Memory operation failed: {str(e)}"
         }, ensure_ascii=False)
 
 
 def check_memory_requirements() -> bool:
-    """Memory 工具没有外部要求，始终可用。"""
     return True
 
 

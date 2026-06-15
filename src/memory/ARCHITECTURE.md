@@ -136,14 +136,39 @@
 
 ```
 src/memory/
-├── __init__.py          # 模块入口
-├── provider.py          # MemoryProvider ABC 抽象基类
-├── manager.py           # MemoryManager 编排器（完整版，Fan-out 容错）
-├── managers.py          # MemoryManager 精简版（基础编排）
-├── file_provider.py     # FileMemoryProvider（MEMORY.md / USER.md）
+├── __init__.py          # 模块入口，re-export 核心 API
+├── memory_store.py      # MemoryStore 唯一数据源（§ 分隔符、文件锁、原子写入、漂移检测）
+├── provider.py          # MemoryProvider ABC 抽象基类（17 个方法）
+├── manager.py           # MemoryManager 编排器（完整版，Fan-out 容错 + 工具路由）
+├── managers.py          # MemoryManager 精简版（基础编排，无工具路由）
+├── file_provider.py     # FileMemoryProvider（委托 MemoryStore）
 ├── context_fencing.py   # 上下文隔离（标签清洗、流式清洗器）
-└── event_handler.py     # MemoryEventHandler（EventBus 订阅桥接）
+├── event_handler.py     # MemoryEventHandler（EventBus 订阅桥接）
+└── flush_task.py        # 记忆刷写后台任务（BackgroundTaskScheduler 注册）
 ```
+
+### MemoryStore（唯一数据源）
+
+三条并行读写路径（memory_tool, FileMemoryProvider, PromptAssembler）各自独立操作文件，
+数据一致性无法保证。MemoryStore 统一为单一数据源，所有路径通过委托调用。
+
+核心能力：
+- § 分隔符条目解析（支持多行内容）
+- 跨平台文件锁（fcntl / msvcrt / 降级无锁）
+- 原子写入（tempfile + os.replace）
+- 漂移检测（外部修改拒绝覆盖 + .bak 备份）
+- 内容扫描（10 种注入/渗出模式检测 + 不可见 Unicode 检测）
+- 去重和使用量追踪
+- 冻结快照（系统提示使用，会话内不变）
+
+### 双 MemoryManager 说明
+
+| 文件 | 类 | 用途 |
+|------|-----|------|
+| `manager.py` | MemoryManager（完整版） | Fan-out 容错 + 工具 schema 路由 + 事件钩子，生产环境使用 |
+| `managers.py` | MemoryManager（精简版） | 基础编排（add_provider/initialize/prefetch/sync/shutdown），无工具路由 |
+
+`__init__.py` 导入的是 `manager.py` 的完整版。`managers.py` 保留为轻量替代实现。
 
 ### MemoryEventHandler
 
@@ -156,6 +181,14 @@ src/memory/
 | LOOP_END | sync_all + queue_prefetch_all（仅完成的轮次） |
 | INTERRUPT | 跳过 sync（中断的轮次不同步） |
 | PRE_COMPRESS | on_pre_compress，压缩前提取信息 |
+
+### flush_task（记忆刷写后台任务）
+
+通过 `BackgroundTaskScheduler` 注册，在对话结束后自动提取记忆：
+- 触发条件：消息数 >= 10（5 轮对话）
+- 使用 `fork_agent` 进行记忆提取，支持工具调用循环
+- 提取最近 20 条消息，每条截断到 500 字符
+- 通过 `FileMemoryProvider.extract_memories_from_messages()` 执行实际提取
 
 ## Dependencies
 - Internal: src/conversation/events.py (EventBus), src/config/ (配置模块)

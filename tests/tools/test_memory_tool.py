@@ -6,43 +6,54 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from src.tools.impls.memory_tool import memory
+from src.memory.memory_store import MemoryStore
+from src.tools.impls.memory_tool import memory, set_memory_store, get_memory_store
 
 
 class TestMemoryTool:
     """Tests for memory tool function."""
 
     def test_memory_add(self):
-        """Test adding memory."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch("src.tools.impls.memory_tool.MEMORY_DIR", Path(tmpdir)), \
-                 patch("src.tools.impls.memory_tool.MEMORY_FILE", Path(tmpdir) / "MEMORY.md"), \
-                 patch("src.tools.impls.memory_tool.USER_FILE", Path(tmpdir) / "USER.md"):
+            store = MemoryStore(Path(tmpdir))
+            store.load_from_disk()
+            set_memory_store(store)
+            try:
                 result = json.loads(memory(action="add", content="User likes Python"))
-                assert result["status"] in ("memory_requested", "success")
-                assert result["action"] == "add"
+                assert result["success"] is True
+                assert "User likes Python" in store.memory_entries
+            finally:
+                set_memory_store(None)
 
     def test_memory_view(self):
-        """Test viewing memory."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch("src.tools.impls.memory_tool.MEMORY_DIR", Path(tmpdir)), \
-                 patch("src.tools.impls.memory_tool.MEMORY_FILE", Path(tmpdir) / "MEMORY.md"), \
-                 patch("src.tools.impls.memory_tool.USER_FILE", Path(tmpdir) / "USER.md"):
+            store = MemoryStore(Path(tmpdir))
+            store.load_from_disk()
+            set_memory_store(store)
+            try:
                 result = json.loads(memory(action="view"))
-                assert result["status"] in ("memory_requested", "success")
+                assert result["success"] is True
                 assert result["action"] == "view"
+            finally:
+                set_memory_store(None)
 
     def test_memory_via_dispatcher(self):
-        """Test memory tool via dispatcher."""
         from src.tools.core.registry import ToolRegistry
         from src.tools.impls import memory_tool
         import importlib
         from src.tools.core.dispatcher import dispatch
 
-        ToolRegistry.clear()
-        importlib.reload(memory_tool)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = MemoryStore(Path(tmpdir))
+            store.load_from_disk()
+            set_memory_store(store)
 
-        result = dispatch("memory", {"action": "view"})
-        data = json.loads(result)
-        assert data["status"] in ("memory_requested", "success", "error")
+            ToolRegistry.clear()
+            importlib.reload(memory_tool)
 
+            try:
+                result = dispatch("memory", {"action": "view"})
+                data = json.loads(result)
+                assert data["success"] is True or "error" in data
+            finally:
+                set_memory_store(None)
