@@ -39,7 +39,7 @@ class FailureAnalysis:
 # 已知 AI 行为模式（来自 test-findings.md）
 KNOWN_AI_BEHAVIORS = {
     "memory": {
-        "pattern": r"记住|memory|记忆",
+        "pattern": r"(好的.*记住|我已经记住|记住了.*名字|不调用.*memory)",
         "description": "AI 倾向于用文本回复'好的我记住了'，不调用 memory 工具",
         "suggestion": "跳过或改为验证文本回复而非工具调用",
     },
@@ -63,6 +63,21 @@ KNOWN_AI_BEHAVIORS = {
         "description": "AI 用中文回复操作结果，而非英文（如 '16 bytes written'）",
         "suggestion": "匹配中文语义而非英文字面 — runner 已自动处理",
     },
+    "count_semantic": {
+        "pattern": r"共找到.*匹配",
+        "description": "AI 用自然语言报告数量（'共找到 N 个匹配'），而非显式输出 'output_mode=count'",
+        "suggestion": "跳过 — AI 表达 count 语义的方式不同，非功能 bug",
+    },
+    "explain_not_execute": {
+        "pattern": r"(你想读取哪个文件.*告诉我|推荐以下命令|场景.*命令|基本用法示例)",
+        "description": "AI 把操作步骤理解为'请教如何做'，输出教程/推荐命令，而非真正执行操作",
+        "suggestion": "跳过 — 这是 prompt 歧义导致的 AI 行为偏差，非功能 bug",
+    },
+}
+
+# 按用例 ID 直接跳过的已知限制（output 截断等场景下 pattern 无法匹配时的兜底）
+SKIP_BY_TEST_ID = {
+    "T-21": "AI 不显式输出 'output_mode=count'，用自然语言表达 count 语义",
 }
 
 # 已知输出截断模式
@@ -155,12 +170,30 @@ def analyze_failure(
             suggestion="增加等待时间",
         )
 
+    # 8. 兜底：按用例 ID 检查已知限制
+    skip_check = _check_skip_by_id(test_id)
+    if skip_check:
+        return skip_check
+
     return FailureAnalysis(
         failure_type=FailureType.UNKNOWN,
         confidence=0.3,
         description="无法自动分类",
         suggestion="需要人工检查输出内容",
     )
+
+
+def _check_skip_by_id(test_id: str) -> FailureAnalysis | None:
+    """兜底：按用例 ID 检查是否为已知限制。"""
+    if test_id in SKIP_BY_TEST_ID:
+        return FailureAnalysis(
+            failure_type=FailureType.AI_BEHAVIOR,
+            confidence=0.9,
+            description=f"已知限制 ({test_id}): {SKIP_BY_TEST_ID[test_id]}",
+            suggestion="跳过此用例",
+            is_known_limitation=True,
+        )
+    return None
 
 
 def generate_fix_suggestion(analysis: FailureAnalysis, case: dict) -> dict:

@@ -50,7 +50,7 @@
 | T-21 | count 模式 | `统计含 class 的文件数` | output_mode=count | [PTY] |
 | T-22 | context 行数 | `搜索 async def 前后 3 行` | 含上下文行 | [PTY] |
 | T-23 | offset 分页 | 跳过前 N 个结果 | 分页正确 | [UNIT] |
-| T-11 | 大型输出截断 | cat 大文件 | 超过预算被截断 | [PTY] |
+| T-11 | 大型输出截断 | 读取 /tmp/big_file_t11.txt（2000行） | 输出被截断，提示默认读取500行 | [PTY] |
 | T-50 | 递归搜索 | recursive=True | 递归搜索子目录 | [PTY] |
 | T-51 | 非递归搜索 | recursive=False | 只搜索当前目录 | [PTY] |
 | T-52 | 目录不存在 | path 指向文件 | 目录不存在错误 | [PTY] |

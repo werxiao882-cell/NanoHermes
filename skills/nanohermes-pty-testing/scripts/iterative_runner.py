@@ -537,12 +537,12 @@ def ai_has_finished(output):
     return has_panel and (has_status or has_empty_area)
 
 
-def needs_more_turns(test_id, output, round_num):
+def needs_more_turns(test_id, output, round_num, max_rounds=10):
     """根据用例类型和当前输出，判断是否需要继续对话。
 
     返回 (needs_more, follow_up_prompt) 或 (False, None)
     """
-    if round_num >= MAX_ROUNDS:
+    if round_num >= max_rounds:
         return False, None
 
     id_prefix = test_id.split('-')[0] if '-' in test_id else test_id.split('_')[0]
@@ -748,7 +748,7 @@ def run_single_test(test_id, prompt, patterns, wait_time=15, setup_cmd=None, max
             continue
 
         # 判断是否需要更多轮
-        needs_more, next_prompt = needs_more_turns(test_id, cleaned, round_num)
+        needs_more, next_prompt = needs_more_turns(test_id, cleaned, round_num, max_rounds=max_rounds)
 
         if needs_more and next_prompt:
             round_num += 1
@@ -809,8 +809,11 @@ def get_setup_command(case):
     if test_id == 'T-22':
         return f'printf "import asyncio\\n\\nasync def fetch_data(url):\\n    await asyncio.sleep(1)\\n    return ok" > /tmp/test_async.py'
     if test_id == 'T-46':
-        # 创建大文件用于分页测试
+        # 创建大文件，用于分页测试
         return f'python3 -c "with open(\'/tmp/big_file.txt\',\'w\') as f:\n    for i in range(500): f.write(f\"line {{i}}: some test content here\\n\")"'
+    if test_id == 'T-11':
+        # 创建大文件，用于截断测试（2000 行，超过默认 limit=500）
+        return f'python3 -c "with open(\'/tmp/big_file_t11.txt\',\'w\') as f:\n    for i in range(2000): f.write(f\"line {{i}}: test data for truncation test with some extra content\\n\")"'
     return None
 
 
@@ -946,7 +949,7 @@ def iterative_test(cases, auto_fix=False, max_retries=2, max_rounds=10):
         f"",
         f"**日期**: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
         f"**总耗时**: {duration:.0f} 秒",
-        f"**策略**: 多轮对话（最多{MAX_ROUNDS}轮）→ 失败分析 → 自动修复 → 重试",
+        f"**策略**: 多轮对话（最多{max_rounds}轮）→ 失败分析 → 自动修复 → 重试",
         f"",
         f"## 结果摘要",
         f"",
