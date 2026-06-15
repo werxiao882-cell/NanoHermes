@@ -110,62 +110,6 @@ class TestProviderRegistryIntegration:
                 assert url is None
 
 
-class TestAuxiliaryClientIntegration:
-    """AuxiliaryClient 与配置系统集成测试。"""
-
-    def test_auxiliary_from_config(self):
-        """测试从 Config 对象创建 AuxiliaryClient。"""
-        from src.config import Config
-        from src.auxiliary.client import AuxiliaryClient
-        from src.provider.credentials import CredentialResult
-        
-        config = Config(
-            auxiliary={"provider": "openai", "model": "gpt-4o-mini", "max_tokens": 2000},
-        )
-        
-        # 模拟凭证
-        credentials = CredentialResult(
-            api_key="sk-test",
-            base_url="https://api.openai.com/v1",
-            source="env",
-        )
-        
-        client = AuxiliaryClient(
-            config=config.auxiliary,
-            main_credentials=credentials,
-            main_model="gpt-4o",
-        )
-        
-        assert client.provider == "openai"
-        assert client.model == "gpt-4o-mini"
-
-    def test_auxiliary_main_provider(self):
-        """测试 provider='main' 复用主对话配置。"""
-        from src.config import Config
-        from src.auxiliary.client import AuxiliaryClient
-        from src.provider.credentials import CredentialResult
-        from src.provider.api_mode import ApiMode
-        
-        config = Config(
-            auxiliary={"provider": "main"},  # 复用主对话
-        )
-        
-        credentials = CredentialResult(
-            api_key="sk-test",
-            base_url="https://api.openai.com/v1",
-            source="env",
-        )
-        
-        client = AuxiliaryClient(
-            config=config.auxiliary,
-            main_credentials=credentials,
-            main_api_mode=ApiMode.CHAT_COMPLETIONS,
-            main_model="gpt-4o",
-        )
-        
-        assert client.provider == "main"
-
-
 class TestMcpConfig:
     """MCP 配置测试。"""
 

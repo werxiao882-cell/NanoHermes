@@ -74,14 +74,19 @@ class TestSkillLoader:
             assert skill.path == str(skill_file)
 
     def test_load_missing_frontmatter(self):
-        """Test loading file without frontmatter raises error."""
+        """Test loading file without frontmatter succeeds with inferred name."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            skill_file = Path(tmpdir) / "SKILL.md"
-            skill_file.write_text("# No frontmatter", encoding="utf-8")
+            # Create a subdirectory to infer name from
+            skill_dir = Path(tmpdir) / "my-skill"
+            skill_dir.mkdir()
+            skill_file = skill_dir / "SKILL.md"
+            skill_file.write_text("# My Skill\n\nBody content", encoding="utf-8")
 
             loader = SkillLoader()
-            with pytest.raises(ValueError, match="缺少 YAML frontmatter"):
-                loader.load(skill_file)
+            # Should load successfully with inferred name
+            skill = loader.load(skill_file)
+            assert skill.name == "my-skill"  # inferred from directory
+            assert "Body content" in skill.body
 
     def test_load_missing_name(self):
         """Test loading skill without name raises error."""
