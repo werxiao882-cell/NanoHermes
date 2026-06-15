@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.delegation.manager import (
+from src.delegation import (
     DelegationManager,
     AgentRole,
     DelegationResult,
@@ -486,3 +486,123 @@ class TestSemaphore:
 
         sem.acquire_sync()
         assert sem.available_slots == 0
+
+
+class TestEventBusIntegration:
+    """Tests for event bus integration."""
+
+    def test_delegation_events_emitted(self):
+        """测试委托事件被正确发射。"""
+        from src.conversation.events import EventType
+
+        events_received = []
+
+        def on_start(data):
+            events_received.append(("start", data))
+
+        def on_complete(data):
+            events_received.append(("complete", data))
+
+        def on_fail(data):
+            events_received.append(("fail", data))
+
+        manager = DelegationManager()
+        bus = manager._event_bus
+        bus.on(EventType.DELEGATION_START, on_start)
+        bus.on(EventType.DELEGATION_COMPLETE, on_complete)
+        bus.on(EventType.DELEGATION_FAIL, on_fail)
+
+        result = manager.delegate_single(goal="Test task")
+
+        assert result.success is True
+        assert len(events_received) == 2
+        assert events_received[0][0] == "start"
+        assert events_received[0][1]["goal"] == "Test task"
+        assert events_received[1][0] == "complete"
+        assert events_received[1][1]["task_id"] == result.task_id
+
+    def test_delegation_fail_event(self):
+        """测试委托失败事件。"""
+        from src.conversation.events import EventType
+
+        events_received = []
+
+        def on_fail(data):
+            events_received.append(data)
+
+        manager = DelegationManager(max_spawn_depth=0)
+        bus = manager._event_bus
+        bus.on(EventType.DELEGATION_FAIL, on_fail)
+        bus.on(EventType.DELEGATION_START, lambda d: None)
+
+        result = manager.delegate_single(goal="Should fail")
+
+        assert result.success is False
+        assert len(events_received) == 1
+        assert "深度" in events_received[0]["error"] or "depth" in events_received[0]["error"].lower()
+
+    def test_no_event_bus_no_error(self):
+        """测试事件总线始终存在（内部创建）。"""
+        manager = DelegationManager()
+        assert manager._event_bus is not None
+        result = manager.delegate_single(goal="Test")
+        assert result.success is True
+
+
+class TestTimeoutEnforcement:
+    """Tests for timeout enforcement."""
+
+    def test_timeout_config_propagation(self):
+        """测试超时配置传播到子 Agent 配置。"""
+        manager = DelegationManager(child_timeout_seconds=42.0)
+        config = manager.build_child_agent_config(
+            goal="Test",
+            role=AgentRole.LEAF,
+        )
+        assert config.timeout == 42.0
+
+    def test_timeout_in_active_children(self):
+        """测试活跃子 Agent 记录包含超时信息。"""
+        manager = DelegationManager(child_timeout_seconds=15.0)
+        config = manager.build_child_agent_config(
+            goal="Test timeout tracking",
+            role=AgentRole.LEAF,
+        )
+        assert config.timeout == 15.0
+        assert config.max_depth == manager.max_spawn_depth
+
+
+class TestAsyncBatchExecution:
+    """Tests for async batch execution."""
+
+    def test_batch_returns_all_results(self):
+        """测试批量执行返回所有结果。"""
+        manager = DelegationManager(max_concurrent_children=5)
+        tasks = [
+            {"goal": "Task A"},
+            {"goal": "Task B"},
+            {"goal": "Task C"},
+        ]
+        results = manager.delegate_batch(tasks=tasks)
+        assert len(results) == 3
+        assert all(r.success for r in results)
+
+    def test_batch_respects_concurrent_limit(self):
+        """测试批量执行尊重并发限制。"""
+        manager = DelegationManager(max_concurrent_children=2)
+        tasks = [
+            {"goal": "Task 1"},
+            {"goal": "Task 2"},
+            {"goal": "Task 3"},
+            {"goal": "Task 4"},
+        ]
+        results = manager.delegate_batch(tasks=tasks)
+        assert len(results) == 2
+
+    def test_batch_task_id_prefix(self):
+        """测试批量任务 ID 前缀。"""
+        manager = DelegationManager()
+        tasks = [{"goal": "A"}, {"goal": "B"}]
+        results = manager.delegate_batch(tasks=tasks)
+        assert results[0].task_id.startswith("batch_0_")
+        assert results[1].task_id.startswith("batch_1_")

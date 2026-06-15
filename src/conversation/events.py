@@ -2,13 +2,14 @@
 
 提供事件总线机制，解耦对话循环逻辑与外部处理器。
 
-事件分类：
+事件分类（18 种）：
 - 生命周期事件：loop_start, loop_end, iteration_start, iteration_end
 - 模型调用事件：model_request, model_response, model_error, model_retry
 - 工具事件：tool_start, tool_end, tool_error
 - 消息事件：message_append
 - 上下文事件：pre_compress
 - 控制事件：interrupt, max_iterations
+- 委托事件：delegation_start, delegation_complete, delegation_fail
 """
 
 from __future__ import annotations
@@ -49,6 +50,11 @@ class EventType(Enum):
     # 控制事件
     INTERRUPT = "interrupt"
     MAX_ITERATIONS = "max_iterations"
+
+    # 委托事件
+    DELEGATION_START = "delegation_start"
+    DELEGATION_COMPLETE = "delegation_complete"
+    DELEGATION_FAIL = "delegation_fail"
 
 
 EventHandler = Callable[[Dict[str, Any]], None]

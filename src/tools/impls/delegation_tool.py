@@ -41,11 +41,11 @@ def delegate_task(
     **kwargs,
 ) -> str:
     """委托任务给子 Agent 执行。
-    
+
     两种调用方式：
     - 单任务：传入 goal
     - 批量：传入 tasks 数组（并行执行）
-    
+
     角色：
     - leaf（默认）：专注的工作者，不能委托、访问记忆等
     - orchestrator：编排者，可以进一步委托子任务
@@ -56,18 +56,71 @@ def delegate_task(
             "status": "error",
             "message": "Either 'goal' or 'tasks' must be provided."
         }, ensure_ascii=False)
-    
+
+    # 处理 LLM 可能将 tasks 二次序列化为字符串的情况
+    # 日志中观察到: "tasks": "[{\"goal\": \"...\"}, ...]" 而非 "tasks": [{"goal": "..."}, ...]
+    if isinstance(tasks, str):
+        try:
+            tasks = json.loads(tasks)
+        except (json.JSONDecodeError, TypeError):
+            return json.dumps({
+                "status": "error",
+                "message": f"tasks 参数是字符串但无法解析为 JSON: {tasks[:100]}"
+            }, ensure_ascii=False)
+
     # 限制 toolsets
     if toolsets:
         toolsets = [t for t in toolsets if t not in DELEGATE_BLOCKED_TOOLS]
-    
+
     try:
-        # 单任务模式
+        # 优先使用 DelegationManager（真实执行）
+        from src.delegation import get_manager
+        mgr = get_manager()
+        if mgr is not None:
+            results = mgr.delegate_task(
+                goal=goal,
+                tasks=tasks,
+                role=role,
+                toolsets=toolsets,
+                context=context,
+            )
+            # 转换为 JSON 响应
+            if len(results) == 1 and not tasks:
+                # 单任务模式
+                r = results[0]
+                return json.dumps({
+                    "status": "success" if r.success else "error",
+                    "task_id": r.task_id,
+                    "role": r.role,
+                    "summary": r.summary,
+                    "duration": round(r.duration, 2),
+                    "tool_calls": r.tool_calls,
+                    "message": r.summary if r.success else r.error,
+                }, ensure_ascii=False)
+            else:
+                # 批量模式
+                return json.dumps({
+                    "status": "success",
+                    "mode": "batch",
+                    "results": [
+                        {
+                            "task_id": r.task_id,
+                            "success": r.success,
+                            "summary": r.summary,
+                            "error": r.error,
+                            "duration": round(r.duration, 2),
+                        }
+                        for r in results
+                    ],
+                    "count": len(results),
+                    "message": f"Completed {len(results)} tasks.",
+                }, ensure_ascii=False)
+
+        # 降级为模拟执行（无 DelegationManager）
         if goal and not tasks:
             result = _execute_single(goal, role, toolsets, context)
             return json.dumps(result, ensure_ascii=False)
-        
-        # 批量模式
+
         if tasks:
             results = _execute_batch(tasks, role, toolsets)
             return json.dumps({
@@ -77,12 +130,12 @@ def delegate_task(
                 "count": len(results),
                 "message": f"Completed {len(results)} tasks."
             }, ensure_ascii=False)
-        
+
         return json.dumps({
             "status": "error",
             "message": "Invalid delegation request."
         }, ensure_ascii=False)
-        
+
     except Exception as e:
         logger.error(f"Delegation error: {e}", exc_info=True)
         return json.dumps({

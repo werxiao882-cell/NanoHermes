@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from typing import Any
 
 from prompt_toolkit import PromptSession
@@ -35,7 +36,7 @@ from src.cli.layout import LayoutManager, LayoutConfig
 from src.cli.completers import ContextAwareCompleter
 from src.cli.history import TUIHistory
 from src.cli.streaming import TypewriterEffect, StreamingMarkdown, StreamingStatusIndicator
-from src.cli.widgets import StatusBar
+from src.cli.widgets import StatusBar, ActivityFeed
 from src.conversation.loop import ConversationLoop
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,7 @@ logger = logging.getLogger(__name__)
 SLASH_COMMANDS = [
     "/help", "/clear", "/status", "/sessions", "/resume", "/title",
     "/skills", "/skills enable <name>", "/skills disable <name>",
-    "/tools", "/compress", "/reasoning", "/quit", "/exit",
+    "/tools", "/compress", "/reasoning", "/subagents", "/quit", "/exit",
 ]
 
 # 哨兵对象：区分 __init__ 中 session_db 参数"未传" vs "显式传 None"
@@ -202,6 +203,16 @@ class TUIApp:
         self.tool_schemas = get_tool_schemas(exclude_deferred=True)
         self.tool_categories_info = ToolRegistry.get_tool_categories_with_info()
 
+        # ── 9.5 委托系统 ──
+        # 初始化全局 DelegationManager 单例，内部自动创建 EventBus
+        from src.delegation import init_manager
+        all_tool_schemas = get_tool_schemas(exclude_deferred=False)
+        self.delegation_manager = init_manager(
+            model_caller=self.model_caller,
+            tool_dispatch=self.tool_dispatch,
+            tool_schemas=all_tool_schemas,
+        )
+
         # ── 10. 技能系统 ──
         # SkillManager 加载 SKILL.md 文件并管理技能的启用/禁用状态
         # skill_categories 按类别分组，用于启动横幅展示和系统提示注入
@@ -232,22 +243,74 @@ class TUIApp:
         self.session_id = "new_session"
 
         # ── 12. 记忆系统 ──
-        # MemoryManager 支持多提供者架构（当前只注册 FileMemoryProvider）
-        # FileMemoryProvider 读写 ~/.nanohermes/ 下的 MEMORY.md 和 USER.md
-        # 记忆在对话中通过 MemoryEventHandler 自动检索和刷写
+        # MemoryStore 作为唯一数据源，FileMemoryProvider 和 memory_tool 共享同一实例
+        # 冻结快照在会话启动时捕获，系统提示使用快照保证 prompt caching 稳定
         from src.memory import MemoryManager, FileMemoryProvider
+        from src.memory.memory_store import MemoryStore
+        from src.tools.impls.memory_tool import set_memory_store
+
         if self._injected_memory_manager is not _UNSET:
             self.memory_manager = self._injected_memory_manager
+            self._memory_store = None
         else:
             self.memory_manager = MemoryManager()
             hermes_home = str(Path.home() / ".nanohermes")
-            file_provider = FileMemoryProvider(hermes_home)
+            memory_dir = Path(hermes_home) / "memory"
+            memory_store = MemoryStore(memory_dir)
+            memory_store.load_from_disk()
+            set_memory_store(memory_store)
+            self._memory_store = memory_store
+            file_provider = FileMemoryProvider(hermes_home, store=memory_store)
             self.memory_manager.add_provider(file_provider)
+
+        # ── 13. 后台任务调度器 ──
+        # 初始化后台任务调度器，注册记忆刷写和技能审查任务
+        from src.background import BackgroundTaskScheduler
+        from src.background.memory_flush import register_memory_flush_task
+        from src.background.skill_review import register_skill_review_task
+
+        # 从配置加载后台任务设置
+        bg_config = app_config.background_tasks
+        self.background_scheduler = BackgroundTaskScheduler(
+            max_concurrent=bg_config.max_concurrent,
+            task_timeout_seconds=bg_config.task_timeout_seconds,
+            enabled=bg_config.enabled,
+        )
+
+        # 获取 FileMemoryProvider 实例（用于记忆刷写）
+        file_provider = None
+        if self.memory_manager:
+            for provider in self.memory_manager.providers:
+                if provider.name == "builtin":
+                    file_provider = provider
+                    break
+
+        # 注册记忆刷写任务
+        if file_provider and self.model_caller and self.tool_dispatch:
+            register_memory_flush_task(
+                scheduler=self.background_scheduler,
+                memory_provider=file_provider,
+                model_caller=self.model_caller,
+                tool_dispatch=self.tool_dispatch,
+                tool_schemas=self.tool_schemas,
+                enabled=bg_config.memory_flush.enabled,
+            )
+
+        # 注册技能审查任务
+        if self.model_caller and self.tool_dispatch:
+            register_skill_review_task(
+                scheduler=self.background_scheduler,
+                model_caller=self.model_caller,
+                tool_dispatch=self.tool_dispatch,
+                tool_schemas=self.tool_schemas,
+                enabled=bg_config.skill_review.enabled,
+            )
 
         from src.conversation.assembler import PromptAssembler
         assembler = PromptAssembler(
             tool_registry=ToolRegistry,
             skill_manager=self.skill_manager,
+            memory_store=getattr(self, "_memory_store", None),
         )
         system_prompt_result = assembler.build_system_prompt(
             model=self.model,
@@ -708,8 +771,18 @@ class TUIApp:
             model_call=self.model_caller,
             tool_dispatch=self.tool_dispatch,
             debug=self.debug,
+            background_scheduler=self.background_scheduler,
         )
         loop = self._current_loop
+
+        # 将当前对话循环的事件总线和会话 ID 注入委托管理器
+        # 设计理由：子 Agent 事件需要转发到当前循环的 EventBus 供 TUI 显示，
+        # 子 Agent JSONL 文件名需要包含当前会话 ID 以建立命名关联
+        if self.delegation_manager:
+            self.delegation_manager.set_parent_context(
+                parent_event_bus=loop.events,
+                parent_session_id=self.session_id,
+            )
 
         # 统一注册 TUI 事件处理器（模型调用 + 工具执行生命周期）
         conversation_handler = ConversationEventHandler(
@@ -833,6 +906,20 @@ class TUIApp:
             self.console.print(f"  Skills: {self.skill_count}")
             self.console.print(f"  Input Tokens: {self.status_bar.input_tokens}")
             self.console.print(f"  Output Tokens: {self.status_bar.output_tokens}")
+
+            # 显示后台任务状态
+            if hasattr(self, 'background_scheduler') and self.background_scheduler:
+                running = self.background_scheduler.get_running_tasks()
+                history = self.background_scheduler.get_task_history(limit=5)
+                self.console.print(f"  Background Tasks: {len(running)} running")
+                if running:
+                    for task in running:
+                        self.console.print(f"    ⟳ {task['name']} ({task['duration']:.1f}s)")
+                if history:
+                    self.console.print(f"  Recent Tasks:")
+                    for task in history[:3]:
+                        status = "[green]✓[/green]" if task['success'] else "[red]✗[/red]"
+                        self.console.print(f"    {status} {task['name']} ({task['duration']:.1f}s)")
             return True
 
         if cmd == "/sessions":
@@ -867,6 +954,10 @@ class TUIApp:
 
         if cmd == "/reasoning":
             await self._cmd_reasoning()
+            return True
+
+        if cmd in ("/subagents", "/subagent"):
+            await self._cmd_subagents()
             return True
 
         # /skill-name → 加载技能并注入对话
@@ -957,9 +1048,13 @@ class TUIApp:
         self.state.running = True
         logger.info("TUI 主循环启动")
 
-        # 如果是新会话，立即创建会话记录
-        # 设计理由：在首次用户输入前创建会话，确保 session_id 有效
-        if self.session_id == "new_session" and self.session_db:
+        # 处理 --resume / --resume-title CLI 参数
+        # 设计理由：在创建新会话之前先检查是否需要恢复，避免创建无用的新会话
+        if self._resume or self._resume_title:
+            await self._handle_cli_resume()
+        elif self.session_id == "new_session" and self.session_db:
+            # 如果是新会话，立即创建会话记录
+            # 设计理由：在首次用户输入前创建会话，确保 session_id 有效
             self.session_id = self.session_db.create_session(title="新会话", model=self.model)
             self.state.session_id = self.session_id
             self.console.print(f"[dim]新会话已创建: {self.session_id}[/dim]\n")
@@ -1023,12 +1118,81 @@ class TUIApp:
 
         self.console.print("\n[cyan]历史会话:[/cyan]")
         for s in sessions:
-            sid = s.get("session_id", "")
+            sid = s.get("id", "")
             title = s.get("title") or "(无标题)"
-            created = s.get("created_at", "")
+            started = s.get("started_at", "")
             short_id = sid[:8]
-            self.console.print(f"  [dim]{created}[/dim]  [bold]{short_id}[/bold]  {title}")
+            self.console.print(f"  [dim]{started}[/dim]  [bold]{short_id}[/bold]  {title}")
         self.console.print()
+
+    async def _handle_cli_resume(self) -> None:
+        """处理 --resume / --resume-title CLI 参数。
+
+        恢复流程：
+        1. --resume-title：按标题关键词搜索，取最佳匹配
+        2. --resume "latest"：取最近结束的会话
+        3. --resume <session_id>：按 ID 精确查找
+        4. 加载会话消息，重建 messages 列表
+        """
+        if not self.session_db:
+            self.console.print("[yellow]会话数据库不可用，无法恢复会话[/yellow]")
+            return
+
+        session = None
+        identifier = None
+
+        if self._resume_title:
+            matches = self.session_db.search_sessions_by_title(self._resume_title, limit=5)
+            if not matches:
+                self.console.print(f"[yellow]未找到标题匹配的会话: {self._resume_title}[/yellow]")
+                return
+            identifier = matches[0]["id"]
+
+        elif self._resume == "latest":
+            sessions = self.session_db.list_sessions(limit=1)
+            if not sessions:
+                self.console.print("[yellow]暂无历史会话可恢复[/yellow]")
+                return
+            identifier = sessions[0]["id"]
+
+        elif self._resume:
+            identifier = self._resume
+
+        if not identifier:
+            return
+
+        session = self.session_db.get_session(identifier)
+        if not session:
+            self.console.print(f"[yellow]未找到会话: {identifier}[/yellow]")
+            return
+
+        messages = self.session_db.get_messages(identifier)
+        if not messages:
+            self.console.print("[yellow]会话存在但无消息记录[/yellow]")
+            return
+
+        self.session_db.reopen_session(identifier)
+
+        self.session_id = identifier
+        self.state.session_id = identifier
+        self.messages = []
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if role == "assistant" and msg.get("tool_calls"):
+                try:
+                    tool_calls = json.loads(msg.get("tool_calls"))
+                    self.messages.append({"role": role, "content": content, "tool_calls": tool_calls})
+                except json.JSONDecodeError:
+                    self.messages.append({"role": role, "content": content})
+            elif role == "tool":
+                self.messages.append({"role": role, "content": content, "tool_call_id": msg.get("tool_call_id")})
+            else:
+                self.messages.append({"role": role, "content": content})
+
+        title = session.get("title") or "(无标题)"
+        self.console.print(f"\n[green]已恢复会话: {identifier[:8]} - {title}[/green]")
+        self.console.print(f"[dim]共 {len(self.messages)} 条消息[/dim]\n")
 
     async def _cmd_resume(self, identifier: str | None) -> None:
         """处理 /resume 命令，恢复历史会话。
@@ -1083,6 +1247,7 @@ class TUIApp:
         # 更新当前会话 ID 和消息
         old_session_id = self.session_id
         self.session_id = identifier
+        self.state.session_id = identifier
         self.messages = []
         for msg in messages:
             role = msg.get("role", "user")
@@ -1182,18 +1347,13 @@ class TUIApp:
         # 估算当前 token 数
         approx_tokens = sum(len(m.get("content", "") or "") // 4 + 10 for m in self.messages)
 
-        def model_caller(msgs):
-            """简单的模型调用适配器。"""
-            response = self.model_caller(msgs)
-            return response
-
         try:
             result = compressor.compress(
                 self.messages,
                 current_tokens=approx_tokens,
                 focus_topic=focus_topic,
                 force=True,
-                model_caller=model_caller,
+                model_caller=self.model_caller,
             )
 
             # compress 返回 dict: {"messages": [...], "summary": "...", ...}
@@ -1312,20 +1472,76 @@ class TUIApp:
                     self.console.print(f"       [dim]{tool.description}[/dim]")
         self.console.print()
 
+    async def _cmd_reasoning(self) -> None:
+        """处理 /reasoning 命令，显示最近的推理内容。"""
+        if self._last_reasoning:
+            self.console.print("\n[cyan]最近的推理内容:[/cyan]")
+            self.console.print(f"[dim]{self._last_reasoning}[/dim]\n")
+        else:
+            self.console.print("[dim]暂无推理内容（使用 --debug 模式查看详细推理）[/dim]")
+
+    async def _cmd_subagents(self) -> None:
+        """处理 /subagents 命令，显示子 Agent 状态。
+
+        显示格式：
+        - 活跃子 Agent：显示 task_id、目标、运行时间
+        - 已完成子 Agent：显示 task_id、目标、结果摘要
+        """
+        if not hasattr(self, 'delegation_manager') or not self.delegation_manager:
+            self.console.print("[yellow]委托管理器不可用[/yellow]")
+            return
+
+        active = self.delegation_manager.get_active_children()
+        completed = self.delegation_manager.get_completed_results()
+
+        self.console.print("\n[cyan]子 Agent 状态:[/cyan]")
+
+        # 显示活跃子 Agent
+        if active:
+            self.console.print("\n[bold yellow]活跃中:[/bold yellow]")
+            for task_id, info in active.items():
+                goal = info.get("goal", "")[:60]
+                role = info.get("role", "leaf")
+                start_time = info.get("start_time", 0)
+                elapsed = time.time() - start_time if start_time else 0
+                self.console.print(f"  ⟳ [bold]{task_id}[/bold] ({role}) {elapsed:.1f}s")
+                self.console.print(f"     [dim]{goal}[/dim]")
+        else:
+            self.console.print("\n[dim]无活跃的子 Agent[/dim]")
+
+        # 显示最近完成的子 Agent（最多 5 个）
+        recent = completed[-5:] if completed else []
+        if recent:
+            self.console.print("\n[bold green]最近完成:[/bold green]")
+            for result in reversed(recent):
+                status = "[green]✓[/green]" if result.success else "[red]✗[/red]"
+                summary = result.summary[:80] if result.summary else result.error[:80]
+                self.console.print(f"  {status} [bold]{result.task_id}[/bold] ({result.role}) {result.duration:.1f}s")
+                self.console.print(f"     [dim]{summary}[/dim]")
+
+        self.console.print()
+
     async def shutdown(self) -> None:
         """执行 TUI 关闭时的清理操作。
 
         设计理由：
         - 在 finally 块中调用，确保无论何种退出方式（正常/Ctrl+C/异常）都执行清理
-        - 清理顺序：停止标志 → 状态持久化 → 事件处理器清理
+        - 清理顺序：停止标志 → 状态持久化 → 事件处理器清理 → 后台任务关闭
           1. 先设置 running=False，防止其他协程继续发起新操作
           2. 保存状态（如 session_id），支持下次启动时恢复
           3. 清理事件处理器订阅，避免内存泄漏（事件总线持有回调引用）
+          4. 关闭后台任务调度器，等待运行中的任务完成
         """
         logger.info("TUI 正在关闭...")
         self.state.running = False
         self.state.save()
         self.event_handler.cleanup()
+
+        # 关闭后台任务调度器
+        if hasattr(self, 'background_scheduler') and self.background_scheduler:
+            logger.info("正在关闭后台任务调度器...")
+            self.background_scheduler.shutdown(timeout=5.0)
+
         logger.info("TUI 已关闭")
 
 

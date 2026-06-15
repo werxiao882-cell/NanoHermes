@@ -183,6 +183,9 @@ class ConversationEventHandler:
         events.on(EventType.TOOL_START, self._on_tool_start)
         events.on(EventType.TOOL_END, self._on_tool_end)
         events.on(EventType.MESSAGE_APPEND, self._on_message_append)
+        events.on(EventType.DELEGATION_START, self._on_delegation_start)
+        events.on(EventType.DELEGATION_COMPLETE, self._on_delegation_complete)
+        events.on(EventType.DELEGATION_FAIL, self._on_delegation_fail)
 
     def _on_model_request(self, data: dict[str, Any]) -> None:
         """模型开始请求：启动状态指示器。"""
@@ -207,10 +210,13 @@ class ConversationEventHandler:
         """工具开始执行：显示 UI。"""
         tool_name = data["tool_name"]
         tool_args = data["tool_args"]
+        child_tag = self._child_tag(data)
 
         action = self._extract_tool_action(tool_name, tool_args)
         self._current_tool_action = action
 
+        if child_tag:
+            self.console.print(f"  [magenta]{child_tag}[/magenta]")
         self.console.print(ActivityFeed.format_start(tool_name, action))
 
     def _on_tool_end(self, data: dict[str, Any]) -> None:
@@ -218,10 +224,12 @@ class ConversationEventHandler:
         tool_name = data["tool_name"]
         result = data["result"]
         elapsed = data["elapsed"]
+        child_tag = self._child_tag(data)
 
         action = self._current_tool_action
         self.console.print(ActivityFeed.format_complete(tool_name, action, elapsed))
-        self._show_tool_result_summary(tool_name, result)
+        if not child_tag:
+            self._show_tool_result_summary(tool_name, result)
 
     def _on_message_append(self, data: dict[str, Any]) -> None:
         """消息追加到对话历史时，统一持久化到 SQLite 和 JSONL。
@@ -302,6 +310,46 @@ class ConversationEventHandler:
                 except Exception as e:
                     logger.debug(f"Failed to save assistant message to JSONL: {e}")
 
+    def _child_tag(self, data: dict[str, Any]) -> str:
+        """生成子 Agent 标识符，主 Agent 事件返回空字符串。"""
+        child_task_id = data.get("child_task_id", "")
+        if child_task_id:
+            return f"[子Agent:{child_task_id}]"
+        return ""
+
+    def _on_delegation_start(self, data: dict[str, Any]) -> None:
+        """子 Agent 委托开始。"""
+        task_id = data.get("task_id", "")
+        goal = data.get("goal", "")[:60]
+        role = data.get("role", "leaf")
+        self.console.print(
+            f"\n[cyan]{'─' * 50}[/cyan]"
+            f"\n[cyan]▶ 子Agent启动[/cyan] [bold]{task_id}[/bold] ({role})"
+            f"\n[cyan]  目标: {goal}[/cyan]"
+        )
+
+    def _on_delegation_complete(self, data: dict[str, Any]) -> None:
+        """子 Agent 委托完成。"""
+        task_id = data.get("task_id", "")
+        duration = data.get("duration", 0)
+        summary = data.get("summary", "")[:100]
+        self.console.print(
+            f"[green]✓ 子Agent完成[/green] [bold]{task_id}[/bold] ({duration:.1f}s)"
+            f"\n[green]  结果: {summary}[/green]"
+            f"\n[cyan]{'─' * 50}[/cyan]\n"
+        )
+
+    def _on_delegation_fail(self, data: dict[str, Any]) -> None:
+        """子 Agent 委托失败。"""
+        task_id = data.get("task_id", "")
+        error = data.get("error", "")[:100]
+        duration = data.get("duration", 0)
+        self.console.print(
+            f"[red]✗ 子Agent失败[/red] [bold]{task_id}[/bold] ({duration:.1f}s)"
+            f"\n[red]  错误: {error}[/red]"
+            f"\n[cyan]{'─' * 50}[/cyan]\n"
+        )
+
     def _extract_tool_action(self, tool_name: str, tool_args: str | dict) -> str:
         """提取工具操作的简短描述，用于 UI 展示。"""
         try:
@@ -365,7 +413,7 @@ class ConversationEventHandler:
             elif tool_name == "todo":
                 self._show_todo_list(data)
             else:
-                self.console.print(ActivityFeed.format_result(tool_name, f"{tool_name} {result.endswith(len(result)/4)}: completed"))
+                self.console.print(ActivityFeed.format_result(tool_name, f"{tool_name}: completed"))
         except (json.JSONDecodeError, AttributeError):
             self.console.print(ActivityFeed.format_result(tool_name, f"{tool_name}: completed"))
 
