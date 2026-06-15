@@ -59,7 +59,6 @@ src/
 ├── conversation/            # 核心对话循环 + 错误分类 + 事件总线
 ├── delegation/              # 多 Agent 委托（leaf/orchestrator 角色）
 ├── insights/                # 指标引擎（token 聚合 + 成本估算）
-├── auxiliary/               # 辅助 LLM 客户端（后台任务）
 ├── cli/                     # TUI 聊天界面 + 事件处理器 + 流式组件
 └── config/                  # 配置加载（模型定义/凭证解析/提供商注册）
 ```
@@ -272,7 +271,6 @@ def apply_anthropic_cache_control(
 | `delegation/` | 多 Agent 委托、并发控制 | 工具实现、会话管理 |
 | `mcp/` | MCP 协议支持、服务器/客户端 | 工具实现、对话逻辑 |
 | `config/` | 配置加载、模型定义、凭证解析 | 业务逻辑、SDK 操作 |
-| `auxiliary/` | 后台 LLM 任务（摘要、记忆刷写） | 主对话逻辑、UI 渲染 |
 
 #### 禁止行为
 

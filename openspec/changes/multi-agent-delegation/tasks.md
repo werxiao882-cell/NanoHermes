@@ -47,3 +47,15 @@
 - [x] 5.1 编写子 Agent 上下文隔离的单元测试
   - [x] 5.1.1 测试子 Agent 无父历史
   - [x] 5.1.2 测试父上下文只看到摘要
+
+## 6. 增强功能实现
+
+- [x] 6.1 实现异步批量并行执行（asyncio.gather）
+- [x] 6.2 实现子 Agent 超时终止（threading.Timer）
+- [x] 6.3 实现事件总线集成（DELEGATION_START/COMPLETE/FAIL）
+- [x] 6.4 更新 TUI 注入 event_bus 到 DelegationManager
+- [x] 6.5 更新 __init__.py 导出完整类型
+- [x] 6.6 编写增强功能的单元测试
+  - [x] 6.6.1 测试事件总线集成
+  - [x] 6.6.2 测试超时配置传播
+  - [x] 6.6.3 测试异步批量执行

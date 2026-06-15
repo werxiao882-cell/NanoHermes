@@ -7,10 +7,6 @@
     "openai": {
       "base_url_env": "OPENAI_BASE_URL",
       "api_key_env": "OPENAI_API_KEY"
-    },
-    "dashscope": {
-      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-      "api_key_env": "DASHSCOPE_API_KEY"
     }
   },
   "tui": {
