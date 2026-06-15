@@ -10,7 +10,7 @@
 
 事件系统：
 - 使用 EventBus 解耦循环逻辑与外部处理器
-- 支持 15 种事件类型，覆盖完整生命周期
+- 支持 18 种事件类型，覆盖完整生命周期（含 3 种委托事件）
 - 外部功能通过 loop.events.on() 订阅事件接入
 - Debug 模式通过 DebugHandler 订阅事件实现，与核心循环完全解耦
 
@@ -56,6 +56,7 @@ class ConversationLoop:
         model_call: Callable | None = None,
         tool_dispatch: Callable | None = None,
         debug: bool = False,
+        background_scheduler: Any | None = None,
     ):
         """初始化对话循环。
 
@@ -64,6 +65,7 @@ class ConversationLoop:
             model_call: 模型调用函数。
             tool_dispatch: 工具分发函数。
             debug: 是否开启 debug 模式，注册 DebugHandler 输出详细日志。
+            background_scheduler: 后台任务调度器（可选）。
         """
         self.max_iterations = max_iterations
         self._model_call = model_call
@@ -71,6 +73,7 @@ class ConversationLoop:
         self._error_classifier = ErrorClassifier()
         self._interrupted = False
         self.events = EventBus()
+        self._background_scheduler = background_scheduler
 
         # 动态工具管理状态
         self._always_loaded_schemas: list[dict[str, Any]] = []
@@ -125,6 +128,11 @@ class ConversationLoop:
 
             # 调用模型
             model_start = time.time()
+            
+            # 调试日志：记录发送给 API 的消息角色
+            message_roles = [m.get("role", "unknown") for m in messages]
+            logger.debug(f"迭代 {iteration}: 发送消息角色 = {message_roles}")
+            
             try:
                 self.events.emit(EventType.MODEL_REQUEST, {
                     "messages": messages,
@@ -261,6 +269,16 @@ class ConversationLoop:
                 "total_elapsed": total_elapsed,
             })
 
+            # 触发后台任务
+            if self._background_scheduler:
+                try:
+                    self._background_scheduler.on_loop_end(
+                        messages=messages,
+                        iteration=iteration,
+                    )
+                except Exception as e:
+                    logger.warning(f"后台任务触发失败: {e}")
+
             return result
 
         # 达到最大迭代
@@ -280,6 +298,16 @@ class ConversationLoop:
             "iterations": iteration,
             "total_elapsed": total_elapsed,
         })
+
+        # 触发后台任务
+        if self._background_scheduler:
+            try:
+                self._background_scheduler.on_loop_end(
+                    messages=messages,
+                    iteration=iteration,
+                )
+            except Exception as e:
+                logger.warning(f"后台任务触发失败: {e}")
 
         return result
 

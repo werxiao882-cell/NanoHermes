@@ -4,6 +4,19 @@
 核心对话循环，管理模型调用、工具分发、错误分类、重试、后台审查。
 支持 debug 模式、工具回调、消息追加回调。
 
+## 目录结构
+
+```
+src/conversation/
+├── __init__.py            # 模块入口
+├── loop.py                # ConversationLoop 核心循环
+├── events.py              # EventBus + EventType（18 种事件）
+├── error_classifier.py    # ErrorClassifier 错误分类和重试决策
+├── debug_handler.py       # DebugHandler 调试输出（订阅事件总线）
+├── background_review.py   # spawn_background_review + fork_agent
+└── assembler.py           # PromptAssembler 系统提示组装（三层架构）
+```
+
 ## Components
 
 ```

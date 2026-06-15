@@ -173,6 +173,7 @@ class PromptAssembler:
         config: dict[str, Any] | None = None,
         tool_registry: Any = None,
         skill_manager: Any = None,
+        memory_store: Any = None,
     ):
         """初始化提示组装器。
 
@@ -182,10 +183,13 @@ class PromptAssembler:
                           如果为 None，则使用传入的 toolsets 参数（向后兼容）。
             skill_manager: SkillManager 实例，用于动态获取技能信息（含 trigger/skip）。
                           如果为 None，则使用传入的 skills 参数（向后兼容）。
+            memory_store: MemoryStore 实例，用于读取冻结快照。
+                         如果为 None，降级为直接读取文件（向后兼容）。
         """
         self._config = config or {}
         self._tool_registry = tool_registry
         self._skill_manager = skill_manager
+        self._memory_store = memory_store
         self._stable_parts: list[PromptPart] = []
         self._context_parts: list[PromptPart] = []
         self._volatile_parts: list[PromptPart] = []
@@ -770,15 +774,9 @@ class PromptAssembler:
 
         读取优先级（从高到低）：
         1. memory_data 参数：显式传入的记忆数据（用于测试或特殊场景）
-        2. self._memory_context：预加载的记忆数据（通过 set_memory_context 设置）
-        3. 文件读取（按优先级）：
-           a. 项目级：<project_root>/.nanohermes/memory/MEMORY.md
-           b. 用户级：~/.nanohermes/memory/MEMORY.md
-
-        设计理由：
-        - 参数优先：允许调用方覆盖默认行为，便于测试和特殊场景
-        - 项目级优先于用户级：项目特定配置应覆盖全局配置
-        - 文件读取使用 try-except 静默失败，因为记忆文件可能不存在
+        2. MemoryStore 冻结快照：如果 memory_store 已注入
+        3. self._memory_context：预加载的记忆数据（通过 set_memory_context 设置）
+        4. 文件读取（降级路径，MemoryStore 未初始化时）
 
         Args:
             memory_data: 记忆数据。如果为 None 则按优先级读取。
@@ -790,11 +788,18 @@ class PromptAssembler:
         if memory_data:
             return self._format_memory_data(memory_data)
 
-        # 优先级 2：预加载的数据
+        # 优先级 2：MemoryStore 冻结快照
+        if self._memory_store:
+            block = self._memory_store.format_for_system_prompt("memory")
+            if block:
+                return block
+            return ""
+
+        # 优先级 3：预加载的数据
         if self._memory_context:
             return self._format_memory_data(self._memory_context)
 
-        # 优先级 3：从文件读取
+        # 优先级 4：从文件读取（降级路径）
         memory_content = self._read_memory_file()
         if memory_content:
             return self._format_memory_content(memory_content)
@@ -909,15 +914,9 @@ class PromptAssembler:
 
         读取优先级（从高到低）：
         1. profile 参数：显式传入的用户画像数据（用于测试或特殊场景）
-        2. self._user_profile：预加载的用户画像数据（通过 set_user_profile 设置）
-        3. 文件读取（按优先级）：
-           a. 项目级：<project_root>/.nanohermes/memory/USER.md
-           b. 用户级：~/.nanohermes/memory/USER.md
-
-        设计理由：
-        - 参数优先：允许调用方覆盖默认行为，便于测试和特殊场景
-        - 项目级优先于用户级：项目特定的用户配置应覆盖全局配置
-        - 文件读取使用 try-except 静默失败，因为用户画像文件可能不存在
+        2. MemoryStore 冻结快照：如果 memory_store 已注入
+        3. self._user_profile：预加载的用户画像数据（通过 set_user_profile 设置）
+        4. 文件读取（降级路径，MemoryStore 未初始化时）
 
         Args:
             profile: 用户画像数据。如果为 None 则按优先级读取。
@@ -929,11 +928,18 @@ class PromptAssembler:
         if profile:
             return self._format_profile_data(profile)
 
-        # 优先级 2：预加载的数据
+        # 优先级 2：MemoryStore 冻结快照
+        if self._memory_store:
+            block = self._memory_store.format_for_system_prompt("user")
+            if block:
+                return block
+            return ""
+
+        # 优先级 3：预加载的数据
         if self._user_profile:
             return self._format_profile_data(self._user_profile)
 
-        # 优先级 3：从文件读取
+        # 优先级 4：从文件读取（降级路径）
         user_content = self._read_user_file()
         if user_content:
             return self._format_user_content(user_content)
