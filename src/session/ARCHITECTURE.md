@@ -4,6 +4,16 @@
 SQLite 会话持久化存储，支持 WAL 并发、FTS5 全文搜索、JSONL 完整历史、会话恢复。
 是所有其他功能（记忆、压缩、委托）的基础层。
 
+## 目录结构
+
+```
+src/session/
+├── __init__.py          # 模块入口，re-export SessionDB, JsonlSessionStore, SCHEMA_SQL
+├── session_db.py        # SessionDB（SQLite 封装，WAL + 重试 + FTS5 + 生命周期）
+├── schema.py            # SCHEMA_SQL, FTS_SQL, FTS_TRIGRAM_SQL（声明式 schema）
+└── jsonl_store.py       # JsonlSessionStore（per-session JSONL 文件存储）
+```
+
 ## Components
 
 ```

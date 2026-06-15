@@ -16,9 +16,12 @@ src/mcp/
 ├── client.py            # MCP 客户端连接管理
 ├── bridge.py            # 工具桥接层
 ├── registry.py          # MCP 工具注册表
-├── transports.py        # 传输模式配置
-└── servers/             # 外部 MCP 服务器实现
+└── transports.py        # 传输模式配置
 ```
+
+与 `src/tools/impls/mcp_client_tool.py` 的关系：
+mcp_client_tool 提供 Agent 侧接口（call_mcp_tool, list_mcp_tools, register_mcp_service），
+封装 mcp/client.py 的调用。
 
 ## 传输模式
 
