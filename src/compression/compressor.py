@@ -15,13 +15,17 @@
 """
 
 import logging
+import time
 import uuid
 from typing import Any, Callable, Dict, List, Optional
 
-from src.config import AuxiliaryConfig
 from src.compression.engine import ContextEngine
 from src.compression.pruning import prune_tool_outputs
-from src.compression.auxiliary import CompressionAuxiliaryClient, get_model_context_length
+from src.compression.auxiliary import get_model_context_length
+from src.compression.circuit_breaker import CircuitBreaker
+from src.compression.budget_tracker import BudgetTracker
+from src.compression.validator import CompressionValidator
+from src.compression.modes import create_mode, BaseCompressionMode
 
 logger = logging.getLogger(__name__)
 
@@ -70,22 +74,33 @@ class ContextCompressor(ContextEngine):
     def __init__(
         self,
         model: str,
-        auxiliary_config: Optional[AuxiliaryConfig] = None,
         threshold_percent: float = 0.50,
         protect_first_n: int = PROTECT_FIRST_N,
         protect_last_n: int = PROTECT_LAST_N,
         summary_target_ratio: float = SUMMARY_RATIO,
-        main_credentials: Any = None,
-        main_api_mode: Any = None,
+        # 新增：熔断器参数
+        enable_circuit_breaker: bool = True,
+        circuit_breaker_threshold: int = 3,
+        circuit_breaker_cooldown: float = 60.0,
+        # 新增：预算追踪器参数
+        enable_budget_tracker: bool = True,
+        budget_tracker_max_history: int = 100,
+        # 新增：压缩验证器参数
+        enable_validator: bool = True,
+        validator_min_retention: float = 0.6,
+        validator_min_length: int = 500,
+        validator_max_length: int = 12000,
+        # 新增：压缩模式参数
+        compression_mode: str = "reactive",
+        reactive_threshold: float = 0.5,
+        micro_interval: int = 10,
+        snip_patterns: Optional[List[str]] = None,
     ):
         """初始化压缩引擎。
 
         **参数设计理由：**
 
         - model: 主模型名称，用于获取上下文长度
-        - auxiliary_config: 辅助 LLM 配置
-            * None 时使用默认配置（provider="main"，复用主模型）
-            * 为什么需要辅助 LLM？摘要生成是后台任务，不应占用主模型配额
         - threshold_percent: 上下文使用达到此比例时触发压缩
             * 默认 50%：在上下文使用一半时开始准备压缩
             * 为什么不是 80% 或 90%？因为需要预留空间给：
@@ -99,19 +114,42 @@ class ContextCompressor(ContextEngine):
             * 尾部和摘要共享这个比例，两者竞争相同的 token 空间
             * 20% 是经验值：既能保护足够的上下文，又留给摘要 30% 的空间
 
+        新增参数：
+        - enable_circuit_breaker: 是否启用熔断器（默认 True）
+        - circuit_breaker_threshold: 熔断器失败阈值（默认 3 次）
+        - circuit_breaker_cooldown: 熔断器冷却期（默认 60 秒）
+        - enable_budget_tracker: 是否启用预算追踪器（默认 True）
+        - budget_tracker_max_history: 预算追踪器最大历史记录数（默认 100）
+        - enable_validator: 是否启用压缩验证器（默认 True）
+        - validator_min_retention: 验证器最小信息保留率（默认 0.6）
+        - validator_min_length: 验证器最小摘要长度（默认 500 字符）
+        - validator_max_length: 验证器最大摘要长度（默认 12000 字符）
+        - compression_mode: 压缩模式（"reactive"、"micro"、"snip"，默认 "reactive"）
+        - reactive_threshold: Reactive 模式触发阈值（默认 0.5）
+        - micro_interval: Micro 模式触发间隔（默认 10 轮）
+        - snip_patterns: Snip 模式触发模式列表（默认 None）
+
         Args:
             model: 主模型名称。
-            auxiliary_config: 辅助 LLM 配置（来自 nanohermes.json 的 auxiliary 段）。
-                              None 时使用默认配置（provider="main"，复用主模型）。
             threshold_percent: 上下文使用达到此比例时触发压缩。
             protect_first_n: 保护前 N 条消息。
             protect_last_n: 保护最后 N 条消息。
             summary_target_ratio: 尾部保护预算占阈值的比例。
-            main_credentials: 主对话凭证（auxiliary_config.provider="main" 时必需）。
-            main_api_mode: 主对话 API Mode（auxiliary_config.provider="main" 时使用）。
+            enable_circuit_breaker: 是否启用熔断器。
+            circuit_breaker_threshold: 熔断器失败阈值。
+            circuit_breaker_cooldown: 熔断器冷却期（秒）。
+            enable_budget_tracker: 是否启用预算追踪器。
+            budget_tracker_max_history: 预算追踪器最大历史记录数。
+            enable_validator: 是否启用压缩验证器。
+            validator_min_retention: 验证器最小信息保留率。
+            validator_min_length: 验证器最小摘要长度。
+            validator_max_length: 验证器最大摘要长度。
+            compression_mode: 压缩模式名称。
+            reactive_threshold: Reactive 模式触发阈值。
+            micro_interval: Micro 模式触发间隔。
+            snip_patterns: Snip 模式触发模式列表。
         """
         self.model = model
-        self.auxiliary_config = auxiliary_config or AuxiliaryConfig()
         self.threshold_percent = threshold_percent
         self.protect_first_n = protect_first_n
         self.protect_last_n = protect_last_n
@@ -126,14 +164,6 @@ class ContextCompressor(ContextEngine):
         # 迭代摘要：保存上次压缩的摘要，用于下次压缩时的迭代更新
         self._previous_summary: Optional[str] = None
 
-        # 辅助客户端（懒加载）
-        # 为什么懒加载？
-        # - 不是每次对话都需要压缩，避免不必要的初始化开销
-        # - 辅助客户端可能需要建立网络连接，延迟到真正需要时再建立
-        self._aux_client: Optional[CompressionAuxiliaryClient] = None
-        self._main_credentials = main_credentials
-        self._main_api_mode = main_api_mode
-
         # Session Splitting 回调（由外部设置）
         # 为什么用回调而非直接调用？
         # - 解耦：compressor 不应该直接依赖 session_db
@@ -143,6 +173,45 @@ class ContextCompressor(ContextEngine):
         # on_pre_compress 回调（由外部设置，用于通知 MemoryManager）
         # 在压缩前提取关键信息（如文件变更、用户偏好）
         self._on_pre_compress: Optional[Callable] = None
+
+        # 新增：初始化熔断器
+        # 设计理由：防止压缩循环，连续失败后自动降级
+        self._circuit_breaker: Optional[CircuitBreaker] = None
+        if enable_circuit_breaker:
+            self._circuit_breaker = CircuitBreaker(
+                failure_threshold=circuit_breaker_threshold,
+                cooldown_seconds=circuit_breaker_cooldown,
+            )
+
+        # 新增：初始化预算追踪器
+        # 设计理由：监控压缩效率，提供可观测性
+        self._budget_tracker: Optional[BudgetTracker] = None
+        if enable_budget_tracker:
+            self._budget_tracker = BudgetTracker(
+                max_history=budget_tracker_max_history,
+            )
+
+        # 新增：初始化压缩验证器
+        # 设计理由：验证压缩质量，避免过度压缩
+        self._validator: Optional[CompressionValidator] = None
+        if enable_validator:
+            self._validator = CompressionValidator(
+                min_retention_rate=validator_min_retention,
+                min_summary_length=validator_min_length,
+                max_summary_length=validator_max_length,
+            )
+
+        # 新增：初始化压缩模式
+        # 设计理由：支持多种触发策略，适应不同场景
+        self._compression_mode: BaseCompressionMode = create_mode(
+            mode_name=compression_mode,
+            reactive_threshold=reactive_threshold,
+            micro_interval=micro_interval,
+            snip_patterns=snip_patterns,
+        )
+
+        # 对话轮次计数器（用于 Micro 模式）
+        self._turn_count = 0
 
     def set_session_split_callback(self, callback: Callable) -> None:
         """设置 Session Splitting 回调。
@@ -168,24 +237,7 @@ class ContextCompressor(ContextEngine):
         """
         self._on_pre_compress = callback
 
-    def _get_aux_client(self) -> CompressionAuxiliaryClient:
-        """获取或创建压缩辅助客户端（懒加载）。
 
-        **懒加载的设计理由：**
-        1. 避免不必要的初始化开销（不是每次对话都需要压缩）
-        2. 延迟网络连接建立（辅助客户端可能需要连接 API）
-        3. 测试友好（可以在测试中 mock 辅助客户端）
-
-        Returns:
-            压缩辅助客户端实例。
-        """
-        if self._aux_client is None:
-            self._aux_client = CompressionAuxiliaryClient(
-                config=self.auxiliary_config,
-                main_credentials=self._main_credentials,
-                main_api_mode=self._main_api_mode,
-            )
-        return self._aux_client
 
     # =========================================================================
     # ContextEngine 核心方法
@@ -210,19 +262,44 @@ class ContextCompressor(ContextEngine):
         if prompt_tokens > self.threshold_tokens:
             logger.debug(f"Prompt tokens ({prompt_tokens}) exceeded threshold ({self.threshold_tokens})")
 
-    def should_compress(self) -> bool:
+    def should_compress(
+        self,
+        messages: Optional[List[Dict[str, Any]]] = None,
+        current_tokens: Optional[int] = None,
+    ) -> bool:
         """判断当前上下文是否需要压缩。
 
-        **注意：**
-        这是一个接口方法，实际实现应该检查当前 token 使用量。
-        当前返回 False 是因为具体的 token 追踪由外部组件（如 conversation loop）负责。
+        根据配置的压缩模式判断是否触发压缩：
+        - Reactive 模式：基于 token 使用率
+        - Micro 模式：基于对话轮次
+        - Snip 模式：基于消息内容特征
+
+        Args:
+            messages: 当前对话消息列表（用于 Snip 模式）。
+            current_tokens: 当前 token 数（用于 Reactive 模式）。
 
         Returns:
             True 如果需要压缩。
         """
-        # 实际实现将检查当前 token 使用量
-        # 这里提供接口框架
-        return False
+        # 如果启用了熔断器且处于 OPEN 状态，拒绝压缩
+        if self._circuit_breaker and not self._circuit_breaker.can_compress():
+            logger.debug("Circuit breaker is OPEN, skipping compression")
+            return False
+
+        # 使用压缩模式判断
+        return self._compression_mode.should_compress(
+            messages=messages or [],
+            current_tokens=current_tokens,
+            max_tokens=self.context_length,
+            turn_count=self._turn_count,
+        )
+
+    def increment_turn_count(self) -> None:
+        """增加对话轮次计数（用于 Micro 模式）。
+
+        应在每次对话轮次结束后调用。
+        """
+        self._turn_count += 1
 
     def compress(
         self,
@@ -231,16 +308,19 @@ class ContextCompressor(ContextEngine):
         focus_topic: str | None = None,
         force: bool = False,
         model_caller=None,
-    ) -> List[Dict[str, Any]]:
+    ) -> Dict[str, Any]:
         """执行实际的压缩操作。
 
         **压缩流程设计理由：**
-        1. 预压缩回调：给 Memory Provider 机会提取关键信息（如文件变更、待办事项）
-        2. 保护头尾：基于情景记忆理论，保留对话的"锚点"和"工作记忆"
-        3. 工具输出剪枝：工具输出通常很长（如文件内容、命令输出），但只需保留关键结果
-        4. 摘要预算：根据被压缩内容动态计算，避免摘要过长或过短
-        5. 生成摘要：使用辅助 LLM（不占用主模型配额）生成结构化摘要
-        6. 合并消息：头部 + 摘要 + 尾部，形成新的上下文窗口
+        1. 检查熔断器：如果处于 OPEN 状态，拒绝压缩
+        2. 预压缩回调：给 Memory Provider 机会提取关键信息（如文件变更、待办事项）
+        3. 保护头尾：基于情景记忆理论，保留对话的"锚点"和"工作记忆"
+        4. 工具输出剪枝：工具输出通常很长（如文件内容、命令输出），但只需保留关键结果
+        5. 摘要预算：根据被压缩内容动态计算，避免摘要过长或过短
+        6. 生成摘要：使用辅助 LLM（不占用主模型配额）生成结构化摘要
+        7. 合并消息：头部 + 摘要 + 尾部，形成新的上下文窗口
+        8. 验证质量：检查信息保留度和摘要长度
+        9. 记录统计：更新预算追踪器和熔断器状态
 
         Args:
             messages: 当前对话消息列表。
@@ -250,73 +330,158 @@ class ContextCompressor(ContextEngine):
             model_caller: 模型调用函数（可选，用于摘要生成）。
 
         Returns:
-            压缩后的消息列表。
+            压缩结果字典，包含 messages、summary、统计信息等。
         """
-        # 0. 通知 Memory Provider 在压缩前提取信息
-        # 为什么需要预压缩回调？
-        # - Memory Provider 可能想从即将被压缩的消息中提取关键信息
-        # - 例如：记录修改过的文件列表、提取用户偏好、更新 USER.md
-        # - 这是一个"最后机会"钩子，在消息被摘要化之前提取结构化数据
-        pre_compress_info = ""
-        if self._on_pre_compress:
-            try:
-                pre_compress_info = self._on_pre_compress(messages)
-            except Exception as e:
-                # 回调失败不应阻断压缩流程，仅记录警告
-                logger.warning(f"on_pre_compress callback failed: {e}")
+        # 新增：检查熔断器状态
+        if self._circuit_breaker and not self._circuit_breaker.can_compress():
+            logger.warning("Circuit breaker is OPEN, skipping compression")
+            return {
+                "messages": messages,
+                "summary": "",
+                "head_count": 0,
+                "tail_count": 0,
+                "compressed_count": 0,
+                "tail_messages": [],
+                "skipped": True,
+                "reason": "circuit_breaker_open",
+                "circuit_breaker_state": self._circuit_breaker.state,
+            }
 
-        # 1. 保护头部和尾部
-        # 将消息分为三部分：头部（不可变锚点）、尾部（工作记忆）、中间（可压缩）
-        head_messages = self._protect_head(messages)
-        tail_messages = self._protect_tail(messages)
-        middle_messages = self._get_middle(messages, head_messages, tail_messages)
+        # 记录压缩开始时间（用于预算追踪）
+        start_time = time.time()
 
-        # 2. 剪枝工具输出
-        # 为什么先剪枝再生成摘要？
-        # - 工具输出（如文件内容、命令输出）通常很长但信息密度低
-        # - 剪枝可以大幅减少需要摘要的内容，降低 LLM 调用成本
-        # - 摘要只需要知道"工具执行了什么"，不需要保留完整的输出内容
-        pruned_middle = prune_tool_outputs(middle_messages)
+        try:
+            # 0. 通知 Memory Provider 在压缩前提取信息
+            # 为什么需要预压缩回调？
+            # - Memory Provider 可能想从即将被压缩的消息中提取关键信息
+            # - 例如：记录修改过的文件列表、提取用户偏好、更新 USER.md
+            # - 这是一个"最后机会"钩子，在消息被摘要化之前提取结构化数据
+            pre_compress_info = ""
+            if self._on_pre_compress:
+                try:
+                    pre_compress_info = self._on_pre_compress(messages)
+                except Exception as e:
+                    # 回调失败不应阻断压缩流程，仅记录警告
+                    logger.warning(f"on_pre_compress callback failed: {e}")
 
-        # 3. 计算摘要预算
-        # 根据剪枝后的内容长度动态计算摘要应该占多少 tokens
-        compressed_chars = self._estimate_content_length(pruned_middle)
-        summary_budget = self._calculate_summary_budget(compressed_chars)
+            # 1. 保护头部和尾部
+            # 将消息分为三部分：头部（不可变锚点）、尾部（工作记忆）、中间（可压缩）
+            head_messages = self._protect_head(messages)
+            tail_messages = self._protect_tail(messages)
+            middle_messages = self._get_middle(messages, head_messages, tail_messages)
 
-        # 4. 生成摘要
-        # 使用辅助 LLM 生成结构化摘要，避免占用主模型配额
-        summary = self._generate_summary(pruned_middle, summary_budget)
+            # 2. 剪枝工具输出
+            # 为什么先剪枝再生成摘要？
+            # - 工具输出（如文件内容、命令输出）通常很长但信息密度低
+            # - 剪枝可以大幅减少需要摘要的内容，降低 LLM 调用成本
+            # - 摘要只需要知道"工具执行了什么"，不需要保留完整的输出内容
+            pruned_middle = prune_tool_outputs(middle_messages)
 
-        # 合并 pre_compress 信息到摘要
-        # 将 Memory Provider 提取的结构化信息追加到摘要末尾
-        # 这样模型既能看到 LLM 生成的自然语言摘要，也能看到结构化的关键数据
-        if pre_compress_info:
-            summary = f"{summary}\n\n## Additional Context (from pre-compress extraction)\n{pre_compress_info}"
+            # 3. 计算摘要预算
+            # 根据剪枝后的内容长度动态计算摘要应该占多少 tokens
+            compressed_chars = self._estimate_content_length(pruned_middle)
+            summary_budget = self._calculate_summary_budget(compressed_chars)
 
-        # 5. 构建压缩后的消息列表
-        # 结构：[头部保护消息] + [摘要 system 消息] + [尾部保护消息]
-        # 为什么摘要作为 system 消息？
-        # - system 消息在对话中具有最高优先级，模型会将其视为背景知识
-        # - 与用户/助手消息区分开，避免模型混淆"历史记录"和"当前对话"
-        compressed_messages = [
-            *head_messages,
-            {"role": "system", "content": f"{SUMMARY_PREFIX}\n\n{summary}"},
-            *tail_messages,
-        ]
+            # 4. 生成摘要
+            # 使用主对话的 model_caller 生成结构化摘要
+            summary = self._generate_summary(pruned_middle, summary_budget, model_caller)
 
-        # 6. 更新前次摘要
-        # 保存当前摘要，用于下次压缩时的"迭代更新"
-        # 迭代更新的优势：保持多次压缩后的信息连贯性，避免信息丢失
-        self._previous_summary = summary
+            # 合并 pre_compress 信息到摘要
+            # 将 Memory Provider 提取的结构化信息追加到摘要末尾
+            # 这样模型既能看到 LLM 生成的自然语言摘要，也能看到结构化的关键数据
+            if pre_compress_info:
+                summary = f"{summary}\n\n## Additional Context (from pre-compress extraction)\n{pre_compress_info}"
 
-        return {
-            "messages": compressed_messages,
-            "summary": summary,
-            "head_count": len(head_messages),
-            "tail_count": len(tail_messages),
-            "compressed_count": len(middle_messages),
-            "tail_messages": tail_messages,
-        }
+            # 5. 构建压缩后的消息列表
+            # 结构：[头部保护消息] + [摘要 system 消息] + [尾部保护消息]
+            # 为什么摘要作为 system 消息？
+            # - system 消息在对话中具有最高优先级，模型会将其视为背景知识
+            # - 与用户/助手消息区分开，避免模型混淆"历史记录"和"当前对话"
+            compressed_messages = [
+                *head_messages,
+                {"role": "system", "content": f"{SUMMARY_PREFIX}\n\n{summary}"},
+                *tail_messages,
+            ]
+
+            # 6. 更新前次摘要
+            # 保存当前摘要，用于下次压缩时的"迭代更新"
+            # 迭代更新的优势：保持多次压缩后的信息连贯性，避免信息丢失
+            self._previous_summary = summary
+
+            # 新增：验证压缩质量
+            validation_result = None
+            if self._validator:
+                validation_result = self._validator.validate(
+                    original_messages=messages,
+                    compressed_messages=compressed_messages,
+                    summary=summary,
+                )
+                if not validation_result.is_valid:
+                    logger.warning(
+                        f"Compression validation failed: {validation_result.warnings}"
+                    )
+                    # 注意：验证失败不回滚，仅记录警告
+                    # 原因：回滚会导致压缩循环，验证失败仍比不压缩好
+
+            # 新增：记录压缩统计（预算追踪）
+            compression_efficiency = 0.0
+            if self._budget_tracker and current_tokens is not None:
+                # 估算压缩后的 token 数
+                after_tokens = self._estimate_tokens(compressed_messages)
+                duration_ms = (time.time() - start_time) * 1000
+
+                record = self._budget_tracker.track_compression(
+                    before_tokens=current_tokens,
+                    after_tokens=after_tokens,
+                    success=True,
+                    duration_ms=duration_ms,
+                )
+                compression_efficiency = self._budget_tracker.get_compression_efficiency()
+
+            # 新增：记录成功到熔断器
+            if self._circuit_breaker:
+                self._circuit_breaker.record_success()
+
+            return {
+                "messages": compressed_messages,
+                "summary": summary,
+                "head_count": len(head_messages),
+                "tail_count": len(tail_messages),
+                "compressed_count": len(middle_messages),
+                "tail_messages": tail_messages,
+                # 新增字段
+                "validation": validation_result.__dict__ if validation_result else None,
+                "compression_efficiency": compression_efficiency,
+                "circuit_breaker_state": self._circuit_breaker.state if self._circuit_breaker else None,
+            }
+
+        except Exception as e:
+            # 新增：记录失败到熔断器和预算追踪器
+            logger.error(f"Compression failed: {e}", exc_info=True)
+
+            if self._circuit_breaker:
+                self._circuit_breaker.record_failure()
+
+            if self._budget_tracker and current_tokens is not None:
+                duration_ms = (time.time() - start_time) * 1000
+                self._budget_tracker.track_compression(
+                    before_tokens=current_tokens,
+                    after_tokens=current_tokens,  # 压缩失败，token 数不变
+                    success=False,
+                    duration_ms=duration_ms,
+                )
+
+            # 返回原始消息，标记压缩失败
+            return {
+                "messages": messages,
+                "summary": "",
+                "head_count": 0,
+                "tail_count": 0,
+                "compressed_count": 0,
+                "tail_messages": [],
+                "error": str(e),
+                "circuit_breaker_state": self._circuit_breaker.state if self._circuit_breaker else None,
+            }
 
     # =========================================================================
     # Session Splitting
@@ -629,26 +794,32 @@ class ContextCompressor(ContextEngine):
         # 钳制到 [MIN_SUMMARY_TOKENS, SUMMARY_TOKENS_CEILING] 范围
         return max(MIN_SUMMARY_TOKENS, min(ratio_budget, SUMMARY_TOKENS_CEILING))
 
-    def _generate_summary(self, messages: List[Dict[str, Any]], budget: int) -> str:
+    def _generate_summary(
+        self,
+        messages: List[Dict[str, Any]],
+        budget: int,
+        model_caller: Callable | None = None,
+    ) -> str:
         """生成结构化摘要。
 
         **摘要生成策略：**
         1. 构建提示：包含结构化模板和消息内容
-        2. 调用辅助 LLM：使用独立的辅助模型，不占用主模型配额
+        2. 调用主对话的 model_caller：复用主模型的凭证和客户端
         3. 失败降级：如果 LLM 调用失败，返回占位符而非抛出异常
 
-        **为什么使用辅助 LLM？**
-        - 成本隔离：摘要生成是后台任务，不应消耗主对话的 token 配额
-        - 模型选择：摘要可以用更便宜的模型（如 qwen-turbo），不需要主模型的能力
-        - 并发安全：辅助 LLM 调用不会阻塞主对话循环
+        **为什么复用主对话的 model_caller？**
+        - 简化架构：无需独立的辅助 LLM 客户端和凭证管理
+        - 一致性：摘要使用与主对话相同的模型，保证理解能力
+        - 可靠性：主对话凭证已验证可用，避免辅助客户端连接失败
 
         **为什么需要失败降级？**
         - 压缩是"优化"而非"必需"，摘要失败不应阻断对话
-        - 占位符告知模型"此处本应有摘要"，比完全丢失上下文更好
+        - 占位符告知模型"摘要生成失败"，模型会更好地处理这种情况
 
         Args:
             messages: 中间消息列表。
             budget: 摘要 token 预算。
+            model_caller: 主对话的模型调用函数。
 
         Returns:
             生成的摘要文本，或失败时的占位符。
@@ -656,10 +827,27 @@ class ContextCompressor(ContextEngine):
         # 构建摘要提示：包含结构化模板、预算和消息内容
         prompt = self._build_summary_prompt(messages, budget)
 
-        # 调用辅助 LLM 生成摘要
+        # 调用主对话的 model_caller 生成摘要
         try:
-            aux_client = self._get_aux_client()
-            summary = aux_client.generate_summary(prompt, budget)
+            if model_caller is None:
+                raise ValueError("model_caller is required for summary generation")
+
+            summary_messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a conversation summarizer. "
+                        "Generate a concise, structured summary of the conversation. "
+                        "Focus on key decisions, progress, and current state."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ]
+
+            response = model_caller(summary_messages, None)
+            summary = response.get("content", "")
+            if not summary:
+                raise ValueError("Empty summary response")
         except Exception as e:
             # 失败降级：记录警告并返回占位符
             # 为什么不用空字符串？因为空字符串会让模型困惑"这里为什么是空的"
@@ -765,6 +953,21 @@ class ContextCompressor(ContextEngine):
         if isinstance(content, str):
             return len(content)
         return 0
+
+    def _estimate_tokens(self, messages: List[Dict[str, Any]]) -> int:
+        """估算消息列表的 token 数。
+
+        使用简单的字符到 token 转换比例（1 token ≈ 4 chars）。
+        这是一个粗略估算，用于预算追踪，不需要精确值。
+
+        Args:
+            messages: 消息列表。
+
+        Returns:
+            估算的 token 数。
+        """
+        total_chars = self._estimate_content_length(messages)
+        return total_chars // CHARS_PER_TOKEN
 
     # =========================================================================
     # 预飞行和响应后压缩

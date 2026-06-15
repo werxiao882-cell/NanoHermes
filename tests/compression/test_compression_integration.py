@@ -46,7 +46,7 @@ class TestCompressionWithSessionDB:
 
         # 执行压缩
         compressor = ContextCompressor(model="gpt-4-turbo")
-        compressor._generate_summary = lambda msgs, budget: "集成测试摘要"
+        compressor._generate_summary = lambda msgs, budget, model_caller=None: "集成测试摘要"
 
         result = compressor.compress(long_messages)
 
@@ -69,7 +69,7 @@ class TestCompressionWithSessionDB:
 
         # 执行压缩
         compressor = ContextCompressor(model="gpt-4-turbo")
-        compressor._generate_summary = lambda msgs, budget: "分裂测试摘要"
+        compressor._generate_summary = lambda msgs, budget, model_caller=None: "分裂测试摘要"
         result = compressor.compress(long_messages)
 
         # 执行会话分裂
@@ -137,7 +137,7 @@ class TestCompressionEdgeCases:
     def test_compress_empty_messages(self):
         """测试压缩空消息列表。"""
         compressor = ContextCompressor(model="gpt-4-turbo")
-        compressor._generate_summary = lambda msgs, budget: "Empty summary"
+        compressor._generate_summary = lambda msgs, budget, model_caller=None: "Empty summary"
         result = compressor.compress([])
         # 即使空消息也应返回有效结果
         assert "messages" in result
@@ -145,7 +145,7 @@ class TestCompressionEdgeCases:
     def test_compress_single_message(self):
         """测试压缩单条消息。"""
         compressor = ContextCompressor(model="gpt-4-turbo")
-        compressor._generate_summary = lambda msgs, budget: "Single summary"
+        compressor._generate_summary = lambda msgs, budget, model_caller=None: "Single summary"
         messages = [{"role": "user", "content": "Hello"}]
         result = compressor.compress(messages)
         assert "messages" in result
@@ -154,7 +154,7 @@ class TestCompressionEdgeCases:
     def test_compress_preserves_system_message(self, long_messages):
         """测试压缩保留 system 消息。"""
         compressor = ContextCompressor(model="gpt-4-turbo")
-        compressor._generate_summary = lambda msgs, budget: "Test summary"
+        compressor._generate_summary = lambda msgs, budget, model_caller=None: "Test summary"
         result = compressor.compress(long_messages)
 
         # 头部保护应包含 system 消息
@@ -164,7 +164,7 @@ class TestCompressionEdgeCases:
     def test_compression_reduces_message_count(self, long_messages):
         """测试压缩确实减少消息数。"""
         compressor = ContextCompressor(model="gpt-4-turbo")
-        compressor._generate_summary = lambda msgs, budget: "Test summary"
+        compressor._generate_summary = lambda msgs, budget, model_caller=None: "Test summary"
         original_count = len(long_messages)
 
         result = compressor.compress(long_messages)
@@ -175,7 +175,7 @@ class TestCompressionEdgeCases:
     def test_summary_prefix_in_compressed_messages(self, long_messages):
         """测试压缩消息包含 SUMMARY_PREFIX。"""
         compressor = ContextCompressor(model="gpt-4-turbo")
-        compressor._generate_summary = lambda msgs, budget: "Test summary"
+        compressor._generate_summary = lambda msgs, budget, model_caller=None: "Test summary"
         result = compressor.compress(long_messages)
 
         summary_msgs = [

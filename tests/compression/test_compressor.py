@@ -1,7 +1,6 @@
 """ContextCompressor 上下文压缩引擎单元测试。"""
 
 import pytest
-from src.config import AuxiliaryConfig
 from src.compression.compressor import (
     ContextCompressor,
     SUMMARY_PREFIX,
@@ -39,14 +38,11 @@ class TestContextCompressorInit:
         assert compressor.protect_first_n == PROTECT_FIRST_N
         assert compressor.protect_last_n == 20
         assert compressor.summary_target_ratio == SUMMARY_RATIO
-        assert compressor.auxiliary_config.provider == "main"
 
     def test_custom_parameters(self):
         """测试自定义参数。"""
-        aux_config = AuxiliaryConfig(provider="openai", model="gpt-4o-mini")
         compressor = ContextCompressor(
             model="gpt-4-turbo",
-            auxiliary_config=aux_config,
             threshold_percent=0.60,
             protect_first_n=5,
             protect_last_n=30,
@@ -54,7 +50,6 @@ class TestContextCompressorInit:
         assert compressor.threshold_percent == 0.60
         assert compressor.protect_first_n == 5
         assert compressor.protect_last_n == 30
-        assert compressor.auxiliary_config.model == "gpt-4o-mini"
 
 
 class TestCompress:
@@ -63,7 +58,7 @@ class TestCompress:
     def test_compress_long_conversation(self, compressor, long_messages):
         """测试压缩长对话。"""
         # Mock summary generation
-        compressor._generate_summary = lambda msgs, budget: "Test summary"
+        compressor._generate_summary = lambda msgs, budget, model_caller=None: "Test summary"
 
         result = compressor.compress(long_messages)
 
@@ -79,7 +74,7 @@ class TestCompress:
 
     def test_summary_contains_correct_prefix(self, compressor, long_messages):
         """测试摘要包含正确前缀。"""
-        compressor._generate_summary = lambda msgs, budget: "Test summary"
+        compressor._generate_summary = lambda msgs, budget, model_caller=None: "Test summary"
 
         result = compressor.compress(long_messages)
 
@@ -90,7 +85,7 @@ class TestCompress:
     def test_iterative_summary_update(self, compressor, long_messages):
         """测试迭代摘要更新。"""
         compressor._previous_summary = "Previous summary"
-        compressor._generate_summary = lambda msgs, budget: "Updated summary"
+        compressor._generate_summary = lambda msgs, budget, model_caller=None: "Updated summary"
 
         result = compressor.compress(long_messages)
 
@@ -102,7 +97,7 @@ class TestCompress:
     def test_first_summary_generation(self, compressor, long_messages):
         """测试首次摘要生成。"""
         assert compressor._previous_summary is None
-        compressor._generate_summary = lambda msgs, budget: "First summary"
+        compressor._generate_summary = lambda msgs, budget, model_caller=None: "First summary"
 
         result = compressor.compress(long_messages)
 

@@ -26,7 +26,7 @@ class TestSessionSplitting:
 
     def test_split_session_creates_new_session(self, compressor, messages_with_tail):
         """测试新 session 创建。"""
-        compressor._generate_summary = lambda msgs, budget: "Test summary"
+        compressor._generate_summary = lambda msgs, budget, model_caller=None: "Test summary"
         result = compressor.compress(messages_with_tail)
 
         # Mock session_db
@@ -62,7 +62,7 @@ class TestSessionSplitting:
 
     def test_parent_session_id_lineage(self, compressor, messages_with_tail):
         """测试 parent_session_id 血缘链。"""
-        compressor._generate_summary = lambda msgs, budget: "Test summary"
+        compressor._generate_summary = lambda msgs, budget, model_caller=None: "Test summary"
         result = compressor.compress(messages_with_tail)
 
         mock_session_db = MagicMock()
@@ -81,7 +81,7 @@ class TestSessionSplitting:
 
     def test_summary_as_first_message(self, compressor, messages_with_tail):
         """测试摘要作为第一条消息。"""
-        compressor._generate_summary = lambda msgs, budget: "Test summary"
+        compressor._generate_summary = lambda msgs, budget, model_caller=None: "Test summary"
         result = compressor.compress(messages_with_tail)
 
         mock_session_db = MagicMock()
@@ -104,7 +104,7 @@ class TestSessionSplitting:
 
     def test_tail_messages_migrated(self, compressor, messages_with_tail):
         """测试尾部消息迁移。"""
-        compressor._generate_summary = lambda msgs, budget: "Test summary"
+        compressor._generate_summary = lambda msgs, budget, model_caller=None: "Test summary"
         result = compressor.compress(messages_with_tail)
         tail_count = result["tail_count"]
 
@@ -135,7 +135,7 @@ class TestOnPreCompressHook:
             call_order.append("pre_compress")
             return "Extracted user preference: likes Python"
 
-        def mock_generate_summary(messages, budget):
+        def mock_generate_summary(messages, budget, model_caller=None):
             call_order.append("generate_summary")
             return "Test summary"
 
@@ -157,7 +157,7 @@ class TestOnPreCompressHook:
             return f"Extracted from {len(user_messages)} user messages"
 
         compressor.set_pre_compress_callback(mock_pre_compress)
-        compressor._generate_summary = lambda msgs, budget: "Base summary"
+        compressor._generate_summary = lambda msgs, budget, model_caller=None: "Base summary"
 
         result = compressor.compress(messages_with_tail)
 
@@ -169,7 +169,7 @@ class TestOnPreCompressHook:
             raise RuntimeError("Provider failed to extract information")
 
         compressor.set_pre_compress_callback(failing_pre_compress)
-        compressor._generate_summary = lambda msgs, budget: "Test summary"
+        compressor._generate_summary = lambda msgs, budget, model_caller=None: "Test summary"
 
         # 不应抛出异常
         result = compressor.compress(messages_with_tail)
