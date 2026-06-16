@@ -382,7 +382,7 @@ class ToolSearch:
 # search_tools 内置工具
 # ============================================================================
 
-def search_tools(query: str = "", mode: str = "auto", task_id=None, **kwargs) -> str:
+def search_tool(query: str = "", mode: str = "auto", task_id=None, **kwargs) -> str:
     """搜索可用的工具。
 
     模型通过此工具按需发现延迟加载的工具。
@@ -437,10 +437,10 @@ def _register_search_tools() -> None:
     from src.tools.core.registry import register_tool
 
     register_tool(
-        name="search_tools",
+        name="search_tool",
         toolset="search",
         schema={
-            "name": "search_tools",
+            "name": "search_tool",
             "description": (
                 "Search for tools that are not currently loaded. Use this when you need a capability "
                 "that none of the visible tools provide, or when you suspect a tool exists for a specific task.\n\n"
@@ -471,7 +471,7 @@ def _register_search_tools() -> None:
                 "required": ["query"],
             },
         },
-        handler=search_tools,
+        handler=search_tool,
         check_fn=check_search_tools_requirements,
         description="搜索可用的工具",
         defer_loading=False,

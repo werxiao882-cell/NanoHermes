@@ -128,51 +128,51 @@ def _format_news_results(results: list[dict[str, Any]]) -> list[dict[str, str]]:
 
 
 SCHEMA = {
-    "type": "function",
-    "function": {
-        "name": "web_search",
-        "description": (
-            "搜索互联网获取实时信息。适用于查询最新新闻、技术文档、"
-            "API 参考、当前事件等需要实时数据的场景。"
-            "返回结构化的搜索结果，包含标题、链接和摘要。"
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "搜索关键词",
-                },
-                "max_results": {
-                    "type": "integer",
-                    "description": "最大返回结果数（默认 5，最大 20）",
-                    "default": 5,
-                },
-                "region": {
-                    "type": "string",
-                    "description": "搜索区域（默认 wt-wt 全球，可选 zh-cn、en-us 等）",
-                    "default": "wt-wt",
-                },
-                "safesearch": {
-                    "type": "string",
-                    "enum": ["on", "moderate", "off"],
-                    "description": "安全搜索级别（默认 moderate）",
-                    "default": "moderate",
-                },
-                "timelimit": {
-                    "type": "string",
-                    "enum": ["d", "w", "m", "y"],
-                    "description": "时间限制：d=过去一天, w=过去一周, m=过去一月, y=过去一年",
-                },
-                "backend": {
-                    "type": "string",
-                    "enum": ["text", "news"],
-                    "description": "搜索类型：text=网页搜索（默认）, news=新闻搜索",
-                    "default": "text",
-                },
+    "name": "web_search",
+    "description": (
+        "Search the internet for real-time information. Use for querying latest news, "
+        "technical documentation, API references, current events, or any data that requires "
+        "up-to-date information. Returns structured search results with titles, URLs, and snippets.\n\n"
+        "Two backends:\n"
+        "- text (default): General web search\n"
+        "- news: News-specific search with date and source information"
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Search keywords",
             },
-            "required": ["query"],
+            "max_results": {
+                "type": "integer",
+                "description": "Maximum number of results to return (default: 5, max: 20)",
+                "default": 5,
+            },
+            "region": {
+                "type": "string",
+                "description": "Search region (default: 'wt-wt' for worldwide, options: 'zh-cn', 'en-us', etc.)",
+                "default": "wt-wt",
+            },
+            "safesearch": {
+                "type": "string",
+                "enum": ["on", "moderate", "off"],
+                "description": "Safe search level (default: moderate)",
+                "default": "moderate",
+            },
+            "timelimit": {
+                "type": "string",
+                "enum": ["d", "w", "m", "y"],
+                "description": "Time filter: d=past day, w=past week, m=past month, y=past year",
+            },
+            "backend": {
+                "type": "string",
+                "enum": ["text", "news"],
+                "description": "Search type: 'text' for web search (default), 'news' for news search",
+                "default": "text",
+            },
         },
+        "required": ["query"],
     },
 }
 
