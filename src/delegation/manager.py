@@ -615,6 +615,7 @@ class DelegationManager:
                 child_session_id = self._build_child_session_id(config)
                 self._record_child_session_start(
                     child_jsonl_store, child_session_id, config,
+                    tools_schema=child_tools,
                 )
                 self._subscribe_child_jsonl_handler(
                     child_loop, child_jsonl_store, child_session_id,
@@ -741,13 +742,15 @@ class DelegationManager:
         jsonl_store,
         session_id: str,
         config: ChildAgentConfig,
+        tools_schema: list[dict[str, Any]] | None = None,
     ) -> None:
         """写入子 Agent 的 session_start 记录和初始 user 消息。"""
         try:
             jsonl_store.start_session(
                 session_id=session_id,
                 model="child-agent",
-                tools_schema=None,
+                tools_schema=tools_schema,
+                system_prompt=config.system_prompt if config.system_prompt else None,
             )
             jsonl_store.append_message(
                 session_id=session_id,
@@ -779,6 +782,8 @@ class DelegationManager:
             message = data.get("message", {})
             role = message.get("role")
             content = message.get("content") or ""
+            reasoning = data.get("reasoning")
+            usage = data.get("usage")
 
             try:
                 if role == "assistant" and message.get("tool_calls"):
@@ -786,6 +791,7 @@ class DelegationManager:
                         session_id, role="assistant",
                         content=content,
                         tool_calls=message["tool_calls"],
+                        reasoning=reasoning, usage=usage,
                     )
                 elif role == "tool":
                     jsonl_store.append_message(
@@ -797,6 +803,7 @@ class DelegationManager:
                 elif role == "assistant":
                     jsonl_store.append_message(
                         session_id, role="assistant", content=content,
+                        reasoning=reasoning, usage=usage,
                     )
             except Exception as e:
                 logger.debug(f"子 Agent JSONL 写入失败 [{session_id}]: {e}")

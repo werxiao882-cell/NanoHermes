@@ -4,7 +4,7 @@
 每条消息一行 JSON，增量追加，不重复存储历史消息。
 
 记录类型：
-- session_start: 会话元数据（model, session_id, tools_schema）
+- session_start: 会话元数据（model, session_id, system_prompt, tools_schema）
 - user: 用户消息
 - assistant: 助手回复（含 reasoning, usage）
 - tool_call: 工具调用（含 tool_name, arguments）
@@ -57,13 +57,20 @@ class JsonlSessionStore:
         session_id: str,
         model: str,
         tools_schema: list[dict[str, Any]] | None = None,
+        system_prompt: str | None = None,
     ) -> None:
-        """记录会话开始，写入元数据和工具 schema。
+        """记录会话开始，写入元数据、系统提示和工具 schema。
+
+        设计理由：
+        - 系统提示和工具列表在会话开始时写入一次，后续消息不再重复存储
+        - 恢复会话时可以从 session_start 记录中获取完整的上下文信息
+        - system_prompt 记录完整的系统提示文本，便于调试和审计
 
         Args:
             session_id: 会话 ID。
             model: 使用的模型名称。
             tools_schema: 工具 schema 列表（只存一次）。
+            system_prompt: 完整的系统提示文本。
         """
         record = {
             "type": "session_start",
@@ -71,6 +78,8 @@ class JsonlSessionStore:
             "model": model,
             "timestamp": time.time(),
         }
+        if system_prompt:
+            record["system_prompt"] = system_prompt
         if tools_schema:
             record["tools"] = tools_schema
         self._append_record(session_id, record)

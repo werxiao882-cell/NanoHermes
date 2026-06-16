@@ -1057,6 +1057,18 @@ class TUIApp:
             # 设计理由：在首次用户输入前创建会话，确保 session_id 有效
             self.session_id = self.session_db.create_session(title="新会话", model=self.model)
             self.state.session_id = self.session_id
+            # 写入 JSONL session_start 记录（含系统提示和工具列表）
+            # 设计理由：在会话开始时记录完整上下文，便于会话恢复和调试
+            if self.jsonl_store:
+                try:
+                    self.jsonl_store.start_session(
+                        session_id=self.session_id,
+                        model=self.model,
+                        tools_schema=self.tool_schemas if self.tool_schemas else None,
+                        system_prompt=self.system_prompt if self.system_prompt else None,
+                    )
+                except Exception as e:
+                    logger.debug(f"Failed to write session_start to JSONL: {e}")
             self.console.print(f"[dim]新会话已创建: {self.session_id}[/dim]\n")
 
         self.print_banner()

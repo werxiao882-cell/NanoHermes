@@ -165,3 +165,65 @@ class TestGetMessageCount:
         """测试统计不存在的会话。"""
         count = store.get_message_count("non-existent")
         assert count == 0
+
+
+class TestStartSession:
+    """测试 start_session 方法。"""
+
+    def test_start_session_basic(self, store):
+        """测试基本的会话开始记录。"""
+        store.start_session("session-1", model="gpt-4")
+
+        messages = store.load_messages("session-1")
+        assert len(messages) == 1
+        assert messages[0]["type"] == "session_start"
+        assert messages[0]["session_id"] == "session-1"
+        assert messages[0]["model"] == "gpt-4"
+        assert "timestamp" in messages[0]
+
+    def test_start_session_with_tools(self, store):
+        """测试带工具 schema 的会话开始记录。"""
+        tools = [{"name": "read_file", "description": "Read a file"}]
+        store.start_session("session-1", model="gpt-4", tools_schema=tools)
+
+        messages = store.load_messages("session-1")
+        assert messages[0]["tools"] == tools
+
+    def test_start_session_with_system_prompt(self, store):
+        """测试带系统提示的会话开始记录。"""
+        system_prompt = "You are a helpful assistant."
+        store.start_session("session-1", model="gpt-4", system_prompt=system_prompt)
+
+        messages = store.load_messages("session-1")
+        assert messages[0]["system_prompt"] == system_prompt
+
+    def test_start_session_with_all_fields(self, store):
+        """测试包含所有字段的会话开始记录。"""
+        tools = [{"name": "terminal", "description": "Run commands"}]
+        system_prompt = "You are Hermes, an AI assistant."
+        store.start_session(
+            "session-1",
+            model="claude-3",
+            tools_schema=tools,
+            system_prompt=system_prompt,
+        )
+
+        messages = store.load_messages("session-1")
+        record = messages[0]
+        assert record["type"] == "session_start"
+        assert record["session_id"] == "session-1"
+        assert record["model"] == "claude-3"
+        assert record["system_prompt"] == system_prompt
+        assert record["tools"] == tools
+
+    def test_start_session_then_messages(self, store):
+        """测试会话开始后追加消息的完整流程。"""
+        store.start_session("session-1", model="gpt-4", system_prompt="System prompt")
+        store.append_message("session-1", "user", "Hello")
+        store.append_message("session-1", "assistant", "Hi!", reasoning="Thinking...")
+
+        messages = store.load_messages("session-1")
+        assert len(messages) == 3
+        assert messages[0]["type"] == "session_start"
+        assert messages[1]["role"] == "user"
+        assert messages[2]["reasoning"] == "Thinking..."

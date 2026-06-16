@@ -188,6 +188,8 @@ class ConversationLoop:
                 self.events.emit(EventType.MESSAGE_APPEND, {
                     "message": assistant_message,
                     "messages": messages,
+                    "reasoning": response.get("reasoning"),
+                    "usage": response.get("usage"),
                 })
 
                 for tool_call in response["tool_calls"]:
@@ -244,6 +246,8 @@ class ConversationLoop:
 
             # 文本响应，结束循环
             # 将最终 assistant 消息追加到 messages 并触发持久化
+            # 设计理由：reasoning 单独传递而非加入 message dict
+            # 因为 messages 列表会直接发送给 LLM API，API 不接受额外字段
             final_message = {
                 "role": "assistant",
                 "content": response.get("content", ""),
@@ -252,6 +256,8 @@ class ConversationLoop:
             self.events.emit(EventType.MESSAGE_APPEND, {
                 "message": final_message,
                 "messages": messages,
+                "reasoning": response.get("reasoning"),
+                "usage": response.get("usage"),
             })
 
             total_elapsed = time.time() - start_time

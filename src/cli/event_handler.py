@@ -249,11 +249,14 @@ class ConversationEventHandler:
         if role == "assistant" and message.get("tool_calls"):
             # assistant 消息含 tool_calls：JSONL 存完整结构，SQLite 逐个存 tool_call
             tool_calls = message["tool_calls"]
+            reasoning = data.get("reasoning")
+            usage = data.get("usage")
             if self.jsonl_store:
                 try:
                     self.jsonl_store.append_message(
                         self.session_id, role="assistant",
                         content=content, tool_calls=tool_calls,
+                        reasoning=reasoning, usage=usage,
                     )
                 except Exception as e:
                     logger.debug(f"Failed to save assistant(tool_calls) to JSONL: {e}")
@@ -297,6 +300,10 @@ class ConversationEventHandler:
 
         elif role == "assistant":
             # 纯文本 assistant 消息（最终响应）
+            # 设计理由：reasoning 和 usage 从事件数据而非 message dict 中获取
+            # 因为 message dict 需要保持 OpenAI API 格式，不含额外字段
+            reasoning = data.get("reasoning")
+            usage = data.get("usage")
             if self.session_db:
                 try:
                     self.session_db.insert_message(self.session_id, "assistant", content)
@@ -306,6 +313,7 @@ class ConversationEventHandler:
                 try:
                     self.jsonl_store.append_message(
                         self.session_id, role="assistant", content=content,
+                        reasoning=reasoning, usage=usage,
                     )
                 except Exception as e:
                     logger.debug(f"Failed to save assistant message to JSONL: {e}")
