@@ -13,6 +13,7 @@
 - 支持 18 种事件类型，覆盖完整生命周期（含 3 种委托事件）
 - 外部功能通过 loop.events.on() 订阅事件接入
 - Debug 模式通过 DebugHandler 订阅事件实现，与核心循环完全解耦
+- 责任链拦截机制：loop.events.intercept() 注册拦截器，可修改 data 或阻断流程
 
 动态工具管理：
 - 支持 Tool Search 机制：启动时仅加载核心工具，其余通过搜索发现
@@ -105,6 +106,7 @@ class ConversationLoop:
         iteration = 0
         start_time = time.time()
 
+        # 仅观察事件：忽略返回值
         self.events.emit(EventType.LOOP_START, {
             "messages": messages,
             "tools": tools,
@@ -113,6 +115,7 @@ class ConversationLoop:
 
         while iteration < self.max_iterations:
             if self._interrupted:
+                # 仅观察事件：忽略返回值
                 self.events.emit(EventType.INTERRUPT, {"iteration": iteration})
                 break
 
@@ -121,58 +124,116 @@ class ConversationLoop:
             # 合并 always_loaded + discovered tools
             current_tools = self._get_current_tools()
 
-            self.events.emit(EventType.ITERATION_START, {
+            # 可修改事件：从 data 读回修改后的值
+            iter_data = {
                 "iteration": iteration,
                 "messages": messages,
-            })
+            }
+            self.events.emit(EventType.ITERATION_START, iter_data)
+            messages = iter_data.get("messages", messages)
 
             # 调用模型
             model_start = time.time()
-            
+
             # 调试日志：记录发送给 API 的消息角色
             message_roles = [m.get("role", "unknown") for m in messages]
             logger.debug(f"迭代 {iteration}: 发送消息角色 = {message_roles}")
-            
-            try:
-                self.events.emit(EventType.MODEL_REQUEST, {
-                    "messages": messages,
-                    "tools": current_tools,
-                    "iteration": iteration,
-                })
-                response = self._call_model(messages, current_tools)
-                model_elapsed = time.time() - model_start
 
-                self.events.emit(EventType.MODEL_RESPONSE, {
-                    "response": response,
-                    "iteration": iteration,
-                    "elapsed": model_elapsed,
-                })
-            except Exception as e:
+            # 可阻断事件：MODEL_REQUEST
+            model_req_data = {
+                "messages": messages,
+                "tools": current_tools,
+                "iteration": iteration,
+            }
+            model_req_result = self.events.emit(EventType.MODEL_REQUEST, model_req_data)
+
+            if model_req_result.blocked:
+                # 拦截器阻断模型调用，使用 block_message 作为响应
+                logger.warning(f"MODEL_REQUEST 被拦截: {model_req_result.message}")
                 model_elapsed = time.time() - model_start
-                classified = self._error_classifier.classify(
-                    getattr(e, "status_code", None),
-                    str(e),
-                )
-                self.events.emit(EventType.MODEL_ERROR, {
-                    "error": e,
-                    "classified": classified,
-                    "iteration": iteration,
-                    "elapsed": model_elapsed,
-                })
-                if classified.retryable and iteration < self.max_iterations:
-                    logger.warning(f"可重试错误，重试中: {classified.message}")
-                    self.events.emit(EventType.MODEL_RETRY, {
-                        "error": e,
-                        "attempt": iteration,
+                response = {
+                    "content": model_req_result.message,
+                    "tool_calls": None,
+                    "reasoning": None,
+                    "usage": None,
+                    "raw_response": None,
+                }
+            else:
+                # 从 data 读回可能被拦截器修改的值
+                messages = model_req_data.get("messages", messages)
+                current_tools = model_req_data.get("tools", current_tools)
+
+                try:
+                    response = self._call_model(messages, current_tools)
+                    model_elapsed = time.time() - model_start
+
+                    # 可修改事件：从 data 读回修改后的值
+                    model_resp_data = {
+                        "response": response,
                         "iteration": iteration,
-                    })
-                    continue
-                raise
+                        "elapsed": model_elapsed,
+                    }
+                    self.events.emit(EventType.MODEL_RESPONSE, model_resp_data)
+                    response = model_resp_data.get("response", response)
 
-            self.events.emit(EventType.ITERATION_END, {
+                except Exception as e:
+                    model_elapsed = time.time() - model_start
+                    classified = self._error_classifier.classify(
+                        getattr(e, "status_code", None),
+                        str(e),
+                    )
+                    # 仅观察事件：忽略返回值
+                    self.events.emit(EventType.MODEL_ERROR, {
+                        "error": e,
+                        "classified": classified,
+                        "iteration": iteration,
+                        "elapsed": model_elapsed,
+                    })
+                    if classified.retryable and iteration < self.max_iterations:
+                        logger.warning(f"可重试错误，重试中: {classified.message}")
+                        # 仅观察事件：忽略返回值
+                        self.events.emit(EventType.MODEL_RETRY, {
+                            "error": e,
+                            "attempt": iteration,
+                            "iteration": iteration,
+                        })
+                        continue
+                    raise
+
+            # 可阻断事件：ITERATION_END（STOP 语义）
+            iter_end_data = {
                 "iteration": iteration,
                 "response": response,
-            })
+            }
+            iter_end_result = self.events.emit(EventType.ITERATION_END, iter_end_data)
+
+            if iter_end_result.blocked:
+                # 拦截器阻断下一轮，结束循环
+                logger.warning(f"ITERATION_END 被拦截（STOP）: {iter_end_result.message}")
+                total_elapsed = time.time() - start_time
+                result = {
+                    "final_response": iter_end_result.message,
+                    "reasoning": None,
+                    "iterations": iteration,
+                    "usage": None,
+                    "raw_response": None,
+                }
+                # 仅观察事件：忽略返回值
+                self.events.emit(EventType.LOOP_END, {
+                    "result": result,
+                    "iterations": iteration,
+                    "total_elapsed": total_elapsed,
+                })
+                # 触发后台任务
+                if self._background_scheduler:
+                    try:
+                        self._background_scheduler.on_loop_end(
+                            messages=messages,
+                            iteration=iteration,
+                        )
+                    except Exception as e:
+                        logger.warning(f"后台任务触发失败: {e}")
+                return result
 
             # 检查是否有工具调用
             if response.get("tool_calls"):
@@ -185,12 +246,15 @@ class ConversationLoop:
                 }
                 messages.append(assistant_message)
 
-                self.events.emit(EventType.MESSAGE_APPEND, {
+                # 可修改事件：从 data 读回修改后的值
+                msg_data_1 = {
                     "message": assistant_message,
                     "messages": messages,
                     "reasoning": response.get("reasoning"),
                     "usage": response.get("usage"),
-                })
+                }
+                self.events.emit(EventType.MESSAGE_APPEND, msg_data_1)
+                assistant_message = msg_data_1.get("message", assistant_message)
 
                 for tool_call in response["tool_calls"]:
                     func = tool_call.get("function", {})
@@ -199,23 +263,37 @@ class ConversationLoop:
 
                     tool_start = time.time()
 
-                    self.events.emit(EventType.TOOL_START, {
+                    # 可阻断事件：TOOL_START
+                    tool_start_data = {
                         "tool_name": tool_name,
                         "tool_args": tool_args,
                         "tool_call": tool_call,
-                    })
+                    }
+                    tool_start_result = self.events.emit(EventType.TOOL_START, tool_start_data)
 
-                    try:
-                        result = self._dispatch_tool(tool_call)
-                    except Exception as e:
-                        tool_elapsed = time.time() - tool_start
-                        self.events.emit(EventType.TOOL_ERROR, {
-                            "tool_name": tool_name,
-                            "error": e,
-                            "tool_call": tool_call,
-                            "elapsed": tool_elapsed,
-                        })
-                        result = json.dumps({"error": str(e)})
+                    if tool_start_result.blocked:
+                        # 拦截器阻断工具执行
+                        logger.warning(f"TOOL_START 被拦截: {tool_name} - {tool_start_result.message}")
+                        result = json.dumps({"error": tool_start_result.message})
+                    else:
+                        # 从 data 读回可能被拦截器修改的值
+                        tool_args = tool_start_data.get("tool_args", tool_args)
+                        # 更新 tool_call 中的 arguments（如果拦截器修改了）
+                        if tool_args != func.get("arguments", "{}"):
+                            func["arguments"] = tool_args if isinstance(tool_args, str) else json.dumps(tool_args)
+
+                        try:
+                            result = self._dispatch_tool(tool_call)
+                        except Exception as e:
+                            tool_elapsed = time.time() - tool_start
+                            # 仅观察事件：忽略返回值
+                            self.events.emit(EventType.TOOL_ERROR, {
+                                "tool_name": tool_name,
+                                "error": e,
+                                "tool_call": tool_call,
+                                "elapsed": tool_elapsed,
+                            })
+                            result = json.dumps({"error": str(e)})
 
                     # search_tools 调用：解析结果并添加到 discovered tools
                     if tool_name == "search_tools":
@@ -223,13 +301,16 @@ class ConversationLoop:
 
                     tool_elapsed = time.time() - tool_start
 
-                    self.events.emit(EventType.TOOL_END, {
+                    # 可修改事件：从 data 读回修改后的值
+                    tool_end_data = {
                         "tool_name": tool_name,
                         "tool_args": tool_args,
                         "result": result,
                         "elapsed": tool_elapsed,
                         "tool_call": tool_call,
-                    })
+                    }
+                    self.events.emit(EventType.TOOL_END, tool_end_data)
+                    result = tool_end_data.get("result", result)
 
                     tool_message = {
                         "role": "tool",
@@ -238,10 +319,13 @@ class ConversationLoop:
                     }
                     messages.append(tool_message)
 
-                    self.events.emit(EventType.MESSAGE_APPEND, {
+                    # 可修改事件：从 data 读回修改后的值
+                    msg_data_2 = {
                         "message": tool_message,
                         "messages": messages,
-                    })
+                    }
+                    self.events.emit(EventType.MESSAGE_APPEND, msg_data_2)
+                    tool_message = msg_data_2.get("message", tool_message)
                 continue
 
             # 文本响应，结束循环
@@ -253,12 +337,16 @@ class ConversationLoop:
                 "content": response.get("content", ""),
             }
             messages.append(final_message)
-            self.events.emit(EventType.MESSAGE_APPEND, {
+
+            # 可修改事件：从 data 读回修改后的值
+            msg_data_3 = {
                 "message": final_message,
                 "messages": messages,
                 "reasoning": response.get("reasoning"),
                 "usage": response.get("usage"),
-            })
+            }
+            self.events.emit(EventType.MESSAGE_APPEND, msg_data_3)
+            final_message = msg_data_3.get("message", final_message)
 
             total_elapsed = time.time() - start_time
             result = {
@@ -269,6 +357,7 @@ class ConversationLoop:
                 "raw_response": response.get("raw_response"),
             }
 
+            # 仅观察事件：忽略返回值
             self.events.emit(EventType.LOOP_END, {
                 "result": result,
                 "iterations": iteration,
@@ -289,6 +378,7 @@ class ConversationLoop:
 
         # 达到最大迭代
         total_elapsed = time.time() - start_time
+        # 仅观察事件：忽略返回值
         self.events.emit(EventType.MAX_ITERATIONS, {"iterations": iteration})
 
         result = {
@@ -299,6 +389,7 @@ class ConversationLoop:
             "raw_response": None,
         }
 
+        # 仅观察事件：忽略返回值
         self.events.emit(EventType.LOOP_END, {
             "result": result,
             "iterations": iteration,

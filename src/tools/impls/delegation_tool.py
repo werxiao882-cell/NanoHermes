@@ -37,10 +37,17 @@ def delegate_task(
     role: str = "leaf",
     toolsets: list[str] = None,
     context: str = "",
+    background: bool = True,
+    name: str = "",
     task_id: str = None,
     **kwargs,
 ) -> str:
     """委托任务给子 Agent 执行。
+
+    两种模式：
+    - background=True（默认）：立即返回 task_id，子 Agent 后台运行。
+      使用 /agents 查看状态，/agent <id> 查看 transcript。
+    - background=False：阻塞等待子 Agent 完成（兼容旧行为）。
 
     两种调用方式：
     - 单任务：传入 goal
@@ -58,7 +65,6 @@ def delegate_task(
         }, ensure_ascii=False)
 
     # 处理 LLM 可能将 tasks 二次序列化为字符串的情况
-    # 日志中观察到: "tasks": "[{\"goal\": \"...\"}, ...]" 而非 "tasks": [{"goal": "..."}, ...]
     if isinstance(tasks, str):
         try:
             tasks = json.loads(tasks)
@@ -73,10 +79,42 @@ def delegate_task(
         toolsets = [t for t in toolsets if t not in DELEGATE_BLOCKED_TOOLS]
 
     try:
-        # 优先使用 DelegationManager（真实执行）
         from src.delegation import get_manager
         mgr = get_manager()
         if mgr is not None:
+            # ── 后台模式（非阻塞）──
+            if background:
+                if tasks:
+                    task_ids = []
+                    for i, t in enumerate(tasks[:3]):
+                        tid = mgr.delegate_background(
+                            goal=t.get("goal", t.get("description", "")),
+                            role=role,
+                            toolsets=toolsets,
+                            context=t.get("context", context),
+                            name=t.get("name", f"task-{i+1}"),
+                        )
+                        task_ids.append(tid)
+                    return json.dumps({
+                        "status": "dispatched",
+                        "task_ids": task_ids,
+                        "message": f"Dispatched {len(task_ids)} background agents. "
+                                   f"/agents to view status, /agent <id> for transcript."
+                    }, ensure_ascii=False)
+                else:
+                    tid = mgr.delegate_background(
+                        goal=goal, role=role,
+                        toolsets=toolsets, context=context,
+                        name=name,
+                    )
+                    return json.dumps({
+                        "status": "dispatched",
+                        "task_id": tid,
+                        "message": f"Background agent started: {tid}. "
+                                   f"/agents to view status, /agent {tid} for transcript."
+                    }, ensure_ascii=False)
+
+            # ── 阻塞模式（兼容旧行为）──
             results = mgr.delegate_task(
                 goal=goal,
                 tasks=tasks,
@@ -267,6 +305,14 @@ register_tool(
                     "type": "string",
                     "enum": ["leaf", "orchestrator"],
                     "description": "Role of the child agent. 'leaf' (default) = focused worker, cannot delegate further. 'orchestrator' = can use delegate_task to spawn its own workers."
+                },
+                "background": {
+                    "type": "boolean",
+                    "description": "Run subagent in background (default: true). Returns immediately with task_id. Use /agents to view status, /agent <id> for transcript. Set to false to block until completion."
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Optional name for the task (e.g., 'auth-refactor'). Used in /agents display and bottom toolbar."
                 },
             },
             "required": [],

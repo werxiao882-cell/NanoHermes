@@ -884,3 +884,211 @@ class DelegationManager:
         self._current_depth = 0
         self._active_children.clear()
         self._completed_results.clear()
+
+    # ── 后台委托（非阻塞）──
+
+    def delegate_background(
+        self,
+        goal: str,
+        role: AgentRole | str = AgentRole.LEAF,
+        toolsets: list[str] | None = None,
+        context: str | None = None,
+        name: str = "",
+    ) -> str:
+        """后台委托：立即返回 task_id，子 Agent 在后台运行。
+
+        与 delegate_single 的区别：
+        - 不阻塞调用者（不等待 done_event）
+        - 返回 task_id 而非 DelegationResult
+        - 子 Agent 事件通过 EventBus 转发到 TUI
+        - 完成后通过 task-notification 回流结果
+
+        Args:
+            goal: 子 Agent 的目标描述。
+            role: 角色（leaf/orchestrator）。
+            toolsets: 工具集列表。
+            context: 额外上下文。
+            name: 任务名称（用于显示，如 "auth-refactor"）。
+
+        Returns:
+            task_id: 任务唯一 ID。
+        """
+        if isinstance(role, str):
+            role = AgentRole(role.lower())
+
+        task_id = str(uuid.uuid4())[:8]
+        task_name = name or goal[:30].replace(" ", "-").lower()
+
+        config = self.build_child_agent_config(
+            goal=goal, role=role, toolsets=toolsets,
+            context=context, task_id=task_id,
+        )
+
+        # 发射 DELEGATION_START 事件（TUI 据此注册 AgentTask）
+        delegation_start_data = {
+            "child_task_id": task_id,
+            "task_id": task_id,
+            "goal": goal,
+            "name": task_name,
+            "role": config.role,
+            "depth": self._current_depth,
+        }
+        self._emit_event("DELEGATION_START", delegation_start_data)
+        self._forward_to_parent_delegation("DELEGATION_START", delegation_start_data)
+
+        # 在后台线程运行（不等待）
+        thread = threading.Thread(
+            target=self._run_background_agent,
+            args=(config, task_name),
+            daemon=True,
+            name=f"bg-agent-{task_id}",
+        )
+        thread.start()
+
+        return task_id
+
+    def _run_background_agent(
+        self,
+        config: ChildAgentConfig,
+        task_name: str,
+    ) -> None:
+        """后台线程：运行子 Agent 并发射完成/失败事件。
+
+        与 _execute_single_agent 的区别：
+        - 不等待结果（无 done_event.wait）
+        - 完成后直接发射 DELEGATION_COMPLETE/FAIL 事件
+        - TUI 的 event_handler 据此更新 AgentTask 状态
+        """
+        task_id = config.task_id
+        start_time = time.time()
+
+        self._active_children[task_id] = {
+            "config": config,
+            "start_time": start_time,
+            "status": "running",
+            "goal": config.goal,
+            "role": config.role,
+        }
+
+        try:
+            if not self._model_caller:
+                summary = self._simulate_execution(config)
+                duration = time.time() - start_time
+                self._emit_background_complete(task_id, summary, 0, duration)
+                return
+
+            # 构建子 Agent 独立的消息列表
+            child_messages = [
+                {"role": "system", "content": config.system_prompt},
+                {"role": "user", "content": config.goal},
+            ]
+
+            child_tools = self._get_filtered_tool_schemas(config.blocked_tools)
+
+            from src.conversation.loop import ConversationLoop
+            child_loop = ConversationLoop(
+                model_call=self._model_caller,
+                tool_dispatch=self._tool_dispatch,
+                max_iterations=30,
+            )
+
+            # JSONL 录制
+            child_jsonl_store = self._create_child_jsonl_store()
+            child_session_id = self._build_child_session_id(config)
+            self._record_child_session_start(
+                child_jsonl_store, child_session_id, config,
+                tools_schema=child_tools,
+            )
+            self._subscribe_child_jsonl_handler(
+                child_loop, child_jsonl_store, child_session_id,
+            )
+
+            # 事件转发 + MESSAGE_APPEND → AgentTask
+            self._subscribe_child_event_forwarding(child_loop, task_id)
+            self._subscribe_child_message_to_task(child_loop, task_id)
+
+            self._current_depth += 1
+            try:
+                loop_result = child_loop.run(
+                    messages=child_messages,
+                    tools=child_tools if child_tools else None,
+                )
+            finally:
+                self._current_depth -= 1
+
+            summary = loop_result.get("final_response", "")
+            iterations = loop_result.get("iterations", 0)
+            duration = time.time() - start_time
+
+            self._active_children[task_id]["status"] = "completed"
+            self._emit_background_complete(task_id, summary, iterations, duration)
+
+        except Exception as e:
+            logger.error(f"后台子 Agent 执行失败 [{task_id}]: {e}", exc_info=True)
+            duration = time.time() - start_time
+            self._active_children[task_id]["status"] = "failed"
+            self._emit_background_fail(task_id, str(e), duration)
+
+        finally:
+            self._active_children.pop(task_id, None)
+
+    def _subscribe_child_message_to_task(
+        self,
+        child_loop,
+        task_id: str,
+    ) -> None:
+        """订阅子 Agent 的 MESSAGE_APPEND 事件，转发到 AgentTaskRegistry。
+
+        通过父 EventBus 转发，TUI 的 event_handler 监听后更新 AgentTask.messages。
+        """
+        if not self._parent_event_bus:
+            return
+
+        from src.conversation.events import EventType
+
+        def _forward_message(data: dict[str, Any]) -> None:
+            forwarded = {**data, "child_task_id": task_id}
+            self._forward_to_parent(EventType.MESSAGE_APPEND, forwarded)
+
+        child_loop.events.on(EventType.MESSAGE_APPEND, _forward_message)
+
+    def _emit_background_complete(
+        self,
+        task_id: str,
+        summary: str,
+        tool_calls: int,
+        duration: float,
+    ) -> None:
+        """发射后台任务完成事件。"""
+        data = {
+            "child_task_id": task_id,
+            "task_id": task_id,
+            "summary": summary,
+            "tool_calls": tool_calls,
+            "duration": duration,
+        }
+        self._emit_event("DELEGATION_COMPLETE", data)
+        self._forward_to_parent_delegation("DELEGATION_COMPLETE", data)
+        self._completed_results.append(DelegationResult(
+            task_id=task_id, success=True, summary=summary,
+            duration=duration, tool_calls=tool_calls,
+        ))
+
+    def _emit_background_fail(
+        self,
+        task_id: str,
+        error: str,
+        duration: float,
+    ) -> None:
+        """发射后台任务失败事件。"""
+        data = {
+            "child_task_id": task_id,
+            "task_id": task_id,
+            "error": error,
+            "duration": duration,
+        }
+        self._emit_event("DELEGATION_FAIL", data)
+        self._forward_to_parent_delegation("DELEGATION_FAIL", data)
+        self._completed_results.append(DelegationResult(
+            task_id=task_id, success=False, error=error, duration=duration,
+        ))
