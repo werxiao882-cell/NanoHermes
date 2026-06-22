@@ -237,6 +237,31 @@ def _register_terminal_tool() -> None:
     """注册终端工具到全局注册表。"""
     from src.tools.core.registry import register_tool
 
+    def _terminal_handler(
+        command: str = "",
+        workdir: str | None = None,
+        timeout: float = 300.0,
+        background: bool = False,
+        task_id: str | None = None,
+        **kwargs,
+    ) -> str:
+        """终端工具处理器。
+
+        设计理由：
+        - workdir 参数名与 schema 保持一致，避免参数丢失
+        - background=true 时委托给 process_tool._start_process()，
+          实现后台进程管理与 process 工具的联动
+        """
+        if background:
+            from src.tools.impls.process_tool import _start_process
+            return _start_process(command=command, cwd=workdir or "")
+
+        return execute_command(
+            command=command,
+            cwd=workdir,
+            timeout=timeout,
+        )
+
     register_tool(
         name="terminal",
         toolset="terminal",
@@ -254,16 +279,10 @@ def _register_terminal_tool() -> None:
                 "Set timeout=300 for long builds/scripts — you'll still get the result in seconds if it's fast. "
                 "Prefer foreground for short commands.\n"
                 "Background: Set background=true to get a session_id. "
-                "Almost always pair with notify_on_complete=true — bg without notify runs SILENTLY and you have no way to learn it finished "
-                "short of calling process(action='poll') yourself. "
-                "For servers/watchers, do NOT use shell-level background wrappers (nohup/disown/setsid/trailing '&') in foreground mode. "
-                "Use background=true so Hermes can track lifecycle and output.\n"
+                "Use process(action='poll') for progress checks, process(action='wait') to block until done.\n"
                 "After starting a server, verify readiness with a health check or log signal, then run tests in a separate terminal() call. "
                 "Avoid blind sleep loops.\n"
-                "Use process(action=\"poll\") for progress checks, process(action=\"wait\") to block until done.\n"
                 "Working directory: Use 'workdir' for per-command cwd.\n"
-                "PTY mode: Set pty=true for interactive CLI tools (Codex, Claude Code, Python REPL).\n\n"
-                "Do NOT use vim/nano/interactive tools without pty=true — they hang without a pseudo-terminal. "
                 "Pipe git output to cat if it might page."
             ),
             "parameters": {
@@ -275,37 +294,23 @@ def _register_terminal_tool() -> None:
                     },
                     "background": {
                         "type": "boolean",
-                        "description": "Run the command in the background. Almost always pair with notify_on_complete=true.",
+                        "description": "Run the command in the background. Returns a session_id for use with process() tool.",
                         "default": False
                     },
                     "timeout": {
                         "type": "integer",
-                        "description": "Max seconds to wait (default: 180, foreground max: 600). Returns INSTANTLY when command finishes.",
+                        "description": "Max seconds to wait (default: 300). Returns INSTANTLY when command finishes.",
                         "minimum": 1
                     },
                     "workdir": {
                         "type": "string",
                         "description": "Working directory for this command (absolute path). Defaults to the session working directory."
                     },
-                    "pty": {
-                        "type": "boolean",
-                        "description": "Run in pseudo-terminal (PTY) mode for interactive CLI tools like Codex, Claude Code, or Python REPL. Default: false.",
-                        "default": False
-                    },
-                    "notify_on_complete": {
-                        "type": "boolean",
-                        "description": "When true (and background=true), you'll be automatically notified exactly once when the process finishes.",
-                        "default": False
-                    },
                 },
                 "required": ["command"],
             },
         },
-        handler=lambda command="", cwd=None, timeout=300.0, task_id=None, **kwargs: execute_command(
-            command=command,
-            cwd=cwd,
-            timeout=timeout,
-        ),
+        handler=_terminal_handler,
         description="执行 shell 命令",
     )
 

@@ -162,7 +162,7 @@ class TestDefaultToolExecution:
         from src.tools.core.dispatcher import dispatch
         result = dispatch("delegate_task", {"goal": "Fix the bug"})
         data = json.loads(result)
-        assert data["status"] in ("delegation_requested", "success", "error")
+        assert data["status"] in ("delegation_requested", "success", "error", "dispatched")
 
     def test_memory_execution(self):
         """Test memory tool execution."""

@@ -111,22 +111,22 @@ class TestRegistryFiltering:
         assert names == {"defer_a", "defer_b"}
 
     def test_five_core_eleven_deferred(self):
-        """验证 5 个核心工具 + 11 个延迟工具 + 1 个 search_tools。"""
+        """验证 5 个核心工具 + 11 个延迟工具 + 1 个 search_tool。"""
         # 清理并重新导入所有工具模块
         ToolRegistry.clear()
         tool_modules = [
-            "src.tools.terminal",
-            "src.tools.file_tool",
-            "src.tools.clarify_tool",
-            "src.tools.code_execution_tool",
-            "src.tools.cronjob_tool",
-            "src.tools.delegation_tool",
-            "src.tools.memory_tool",
-            "src.tools.session_search_tool",
-            "src.tools.skills_tool",
-            "src.tools.process_tool",
-            "src.tools.todo_tool",
-            "src.tools.search_tool",
+            "src.tools.impls.terminal",
+            "src.tools.impls.file_tool",
+            "src.tools.impls.clarify_tool",
+            "src.tools.impls.code_execution_tool",
+            "src.tools.impls.cronjob_tool",
+            "src.tools.impls.delegation_tool",
+            "src.tools.impls.memory_tool",
+            "src.tools.impls.session_search_tool",
+            "src.tools.impls.skills_tool",
+            "src.tools.impls.process_tool",
+            "src.tools.impls.todo_tool",
+            "src.tools.core.search_tool",
         ]
         for mod in tool_modules:
             sys.modules.pop(mod, None)
@@ -145,7 +145,7 @@ class TestRegistryFiltering:
         core_names = {s["name"] for s in core}
         deferred_names = {e.name for e in deferred}
 
-        # 6 个核心（5 个核心 + search_tools）
+        # 6 个核心（5 个核心 + search_tool）
         assert len(core) == 6
         # 11 个延迟
         assert len(deferred) == 11
@@ -158,7 +158,7 @@ class TestRegistryFiltering:
         assert "search_files" in core_names
         assert "patch" in core_names
         assert "terminal" in core_names
-        assert "search_tools" in core_names
+        assert "search_tool" in core_names
 
         # 验证延迟工具
         assert "execute_code" in deferred_names

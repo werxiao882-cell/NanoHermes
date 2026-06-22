@@ -25,7 +25,9 @@ class TestWebSearchRegistration:
 
     def test_tool_is_registered(self):
         from src.tools.core.registry import ToolRegistry
-        from src.tools.impls import web_search_tool  # noqa: F401
+        from src.tools.impls import web_search_tool
+        import importlib
+        importlib.reload(web_search_tool)  # 确保重新注册（其他测试可能 clear 了 registry）
 
         entry = ToolRegistry.get_tool("web_search")
         assert entry is not None
@@ -36,13 +38,12 @@ class TestWebSearchRegistration:
     def test_schema_has_required_fields(self):
         from src.tools.impls.web_search_tool import SCHEMA
 
-        assert SCHEMA["type"] == "function"
-        func = SCHEMA["function"]
-        assert func["name"] == "web_search"
-        assert "description" in func
-        assert "parameters" in func
+        # 扁平格式（name/description/parameters 直接在顶层）
+        assert SCHEMA["name"] == "web_search"
+        assert "description" in SCHEMA
+        assert "parameters" in SCHEMA
 
-        params = func["parameters"]
+        params = SCHEMA["parameters"]
         assert "query" in params["properties"]
         assert "max_results" in params["properties"]
         assert "region" in params["properties"]

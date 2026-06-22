@@ -426,6 +426,9 @@ def search_tool(query: str = "", mode: str = "auto", task_id=None, **kwargs) -> 
         return json.dumps({"error": str(e)})
 
 
+search_tools = search_tool
+
+
 def check_search_tools_requirements() -> bool:
     """search_tools 始终可用。"""
     return True

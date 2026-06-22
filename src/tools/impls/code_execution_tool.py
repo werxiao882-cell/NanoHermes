@@ -116,23 +116,35 @@ def execute_code(
         }, ensure_ascii=False)
 
 
-def _check_code_safety(code: str):
-    """简单的代码安全检查。
-    
-    禁止明显危险的操作。
+def _check_code_safety(code: str) -> None:
+    """代码安全检查：禁止直接调用系统命令和危险函数。
+
+    设计理由：
+    - 作为第一道防线，拦截明显危险的操作
+    - 匹配到危险模式时抛出 ValueError，阻止执行
+    - 使用字符串匹配而非 AST 解析，保持简单高效
+    - 不追求完美覆盖（沙箱才是完整方案），但拦截常见攻击向量
+
+    Args:
+        code: 待检查的 Python 代码字符串。
+
+    Raises:
+        ValueError: 检测到危险操作时抛出。
     """
     dangerous_patterns = [
-        "os.system(",
-        "subprocess.call(",
-        "subprocess.Popen(",
-        "__import__('os').system(",
-        "eval(",
-        "exec(",
+        ("os.system(", "禁止直接调用 os.system()"),
+        ("os.popen(", "禁止直接调用 os.popen()"),
+        ("subprocess.call(", "禁止直接调用 subprocess.call()"),
+        ("subprocess.Popen(", "禁止直接调用 subprocess.Popen()"),
+        ("subprocess.run(", "禁止直接调用 subprocess.run()"),
+        ("__import__('os').system(", "禁止通过 __import__ 调用系统命令"),
+        ('__import__("os").system(', "禁止通过 __import__ 调用系统命令"),
+        ("shutil.rmtree(", "禁止直接调用 shutil.rmtree()"),
     ]
-    
-    # 注意：这不是完整的安全检查，只是第一道防线
-    # 实际应在沙箱中运行
-    pass
+
+    for pattern, reason in dangerous_patterns:
+        if pattern in code:
+            raise ValueError(f"安全检查未通过: {reason}。请使用 Hermes 内置工具（terminal, read_file 等）替代。")
 
 
 def check_code_execution_requirements() -> bool:
@@ -146,29 +158,22 @@ register_tool(
     schema={
         "name": "execute_code",
         "description": (
-            "Run a Python script that can call Hermes tools programmatically. Use this when you need 3+ tool calls with processing logic between them, need to filter/reduce large tool outputs before they enter your context, need conditional branching (if X then Y else Z), or need to loop (fetch N pages, process N files, retry on failure).\n\n"
+            "Run a Python script for data processing and computation. Use this when you need to filter/reduce large outputs, "
+            "perform conditional branching (if X then Y else Z), run loops (process N files, retry on failure), or apply complex "
+            "transformations between tool calls.\n\n"
             "Use normal tool calls instead when: single tool call with no processing, you need to see the full result and apply complex reasoning, or the task requires interactive user input.\n\n"
-            "Available via `from hermes_tools import ...`:\n\n"
-            "  read_file(path: str, offset: int = 1, limit: int = 500) -> dict\n"
-            "    Lines are 1-indexed. Returns {\"content\": \"...\", \"total_lines\": N}\n"
-            "  write_file(path: str, content: str) -> dict\n"
-            "    Always overwrites the entire file.\n"
-            "  search_files(pattern: str, target=\"content\", path=\".\", file_glob=None, limit=50) -> dict\n"
-            "    target: \"content\" (search inside files) or \"files\" (find files by name). Returns {\"matches\": [...]}\n"
-            "  patch(path: str, old_string: str, new_string: str, replace_all: bool = False) -> dict\n"
-            "    Replaces old_string with new_string in the file.\n"
-            "  terminal(command: str, timeout=None, workdir=None) -> dict\n"
-            "    Foreground only (no background/pty). Returns {\"output\": \"...\", \"exit_code\": N}\n\n"
-            "Limits: 5-minute timeout, 50KB stdout cap, max 50 tool calls per script.\n\n"
+            "Available: Python stdlib (json, re, math, csv, datetime, collections, pathlib, etc.) and any installed packages in the project's venv.\n"
+            "NOT available: Hermes tools cannot be called from within execute_code. Use normal tool calls for file/terminal operations.\n\n"
+            "Limits: 30-second default timeout (configurable), 10KB stdout cap.\n\n"
             "Scripts run in the session's working directory with the active venv's python, so project deps (pandas, etc.) and relative paths work like in terminal().\n\n"
-            "Print your final result to stdout. Use Python stdlib (json, re, math, csv, datetime, collections, etc.) for processing between tool calls."
+            "Print your final result to stdout."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "code": {
                     "type": "string",
-                    "description": "Python code to execute. Import tools with `from hermes_tools import terminal, ...` and print your final result to stdout.",
+                    "description": "Python code to execute. Use stdlib for processing and print your final result to stdout.",
                 },
                 "language": {
                     "type": "string",
