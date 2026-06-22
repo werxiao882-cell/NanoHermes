@@ -45,7 +45,9 @@ logger = logging.getLogger(__name__)
 SLASH_COMMANDS = [
     "/help", "/clear", "/status", "/sessions", "/resume", "/title",
     "/skills", "/skills enable <name>", "/skills disable <name>",
-    "/tools", "/compress", "/reasoning", "/subagents", "/quit", "/exit",
+    "/tools", "/compress", "/reasoning", "/subagents",
+    "/agents", "/agent <id>",
+    "/quit", "/exit",
 ]
 
 # 哨兵对象：区分 __init__ 中 session_db 参数"未传" vs "显式传 None"
@@ -143,6 +145,7 @@ class TUIApp:
             style=self.style,
             completer=self.completer,
             history=self.history,
+            bottom_toolbar=self._get_agent_toolbar,
         )
         self.application: Application | None = None
 
@@ -212,6 +215,15 @@ class TUIApp:
             tool_dispatch=self.tool_dispatch,
             tool_schemas=all_tool_schemas,
         )
+
+        # ── 9.6 子 Agent 状态追踪 ──
+        # AgentTaskRegistry: 管理所有子 Agent 的任务状态
+        # AgentPrinter: 打印 Agent 列表和 transcript（/agents, /agent <id> 命令）
+        from src.cli.agent_task import AgentTaskRegistry
+        from src.cli.agent_printer import AgentPrinter
+        self.task_registry = AgentTaskRegistry()
+        self.agent_printer = AgentPrinter(self.task_registry, self.console)
+        self._selected_agent_index = 0  # 0=main, 1..N=子 Agent
 
         # ── 10. 技能系统 ──
         # SkillManager 加载 SKILL.md 文件并管理技能的启用/禁用状态
@@ -373,7 +385,7 @@ class TUIApp:
         @bindings.add("c-c")
         def _(event):
             """处理 Ctrl+C 中断信号。
-            
+
             与 Ctrl+D 的区别：
             - Ctrl+D 是优雅退出（等待当前操作完成）
             - Ctrl+C 是强制中断（立即停止当前操作）
@@ -384,7 +396,49 @@ class TUIApp:
                 self._current_loop.interrupt()
             event.app.exit()
 
+        # ↑↓ 键：在子 Agent 之间切换视图（仅在有子 Agent 时）
+        @bindings.add("up")
+        def _(event):
+            """↑ 键：如果有子 Agent，向上切换；否则正常上箭头。"""
+            tasks = self.task_registry.get_all()
+            if tasks:
+                # 循环切换：0(main) -> N -> N-1 -> ... -> 1 -> 0
+                max_index = len(tasks)
+                if self._selected_agent_index <= 0:
+                    self._selected_agent_index = max_index
+                else:
+                    self._selected_agent_index -= 1
+                self.agent_printer.print_switch_view(self._selected_agent_index)
+            else:
+                # 正常上箭头：移动光标到历史
+                event.current_buffer.auto_up()
+
+        @bindings.add("down")
+        def _(event):
+            """↓ 键：如果有子 Agent，向下切换；否则正常下箭头。"""
+            tasks = self.task_registry.get_all()
+            if tasks:
+                # 循环切换：0(main) -> 1 -> 2 -> ... -> N -> 0
+                max_index = len(tasks)
+                if self._selected_agent_index >= max_index:
+                    self._selected_agent_index = 0
+                else:
+                    self._selected_agent_index += 1
+                self.agent_printer.print_switch_view(self._selected_agent_index)
+            else:
+                # 正常下箭头：移动光标到历史
+                event.current_buffer.auto_down()
+
         return bindings
+
+    def _get_agent_toolbar(self) -> str:
+        """生成 bottom_toolbar 内容（prompt_toolkit HTML 格式）。
+
+        每次 PromptSession 渲染输入框时自动调用。
+        显示运行中子 Agent 的实时状态（名称、当前动作、耗时、token 数）。
+        无运行中子 Agent 时返回空字符串（自动隐藏 toolbar）。
+        """
+        return self.agent_printer.format_toolbar()
 
     def _create_style(self) -> Style:
         """创建 Rich 样式定义。
@@ -792,6 +846,7 @@ class TUIApp:
             session_id=self.session_id,
             jsonl_store=self.jsonl_store,
             session_db=self.session_db,
+            task_registry=self.task_registry,
         )
         conversation_handler.register(loop.events)
 
@@ -958,6 +1013,18 @@ class TUIApp:
 
         if cmd in ("/subagents", "/subagent"):
             await self._cmd_subagents()
+            return True
+
+        if cmd == "/agents":
+            self.agent_printer.print_agent_list()
+            return True
+
+        if cmd.startswith("/agent "):
+            agent_id = command[7:].strip()
+            if agent_id:
+                self.agent_printer.print_transcript(agent_id)
+            else:
+                self.console.print("[dim]用法: /agent <task_id|name>[/dim]")
             return True
 
         # /skill-name → 加载技能并注入对话

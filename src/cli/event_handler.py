@@ -152,6 +152,7 @@ class ConversationEventHandler:
     1. 模型调用生命周期：启动/停止状态指示器，更新状态栏
     2. 工具执行生命周期：显示工具状态，保存 JSONL
     3. 会话持久化：保存助手回复到 JSONL
+    4. 子 Agent 状态追踪：更新 AgentTaskRegistry（后台委托模式）
 
     设计理由：
     - 将散落的多处 loop.events.on() 调用集中到单一类
@@ -167,6 +168,7 @@ class ConversationEventHandler:
         session_id: str = "",
         jsonl_store=None,
         session_db=None,
+        task_registry=None,
     ):
         self.console = console
         self.status_bar = status_bar
@@ -174,6 +176,7 @@ class ConversationEventHandler:
         self.session_id = session_id
         self.jsonl_store = jsonl_store
         self.session_db = session_db
+        self.task_registry = task_registry  # AgentTaskRegistry（可选）
         self._current_tool_action = "exec"
 
     def register(self, events: EventBus) -> None:
@@ -207,29 +210,67 @@ class ConversationEventHandler:
             )
 
     def _on_tool_start(self, data: dict[str, Any]) -> None:
-        """工具开始执行：显示 UI。"""
+        """工具开始执行：显示 UI + 更新子 Agent 进度。
+
+        子 Agent 事件（有 child_task_id）不打印到主输出流，
+        只更新 AgentTaskRegistry，通过 bottom_toolbar 实时显示状态。
+        用户可通过 /agent <id> 查看完整 transcript。
+        """
+        child_id = data.get("child_task_id", "")
         tool_name = data["tool_name"]
         tool_args = data["tool_args"]
-        child_tag = self._child_tag(data)
 
         action = self._extract_tool_action(tool_name, tool_args)
         self._current_tool_action = action
 
-        if child_tag:
-            self.console.print(f"  [magenta]{child_tag}[/magenta]")
+        if child_id:
+            # 子 Agent：只更新 registry，不打印到主输出
+            if self.task_registry:
+                self.task_registry.update_progress(
+                    child_id,
+                    last_activity=f"{tool_name}: {action}",
+                )
+                self.task_registry.append_message(child_id, {
+                    "role": "tool",
+                    "content": "",
+                    "metadata": {"tool_name": tool_name, "status": "start", "action": action},
+                })
+            return
+
+        # 主 Agent：正常打印
         self.console.print(ActivityFeed.format_start(tool_name, action))
 
     def _on_tool_end(self, data: dict[str, Any]) -> None:
-        """工具执行结束：显示结果。"""
+        """工具执行结束：显示结果 + 更新子 Agent 消息。
+
+        子 Agent 事件不打印到主输出流，只更新 registry。
+        """
+        child_id = data.get("child_task_id", "")
         tool_name = data["tool_name"]
         result = data["result"]
         elapsed = data["elapsed"]
-        child_tag = self._child_tag(data)
 
         action = self._current_tool_action
+
+        if child_id:
+            # 子 Agent：只更新 registry
+            if self.task_registry:
+                task = self.task_registry.get(child_id)
+                if task:
+                    self.task_registry.update_progress(
+                        child_id,
+                        tool_calls=task.progress.tool_calls + 1,
+                    )
+                self.task_registry.append_message(child_id, {
+                    "role": "tool",
+                    "content": result[:200] if result else "",
+                    "metadata": {"tool_name": tool_name, "status": "end", "elapsed": elapsed},
+                })
+            return
+
+        # 主 Agent：正常打印
         self.console.print(ActivityFeed.format_complete(tool_name, action, elapsed))
-        if not child_tag:
-            self._show_tool_result_summary(tool_name, result)
+        self._show_tool_result_summary(tool_name, result)
 
     def _on_message_append(self, data: dict[str, Any]) -> None:
         """消息追加到对话历史时，统一持久化到 SQLite 和 JSONL。
@@ -238,7 +279,21 @@ class ConversationEventHandler:
         - 所有消息持久化通过 MESSAGE_APPEND 事件集中处理
         - 与工具执行生命周期（TOOL_START/TOOL_END）完全解耦
         - 支持 assistant（含 tool_calls）、tool、assistant（纯文本）三种消息类型
+        - 子 Agent 消息追加到 AgentTask.transcript（增量打印用）
         """
+        # 子 Agent 消息：追加到 transcript
+        child_id = data.get("child_task_id", "")
+        if child_id and self.task_registry:
+            message = data.get("message", {})
+            role = message.get("role", "")
+            content = message.get("content", "")
+            if role in ("assistant", "user") and content:
+                self.task_registry.append_message(child_id, {
+                    "role": role,
+                    "content": content,
+                })
+            return  # 子 Agent 消息不持久化到主会话
+
         if not self.session_id or self.session_id == "new_session":
             return
 
@@ -326,21 +381,39 @@ class ConversationEventHandler:
         return ""
 
     def _on_delegation_start(self, data: dict[str, Any]) -> None:
-        """子 Agent 委托开始。"""
-        task_id = data.get("task_id", "")
+        """子 Agent 委托开始：注册 AgentTask + 打印通知。"""
+        task_id = data.get("child_task_id", "") or data.get("task_id", "")
         goal = data.get("goal", "")[:60]
         role = data.get("role", "leaf")
+        name = data.get("name", "") or goal[:30].replace(" ", "-").lower()
+
+        # 注册 AgentTask
+        if self.task_registry:
+            self.task_registry.register(task_id, name, goal)
+
         self.console.print(
             f"\n[cyan]{'─' * 50}[/cyan]"
             f"\n[cyan]▶ 子Agent启动[/cyan] [bold]{task_id}[/bold] ({role})"
             f"\n[cyan]  目标: {goal}[/cyan]"
+            f"\n[cyan]  /agent {task_id} 查看 transcript[/cyan]"
         )
 
     def _on_delegation_complete(self, data: dict[str, Any]) -> None:
-        """子 Agent 委托完成。"""
-        task_id = data.get("task_id", "")
+        """子 Agent 委托完成：更新 AgentTask 状态 + 打印通知。"""
+        task_id = data.get("child_task_id", "") or data.get("task_id", "")
         duration = data.get("duration", 0)
         summary = data.get("summary", "")[:100]
+
+        # 更新 AgentTask 状态
+        if self.task_registry:
+            from src.cli.agent_task import AgentTaskStatus
+            self.task_registry.update_status(task_id, AgentTaskStatus.COMPLETED)
+            self.task_registry.update_progress(task_id, last_activity=f"completed: {summary[:40]}")
+            self.task_registry.append_message(task_id, {
+                "role": "system",
+                "content": f"任务完成 ({duration:.1f}s): {summary}",
+            })
+
         self.console.print(
             f"[green]✓ 子Agent完成[/green] [bold]{task_id}[/bold] ({duration:.1f}s)"
             f"\n[green]  结果: {summary}[/green]"
@@ -348,10 +421,21 @@ class ConversationEventHandler:
         )
 
     def _on_delegation_fail(self, data: dict[str, Any]) -> None:
-        """子 Agent 委托失败。"""
-        task_id = data.get("task_id", "")
+        """子 Agent 委托失败：更新 AgentTask 状态 + 打印通知。"""
+        task_id = data.get("child_task_id", "") or data.get("task_id", "")
         error = data.get("error", "")[:100]
         duration = data.get("duration", 0)
+
+        # 更新 AgentTask 状态
+        if self.task_registry:
+            from src.cli.agent_task import AgentTaskStatus
+            self.task_registry.update_status(task_id, AgentTaskStatus.FAILED)
+            self.task_registry.update_progress(task_id, last_activity=f"failed: {error[:40]}")
+            self.task_registry.append_message(task_id, {
+                "role": "system",
+                "content": f"任务失败 ({duration:.1f}s): {error}",
+            })
+
         self.console.print(
             f"[red]✗ 子Agent失败[/red] [bold]{task_id}[/bold] ({duration:.1f}s)"
             f"\n[red]  错误: {error}[/red]"
