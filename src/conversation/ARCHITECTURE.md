@@ -78,6 +78,21 @@ src/conversation/
    - 同步记忆系统
 6. 后台审查线程异步评估对话内容
 
+## EventBus 拦截器机制
+
+emit() 执行流程：拦截器链（责任链递归） → 观察者（原有 handler）
+
+- **拦截器**：intercept(type, handler, priority) 注册，签名 (data, next)→None
+  - 调用 next() 放行，不调用 next() 阻断
+  - 可修改 data dict，可执行前后置逻辑（洋葱模型）
+  - 按 priority 升序执行，异常被捕获跳过
+- **观察者**：on(type, handler) 注册（不变），签名 (data)→None
+  - 拦截器链完成后触发（无论是否被阻断）
+  - 异常被捕获跳过
+- **返回值**：emit() 返回 ChainResult(blocked, message)
+
+事件分类：可阻断（3 种）/ 可修改（7 种）/ 仅观察（8 种）
+
 ## Design Decisions
 - **Decision**: 使用回调机制解耦对话循环和外部系统
   - **Reason**: 对话循环不依赖具体的存储或显示实现

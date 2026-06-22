@@ -164,4 +164,211 @@ class TestEventType:
 
     def test_total_event_count(self):
         """测试事件类型总数。"""
-        assert len(EventType) == 15
+        assert len(EventType) == 18
+
+
+class TestChainInterceptors:
+    """测试责任链拦截器机制。"""
+
+    def test_intercept_and_emit_returns_chain_result(self):
+        """测试 intercept 注册后 emit 返回 ChainResult。"""
+        from src.conversation.events import ChainResult
+
+        bus = EventBus()
+        bus.intercept(EventType.TOOL_START, lambda data, next_fn: next_fn())
+        result = bus.emit(EventType.TOOL_START, {})
+
+        assert isinstance(result, ChainResult)
+        assert result.blocked is False
+
+    def test_interceptor_can_modify_data(self):
+        """测试拦截器可以修改 data dict。"""
+        bus = EventBus()
+
+        def modifier(data, next_fn):
+            data["modified"] = True
+            next_fn()
+
+        bus.intercept(EventType.TOOL_START, modifier)
+        data = {"original": True}
+        bus.emit(EventType.TOOL_START, data)
+
+        assert data["modified"] is True
+
+    def test_interceptor_block_by_not_calling_next(self):
+        """测试拦截器不调用 next_fn 表示阻断。"""
+        bus = EventBus()
+
+        def blocker(data, next_fn):
+            pass  # 不调用 next_fn = 阻断
+
+        bus.intercept(EventType.TOOL_START, blocker)
+        result = bus.emit(EventType.TOOL_START, {})
+
+        assert result.blocked is True
+
+    def test_interceptor_block_stops_subsequent_interceptors(self):
+        """测试阻断后后续拦截器不执行。"""
+        bus = EventBus()
+        execution_order = []
+
+        def blocker(data, next_fn):
+            execution_order.append("blocker")
+            # 不调用 next_fn
+
+        def should_not_run(data, next_fn):
+            execution_order.append("should_not_run")
+            next_fn()
+
+        bus.intercept(EventType.TOOL_START, blocker, priority=1)
+        bus.intercept(EventType.TOOL_START, should_not_run, priority=2)
+        bus.emit(EventType.TOOL_START, {})
+
+        assert execution_order == ["blocker"]
+
+    def test_interceptor_priority_order(self):
+        """测试拦截器按 priority 升序执行。"""
+        bus = EventBus()
+        execution_order = []
+
+        def make_handler(name):
+            def handler(data, next_fn):
+                execution_order.append(name)
+                next_fn()
+            return handler
+
+        bus.intercept(EventType.TOOL_START, make_handler("high"), priority=10)
+        bus.intercept(EventType.TOOL_START, make_handler("low"), priority=1)
+        bus.intercept(EventType.TOOL_START, make_handler("medium"), priority=5)
+        bus.emit(EventType.TOOL_START, {})
+
+        assert execution_order == ["low", "medium", "high"]
+
+    def test_observers_still_fire_when_blocked(self):
+        """测试拦截器阻断后观察者仍然触发。"""
+        bus = EventBus()
+        observer_called = False
+
+        def blocker(data, next_fn):
+            pass  # 阻断
+
+        def observer(data):
+            nonlocal observer_called
+            observer_called = True
+
+        bus.intercept(EventType.TOOL_START, blocker)
+        bus.on(EventType.TOOL_START, observer)
+        bus.emit(EventType.TOOL_START, {})
+
+        assert observer_called is True
+
+    def test_interceptor_exception_does_not_block_others(self):
+        """测试拦截器异常不影响其他拦截器。"""
+        bus = EventBus()
+        execution_order = []
+
+        def bad_interceptor(data, next_fn):
+            execution_order.append("bad")
+            raise ValueError("Interceptor error")
+
+        def good_interceptor(data, next_fn):
+            execution_order.append("good")
+            next_fn()
+
+        bus.intercept(EventType.TOOL_START, bad_interceptor, priority=1)
+        bus.intercept(EventType.TOOL_START, good_interceptor, priority=2)
+        result = bus.emit(EventType.TOOL_START, {})
+
+        assert "bad" in execution_order
+        assert "good" in execution_order
+        assert result.blocked is False  # 异常不视为阻断
+
+    def test_interceptor_onion_model(self):
+        """测试拦截器洋葱模型（next 前后执行逻辑）。"""
+        bus = EventBus()
+        execution_order = []
+
+        def make_onion(name):
+            def handler(data, next_fn):
+                execution_order.append(f"{name}_before")
+                next_fn()
+                execution_order.append(f"{name}_after")
+            return handler
+
+        bus.intercept(EventType.TOOL_START, make_onion("outer"), priority=1)
+        bus.intercept(EventType.TOOL_START, make_onion("inner"), priority=2)
+        bus.emit(EventType.TOOL_START, {})
+
+        assert execution_order == [
+            "outer_before",
+            "inner_before",
+            "inner_after",
+            "outer_after",
+        ]
+
+    def test_no_interceptors_backward_compatible(self):
+        """测试无拦截器时行为与现有逻辑一致。"""
+        bus = EventBus()
+        received = []
+
+        def observer(data):
+            received.append(data)
+
+        bus.on(EventType.TOOL_START, observer)
+        result = bus.emit(EventType.TOOL_START, {"test": "data"})
+
+        assert len(received) == 1
+        assert received[0]["test"] == "data"
+        assert result.blocked is False
+
+    def test_emit_returns_chain_result_not_none(self):
+        """测试 emit 返回 ChainResult 而非 None（向后兼容：调用方可忽略返回值）。"""
+        bus = EventBus()
+        result = bus.emit(EventType.TOOL_START, {})
+
+        # 调用方忽略返回值不应报错
+        bus.emit(EventType.TOOL_START, {})
+
+        # 返回值是 ChainResult
+        from src.conversation.events import ChainResult
+        assert isinstance(result, ChainResult)
+
+    def test_clear_also_clears_interceptors(self):
+        """测试 clear 同时清除拦截器和观察者。"""
+        bus = EventBus()
+        bus.intercept(EventType.TOOL_START, lambda data, next_fn: next_fn())
+        bus.on(EventType.TOOL_START, lambda data: None)
+        bus.clear(EventType.TOOL_START)
+
+        result = bus.emit(EventType.TOOL_START, {})
+        assert result.blocked is False
+
+    def test_unintercept_removes_interceptor(self):
+        """测试 unintercept 移除拦截器。"""
+        bus = EventBus()
+
+        def blocker(data, next_fn):
+            pass  # 阻断
+
+        bus.intercept(EventType.TOOL_START, blocker)
+        bus.unintercept(EventType.TOOL_START, blocker)
+        result = bus.emit(EventType.TOOL_START, {})
+
+        assert result.blocked is False
+
+    def test_interceptor_exception_after_next_does_not_block(self):
+        """测试拦截器调用 next 后抛出异常不阻断。"""
+        bus = EventBus()
+
+        def bad_after_next(data, next_fn):
+            next_fn()
+            raise ValueError("Error after next")
+
+        def good_interceptor(data, next_fn):
+            next_fn()
+
+        bus.intercept(EventType.TOOL_START, bad_after_next, priority=1)
+        bus.intercept(EventType.TOOL_START, good_interceptor, priority=2)
+        result = bus.emit(EventType.TOOL_START, {})
+
+        assert result.blocked is False
