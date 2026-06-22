@@ -54,7 +54,7 @@ ConversationLoop (src/conversation/loop.py)
 | Module | Responsibility |
 |--------|----------------|
 | `src/main.py` | Composition root - dependency injection only, no business logic |
-| `src/conversation/` | Core loop, EventBus, error classification, dynamic tool management |
+| `src/conversation/` | Core loop, EventBus, chain interceptors, error classification, dynamic tool management |
 | `src/provider/` | LLM provider runtime (credentials, API routing, client factory, fallback) |
 | `src/tools/core/` | Registry, Dispatcher, BM25+Regex search engine |
 | `src/tools/impls/` | Individual tool implementations (terminal, file, memory, etc.) |
@@ -64,6 +64,7 @@ ConversationLoop (src/conversation/loop.py)
 | `src/compression/` | Context compression with summary budget |
 | `src/prompt/` | Three-layer system prompt assembly (stable/context/volatile) |
 | `src/cli/` | TUI chat interface, event handlers, streaming components |
+| `src/hooks/` | Chain interceptors (dangerous command guard, ScriptHook, config loader) |
 | `src/delegation/` | Multi-agent delegation (leaf/orchestrator roles) |
 | `src/mcp/` | MCP protocol support (server/client/bridge) |
 
@@ -83,6 +84,8 @@ The `search_tools` tool uses BM25 (natural language) + Regex (exact pattern) dua
 
 `ConversationLoop` publishes events via `EventBus`. External handlers (memory, TUI, debug) subscribe to events. This decouples the core loop from side effects.
 
+**Chain of Responsibility Interceptors**: `EventBus.intercept()` registers interceptors that can modify data or block the chain. Interceptors use `(data, next_fn)` signature - calling `next_fn()` passes control, not calling it blocks. After the interceptor chain completes (blocked or not), observers still fire. `emit()` returns `ChainResult(blocked, message)`.
+
 ## Coding Conventions
 
 ### Language & Style
@@ -96,6 +99,7 @@ The `search_tools` tool uses BM25 (natural language) + Regex (exact pattern) dua
 - **Single file max 300 lines** - split by responsibility
 - **Single function max 50 lines** - break into smaller functions
 - **No cross-module direct calls** - use public APIs or EventBus
+- **Chain interceptors** - `loop.events.intercept(EventType, handler, priority)` for data modification/blocking
 - **Dependency injection** - objects receive dependencies via constructor, never create other module instances internally
 - **Use `build_client()` factory** from `src/provider/client_factory.py` - never instantiate SDK clients directly in entry files
 

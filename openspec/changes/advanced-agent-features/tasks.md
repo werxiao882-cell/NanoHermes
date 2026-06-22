@@ -129,19 +129,21 @@
 - [ ] 9.8 编写 Shell 执行单元测试（内联、代码块、MCP 切断）
 - [ ] 9.9 编写条件技能单元测试
 
-## 10. Hooks 系统
+## 10. Hooks 系统（EventBus 责任链拦截）
 
-- [ ] 10.1 创建 `src/hooks/` 目录结构
-- [ ] 10.2 实现 `HookRegistry` 类：注册/注销 handler，按钩子点分组
-- [ ] 10.3 定义 8 种钩子点枚举（PreSampling, PostSampling, PreCompact, PostCompact, SessionStart, FileChanged, SubagentStart, Stop）
-- [ ] 10.4 实现 hook 配置加载（从 settings 的 `hooks` 字段）
-- [ ] 10.5 实现 hook 执行器：subprocess 调用外部脚本，stdin 传入 JSON 上下文
-- [ ] 10.6 实现故障隔离：单个 hook 失败不影响其他 hook 和主流程
-- [ ] 10.7 实现执行超时（默认 30 秒）
-- [ ] 10.8 实现 Stop 钩子输出解析（`{"block": true, "message": "..."}` 阻止继续）
-- [ ] 10.9 实现 FileChanged 钩子 glob pattern 过滤
-- [ ] 10.10 将钩子点映射到现有 EventBus 事件类型
-- [ ] 10.11 编写 HookRegistry 单元测试（注册、执行、故障隔离、超时）
+- [ ] 10.1 在 `src/conversation/events.py` 中新增 `ChainResult` dataclass（blocked: bool, message: str）和 `ChainInterceptor` 类型别名
+- [ ] 10.2 在 `EventBus` 中新增 `intercept(event_type, handler, priority=0)` 方法和 `_interceptors` 存储
+- [ ] 10.3 改造 `emit()` 方法：构建责任链递归执行拦截器 → 链完成后触发观察者 → 返回 ChainResult。拦截器/观察者异常均捕获并跳过
+- [ ] 10.4 改造 `src/conversation/loop.py` 全部 17 处 `emit()` 调用：3 个可阻断事件检查 blocked 并处理（MODEL_REQUEST 跳过模型调用、TOOL_START 跳过工具执行、ITERATION_END 触发 LOOP_END 并返回），7 个可修改事件从 data 读回修改后的值
+- [ ] 10.5 验证 `src/delegation/manager.py` 兼容性：_emit_event、_forward_to_parent、_forward_to_parent_delegation 的 emit 调用忽略返回值，无需逻辑变更
+- [ ] 10.6 创建 `src/hooks/` 目录，实现 `dangerous_command_guard.py` 危险命令拦截器（复用 terminal.py DANGEROUS_PATTERNS）
+- [ ] 10.7 实现 `src/hooks/script_hook.py` ScriptHook 包装类（subprocess + JSON stdin/stdout + timeout + 故障隔离）
+- [ ] 10.8 实现 `src/hooks/config_loader.py`：从 settings 加载 hook 配置，支持 script/python 两种类型，自动注册到 EventBus
+- [ ] 10.9 更新 `tests/conversation/test_events.py`：修复 `len(EventType)==15` 为 18，适配 emit() 返回 ChainResult
+- [ ] 10.10 编写责任链单元测试（优先级排序、阻断、修改 data、故障隔离、middleware 前后置、向后兼容、观察者仍触发、拦截器异常后链继续）
+- [ ] 10.11 编写 ScriptHook 单元测试（正常放行、阻断、超时、执行失败、非法 JSON）
+- [ ] 10.12 编写危险命令拦截器单元测试（rm -rf 拦截、ls 放行、非 terminal 工具不拦截、拦截后观察者仍触发）
+- [ ] 10.13 更新 `src/conversation/ARCHITECTURE.md`：记录拦截器机制和事件分类
 
 ## 11. 高级 Multi-Agent
 

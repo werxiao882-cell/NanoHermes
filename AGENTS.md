@@ -2,7 +2,7 @@
 
 ## 项目概况
 
-Python 自进化 AI Agent 系统，参考 Hermes Agent 架构。15 个核心模块，~960 个测试。
+Python 自进化 AI Agent 系统，参考 Hermes Agent 架构。16 个核心模块，~1100 个测试。
 
 ## 关键命令
 
@@ -56,10 +56,11 @@ src/
 ├── skills/                  # 技能系统（SKILL.md 解析 + Curator 自进化）
 ├── compression/             # 上下文压缩（摘要预算 + 头尾保护）
 ├── prompt/                  # 系统提示组装（三层：stable/context/volatile）
-├── conversation/            # 核心对话循环 + 错误分类 + 事件总线
+├── conversation/            # 核心对话循环 + 事件总线 + 责任链拦截机制
 ├── delegation/              # 多 Agent 委托（leaf/orchestrator 角色）
 ├── insights/                # 指标引擎（token 聚合 + 成本估算）
 ├── cli/                     # TUI 聊天界面 + 事件处理器 + 流式组件
+├── hooks/                   # 责任链拦截器（危险命令拦截、ScriptHook、配置加载）
 └── config/                  # 配置加载（模型定义/凭证解析/提供商注册）
 ```
 
@@ -89,6 +90,7 @@ src/
 - 代码注释使用**中文**，说明"为什么"而非仅"做什么"
 - pytest 配置 `asyncio_mode = "auto"`，无需手动标记异步测试
 - 事件驱动解耦：`ConversationLoop` 通过 `EventBus` 发布事件，外部处理器（记忆、TUI、调试）订阅接入
+- 责任链拦截机制：`EventBus.intercept()` 注册拦截器，可修改数据或阻断流程，拦截器阻断后观察者仍触发
 
 ## 编码规范
 
@@ -108,6 +110,7 @@ src/
 - **通过接口交互**：模块间通过抽象类/协议交互，不直接依赖具体实现
 - **依赖注入**：对象通过构造函数或参数注入，不在内部创建其他模块实例
 - **事件驱动解耦**：使用 `EventBus` 解耦核心循环与外部处理器（记忆、调试、TUI 等）
+- **责任链拦截**：`EventBus.intercept()` 注册拦截器，`emit()` 返回 `ChainResult`，可检查 `blocked` 状态
 - **禁止跨模块调用**：不直接调用其他模块的内部方法或访问私有属性
 
 #### 3. 高聚合
@@ -265,8 +268,9 @@ def apply_anthropic_cache_control(
 | `skills/` | 技能加载、启用/禁用、CRUD | 对话逻辑、UI 渲染、工具分发 |
 | `compression/` | 上下文压缩、摘要生成 | 直接操作数据库（通过事件） |
 | `prompt/` | 系统提示组装、缓存控制 | 威胁检测（独立安全模块）、文件搜索 |
-| `conversation/` | 核心对话循环、事件总线、错误分类、动态工具管理 | UI 渲染、工具实现、记忆管理 |
+| `conversation/` | 核心对话循环、事件总线、责任链拦截、错误分类、动态工具管理 | UI 渲染、工具实现、记忆管理 |
 | `cli/` | UI 渲染、用户输入、命令展示、事件处理器 | 对话逻辑、压缩实现、技能管理 |
+| `hooks/` | 责任链拦截器实现、危险命令拦截、ScriptHook、配置加载 | EventBus 核心机制、对话逻辑 |
 | `insights/` | 数据聚合、指标计算 | UI 格式化（独立 formatter）、定价数据 |
 | `delegation/` | 多 Agent 委托、并发控制 | 工具实现、会话管理 |
 | `mcp/` | MCP 协议支持、服务器/客户端 | 工具实现、对话逻辑 |
@@ -297,6 +301,9 @@ class TUIApp:
 
 # ✅ 正确：事件驱动解耦
 loop.events.on(EventType.TOOL_START, self._on_tool_start)
+
+# ✅ 正确：责任链拦截
+loop.events.intercept(EventType.TOOL_START, my_guard, priority=10)
 
 # ❌ 错误：内部创建其他模块实例
 class TUIApp:

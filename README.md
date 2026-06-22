@@ -116,11 +116,12 @@ NanoHermes/
 │   ├── skills/                       # 技能系统
 │   ├── compression/                  # 上下文压缩
 │   ├── prompt/                       # 系统提示组装
-│   ├── conversation/                 # 核心对话循环 + 事件总线
+│   ├── conversation/                 # 核心对话循环 + 事件总线 + 责任链拦截
 │   ├── delegation/                   # 多 Agent 委托
 │   ├── insights/                     # 指标引擎
 │   ├── auxiliary/                    # 辅助 LLM 客户端
-│   └── cli/                          # TUI 聊天界面
+│   ├── cli/                          # TUI 聊天界面
+│   └── hooks/                        # 责任链拦截器（危险命令拦截、ScriptHook、配置加载）
 │
 ├── tests/                            # 单元测试
 ├── openspec/                         # OpenSpec 变更管理
@@ -129,7 +130,7 @@ NanoHermes/
 └── README.md                         # 本文件
 ```
 
-> 每个 `src/<module>/` 目录包含 `ARCHITECTURE.md` 架构文档，详细说明模块职责、数据流和设计决策。
+> 每个 `src/<module>/` 目录包含 `ARCHITECTURE.md` 架构文档，详细说明模块职责、数据流和设计决策。新增 `src/hooks/` 模块提供责任链拦截机制。
 
 ## 架构概览
 
@@ -180,11 +181,12 @@ NanoHermes/
 | **memory** | 记忆提供者接口、编排器、文件记忆 | `src/memory/ARCHITECTURE.md` |
 | **skills** | SKILL.md 解析、Curator 自进化 | `src/skills/ARCHITECTURE.md` |
 | **compression** | 上下文压缩、摘要预算、头尾保护 | `src/compression/ARCHITECTURE.md` |
-| **conversation** | 核心对话循环、事件总线、错误分类、动态工具管理、三层提示组装 | `src/conversation/ARCHITECTURE.md` |
+| **conversation** | 核心对话循环、事件总线、责任链拦截机制、错误分类、动态工具管理、三层提示组装 | `src/conversation/ARCHITECTURE.md` |
+| **hooks** | 危险命令拦截器、ScriptHook 包装类、配置加载器 | `src/hooks/ARCHITECTURE.md` |
 | **delegation** | 委托管理、leaf/orchestrator 角色 | `src/delegation/ARCHITECTURE.md` |
 | **insights** | Token 聚合、成本估算、活动趋势 | `src/insights/ARCHITECTURE.md` |
 | **auxiliary** | 后台 LLM 任务（摘要生成、记忆刷写） | `src/auxiliary/ARCHITECTURE.md` |
-| **cli** | TUI 聊天界面、事件处理器、流式组件 | `src/cli/ARCHITECTURE.md` |
+| **cli** | TUI 聊天界面、事件处理器、责任链拦截、流式组件 | `src/cli/ARCHITECTURE.md` |
 | **mcp** | MCP 协议支持、服务器/客户端/桥接 | `src/mcp/ARCHITECTURE.md` |
 
 ## 工具系统
@@ -264,7 +266,7 @@ python -m pytest tests/test_e2e.py -v -s
 - 技术选型和替代方案对比
 - 潜在风险和未知因素
 
-> **经验**: NanoHermes 的 15 个核心模块在实现前都经过了充分的架构讨论，避免了返工。
+> **经验**: NanoHermes 的 16 个核心模块在实现前都经过了充分的架构讨论，避免了返工。
 
 ### 2. 小步快跑，频繁提交
 
@@ -373,7 +375,7 @@ src/tools/
 ---
 
 **NanoHermes 项目统计**:
-- 🏗️ 15 个核心模块
+- 🏗️ 16 个核心模块（含 hooks 责任链拦截系统）
 - 🧪 ~960 个测试
 - 📝 100+ 源文件
 - 🔄 持续迭代中
