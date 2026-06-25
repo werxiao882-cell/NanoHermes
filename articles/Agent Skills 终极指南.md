@@ -32,7 +32,7 @@ Claude Skills 的价值，还是被大大低估了。
 👉
 文末会拉一个 Skill 中文社群，专项讨论与实践 Agent Skills，加入方式见底部。
 
-## 一、Skills 是什么：从概念来源到运作原理
+## ### 一、Skills 是什么：从概念来源到运作原理
 
 2025 年 10 月中旬，Anthropic 正式发布 Claude Skills。
 两个月后，Agent Skills 作为开放标准被进一步发布，意在引导一个新的 AI Agent 开发生态。
@@ -323,7 +323,7 @@ Level 3: Resources 中的具体文件（按需读取）
 每种情况，都由 agent 拿着各种 skills 自动匹配来处理。
 这样下来，Skills-based 的 Agent 产品，就能用同一个多模态输入框，处理用户各种不同的输入，也能灵活应对未被规划的边缘问题、为用户提供绝对个性化的生成需求了。
 
-## 二、Skills 完全教程：制作与使用
+## ### 二、Skills 完全教程：制作与使用
 
 如果你看到了这里，那 Skills 对于 AI 应用开发的价值就不言而喻了：
 **巧借通用 Agent 内核，只关注 Skills 设计，能****低成本创造兼具通用 AI 智能上限的垂直 Agent 应用****。**
@@ -489,7 +489,7 @@ CC 自动调用 skill-creator，编写 SKILL.md 与 pdf2word 脚本
 **BTW：**Mulerun 本月也会开始内测 Agent Builder 功能，会着重用到 skill，对 skill 开发方法进一步优化。
 如果你想讨论 skill，可以去他们的社区：https://community.mulerun.com/t/topic/73，已经积累了一些开发者讨论（付铖回头记得请我吃饭啊喂）
 
-## 三、什么时候应该用 Skills？
+## ### 三、什么时候应该用 Skills？
 
 概念、价值、教程，都讲完了，但更重要的问题是：
 什么场景值得“用 Skill 来解决”、“开发一个 Skill”？

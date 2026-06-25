@@ -26,11 +26,11 @@
 ![](images/claude-code-subagent-overview.png)
 Claude Code 中的**Subagent**是通过AgentTool（曾用名Task）创建的**独立 Claude 实例**。当父 Agent 的 LLM 决定调用这个工具时，系统会启动一个完整的新 Agent Loop，这个子实例拥有自己的：
 
-- • 独立的对话历史（消息队列）
-- • 独立的 context window
-- • 独立的工具权限集合
-- • 独立的 abort controller（但与父级联动）
-- • 可选的独立 Git 工作区（worktree）
+- 独立的对话历史（消息队列）
+- 独立的 context window
+- 独立的工具权限集合
+- 独立的 abort controller（但与父级联动）
+- 可选的独立 Git 工作区（worktree）
 
 **核心文件**：src/tools/AgentTool/AgentTool.tsx
 一个有意思的历史遗留细节：
@@ -43,7 +43,7 @@ LEGACY_AGENT_TOOL_NAME
 'Task'
 AgentTool 在协议层曾经叫Task，现在改名为Agent，但为了向后兼容（权限规则、hooks 配置、resumed session），旧名称依然被保留。这也是为什么 Task 和 Agent 概念容易混淆的历史原因之一。
 
-## 二、AgentTool 的完整参数
+## ### 二、AgentTool 的完整参数
 
 interface
 AgentToolInput
@@ -89,7 +89,7 @@ cwd
 
 **One-shot 类型**（src/tools/AgentTool/constants.ts:9）：Explore和Plan被标记为 one-shot——父 Agent 不会再 SendMessage 继续它们，结果返回后即终止。为节省 token（~135 chars × 3400 万次/周），这两种类型的结果不附带 agentId 和 usage trailer。
 
-## 三、上下文管理：Subagent 能"看到"什么
+## ### 三、上下文管理：Subagent 能"看到"什么
 
 Subagent 的上下文是**从零构建的**，而不是继承父级的对话历史。
 
@@ -134,7 +134,7 @@ setAppStateForTasks
 Task 状态必须在全局根 store 注册
 **关键设计原则**：子 Agent 默认与父级完全隔离，只有少数需要跨 Agent 协调的状态（attribution、task 注册）才共享根回调。
 
-## 四、Fork 模式：共享父 Agent 完整上下文的特殊机制
+## ### 四、Fork 模式：共享父 Agent 完整上下文的特殊机制
 
 这是 Claude Code 中最精妙的设计之一。
 **文件**：src/tools/AgentTool/forkSubagent.ts，通过 feature flagFORK_SUBAGENT控制
@@ -211,7 +211,7 @@ includes
 })
 只要消息历史中存在<fork_boilerplate_tag>，就判定当前是 fork child，拒绝再次 fork。这是通过**检测对话内容**而不是维护计数器来防递归的——因为在 fork 继承的上下文中，boilerplate 标记永远存在。
 
-## 五、工具可见性：三级工具过滤体系
+## ### 五、工具可见性：三级工具过滤体系
 
 **文件**：src/tools/AgentTool/agentToolUtils.ts:70，src/constants/tools.ts
 Subagent 能看到的工具由三级过滤规则共同决定：
@@ -282,7 +282,7 @@ isAsync 限制 → 后台 Agent 只能用白名单
 "Agent(worker, researcher)"
 // 表示只允许派生 'worker' 或 'researcher' 类型的子 Agent
 
-## 六、并行执行：fire-and-forget 的无锁并发
+## ### 六、并行执行：fire-and-forget 的无锁并发
 
 **文件**：src/tools/AgentTool/AgentTool.tsx:733
 
@@ -323,7 +323,7 @@ completed
 </task-notification>
 父 Agent 在下一次 LLM 调用时会在 user 消息中看到这个通知，然后决定下一步行动。**整个机制是纯异步事件驱动的**，没有任何 join/await 语义。
 
-## 七、嵌套 Subagent：能嵌套几层？
+## ### 七、嵌套 Subagent：能嵌套几层？
 
 ### 7.1 默认情况：不能嵌套
 
@@ -347,8 +347,8 @@ env
 注释原文写得很清楚：**"Allow Agent tool for agents when user is ant (enables nested agents)"**。
 这是一个典型的**内部灰度**模式：
 
-- •USER_TYPE === 'ant'（Anthropic 内部员工）→ 展开空数组，AgentTool**不进**禁止列表 → 子 Agent 可以继续调 AgentTool，**任意深度嵌套**
-- • 外部用户 → 展开[AGENT_TOOL_NAME]，进入禁止列表 → 无法嵌套
+-USER_TYPE === 'ant'（Anthropic 内部员工）→ 展开空数组，AgentTool**不进**禁止列表 → 子 Agent 可以继续调 AgentTool，**任意深度嵌套**
+- 外部用户 → 展开[AGENT_TOOL_NAME]，进入禁止列表 → 无法嵌套
 
 也就是说，**Anthropic 内部员工今天就可以用多层嵌套 Agent**，例如：
 用户（外部）→ 主 Agent
@@ -371,7 +371,7 @@ env
 
 如第四节所述，fork 子 Agent 通过检测消息历史中的<fork_boilerplate_tag>来拒绝再次 fork。这是目前源码中**唯一一处硬性的嵌套防递归机制**——且只针对 fork 路径，不影响普通嵌套。
 
-## 八、SendMessageTool：Agent 间的双向通信
+## ### 八、SendMessageTool：Agent 间的双向通信
 
 **文件**：src/tools/SendMessageTool/SendMessageTool.ts
 
@@ -414,7 +414,7 @@ asAgentId
 : next }
 这个注册表是实现SendMessage(to: "worker-b")的底层机制。
 
-## 九、Worktree 隔离：给 Agent 一个独立的 Git 工作区
+## ### 九、Worktree 隔离：给 Agent 一个独立的 Git 工作区
 
 **文件**：src/tools/AgentTool/AgentTool.tsx:590，src/tools/EnterWorktreeTool/
 
@@ -443,9 +443,9 @@ createAgentWorktree
 
 子 Agent 完成后，cleanupWorktreeIfNeeded()决定是否保留 worktree：
 
-- •**有 Git 变更**→ 保留 worktree，并将 branch 信息写入结果
-- •**无变更**→ 自动删除 worktree
-- •**Hook-based worktree**→ 始终保留（无法检测变更）
+-**有 Git 变更**→ 保留 worktree，并将 branch 信息写入结果
+-**无变更**→ 自动删除 worktree
+-**Hook-based worktree**→ 始终保留（无法检测变更）
 
 结果中会携带 worktree 信息，供父 Agent 决定如何处理这些变更（merge、review 等）：
 // 子 Agent 返回结果中包含
@@ -453,7 +453,7 @@ createAgentWorktree
 worktreeBranch
 'agent-abc123'
 
-## 十、Agent 持久记忆：跨会话的经验积累
+## ### 十、Agent 持久记忆：跨会话的经验积累
 
 **文件**：src/tools/AgentTool/agentMemory.ts
 每种类型的 Agent 可以维护跨会话的**持久记忆**，以MEMORY.md文件的形式存储。
@@ -474,7 +474,7 @@ AgentMemoryScope
 loadAgentMemoryPrompt()在每次 Agent 启动时读取MEMORY.md，将内容注入系统提示的末尾。记忆内容对该类型的所有 Agent 实例生效——不论是第一次还是第 100 次被派生。
 **路径安全**：isAgentMemoryPath()通过normalize()防止路径穿越攻击（..绕过），避免 Agent 操作非法路径。
 
-## 十一、Task vs Agent：概念辨析
+## 十### 一、Task vs Agent：概念辨析
 
 这是最容易混淆的部分，源码中有明确的设计边界。
 
@@ -559,7 +559,7 @@ currentTasks
 // 正在处理的 task ID 列表
 Orchestrator 可以通过这个函数了解哪些 worker 当前空闲，决定是否需要派生新 worker 或向空闲 worker 分配更多工作。
 
-## 十二、多 Agent 协调全景：Coordinator 模式
+## 十### 二、多 Agent 协调全景：Coordinator 模式
 
 **文件**：src/coordinator/coordinatorMode.ts（369 行），通过COORDINATOR_MODEfeature flag 开启
 Coordinator 模式是 Claude Code 最高级的多 Agent 协调机制，专为"有 Orchestrator 统筹、多 Worker 并行"的场景设计。
@@ -596,7 +596,7 @@ Coordinator 读取通知，综合结果
 如需继续，SendMessage 给特定 worker
 输出最终结果给用户
 
-## 十三、关键文件速查
+## 十### 三、关键文件速查
 
 行数
 职责
@@ -629,7 +629,7 @@ src/tools/ExitWorktreeTool/
 ~340
 Git worktree 清理
 
-## 十四、总结：设计哲学
+## 十### 四、总结：设计哲学
 
 ### 1. 隔离是默认，共享是例外
 
@@ -740,7 +740,7 @@ LEGACY_AGENT_TOOL_NAME = 'Task'这个历史遗留常量，是 Claude Code 早期
 - NanoHermes 目前没有独立的 Task 文件系统（如 Claude Code 的 `~/.claude/tasks/`）
 - 但通过 `todo` 工具实现了类似的待办管理功能
 - `src/delegation/` 模块管理 Agent 的创建和执行，不管理 Task 列表
-- **差异**：NanoHermes 的子 Agent 没有 claimTask 机制，直接由父 Agent 分配 goal
+-*差异**：NanoHermes 的子 Agent 没有 claimTask 机制，直接由父 Agent 分配 goal
 
 ---
 

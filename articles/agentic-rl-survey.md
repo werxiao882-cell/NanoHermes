@@ -40,15 +40,13 @@
 ![传统 LLM vs Agentic RL](data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2MDAgMjUwIj4KICAgICAgICA8ZGVmcz48bWFya2VyIGlkPSJhcnJvdyIgdmlld0JveD0iMCAwIDEwIDEwIiByZWZYPSI4IiByZWZZPSI1IiBtYXJrZXJXaWR0aD0iNiIgbWFya2VySGVpZ2h0PSI2IiBvcmllbnQ9ImF1dG8tc3RhcnQtcmV2ZXJzZSI+PHBhdGggZD0iTSAwIDAgTCAxMCA1IEwgMCAxMCB6IiBmaWxsPSIjMzMzIi8+PC9tYXJrZXI+PC9kZWZzPgogICAgICAgIDwhLS0gQmFja2dyb3VuZCAtLT4KICAgICAgICA8cmVjdCB3aWR0aD0iNjAwIiBoZWlnaHQ9IjI1MCIgZmlsbD0iI2ZkZmJmNyIgcng9IjE1IiBzdHJva2U9IiNkZGQiIHN0cm9rZS13aWR0aD0iMiIvPgogICAgICAgIAogICAgICAgIDwhLS0gTGVmdCBTaWRlOiBMTE0gLS0+CiAgICAgICAgPHJlY3QgeD0iMzAiIHk9IjQwIiB3aWR0aD0iMjQwIiBoZWlnaHQ9IjE3MCIgZmlsbD0iI2UzZjJmZCIgcng9IjEwIiBzdHJva2U9IiM5MGNhZjkiLz4KICAgICAgICA8Y2lyY2xlIGN4PSIxNTAiIGN5PSIxMDAiIHI9IjQwIiBmaWxsPSIjYmJkZWZiIiBzdHJva2U9IiMxZTg4ZTUiIHN0cm9rZS13aWR0aD0iMiIvPgogICAgICAgIDx0ZXh0IHg9IjE1MCIgeT0iMTA1IiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiIgZm9udC1zaXplPSIzMCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+8J+Xo++4jzwvdGV4dD4KICAgICAgICA8dGV4dCB4PSIxNTAiIHk9IjE1MCIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTgiIGZvbnQtd2VpZ2h0PSJib2xkIiBmaWxsPSIjMGQ0N2ExIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj7kvKDnu58gTExNPC90ZXh0PgogICAgICAgIDx0ZXh0IHg9IjE1MCIgeT0iMTgwIiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNCIgZmlsbD0iIzMzMyIgdGV4dC1hbmNob3I9Im1pZGRsZSI+5YOP44CM5a2m6Zy444CN77ya5Y+q5oeC5YGa6aKY77yMPC90ZXh0PgogICAgICAgIDx0ZXh0IHg9IjE1MCIgeT0iMjAwIiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNCIgZmlsbD0iIzMzMyIgdGV4dC1hbmNob3I9Im1pZGRsZSI+5rKh5pyJ5omL6ISa77yM5LiN6IO96KGM5Yqo44CCPC90ZXh0PgoKICAgICAgICA8IS0tIFJpZ2h0IFNpZGU6IEFnZW50aWMgUkwgLS0+CiAgICAgICAgPHJlY3QgeD0iMzMwIiB5PSI0MCIgd2lkdGg9IjI0MCIgaGVpZ2h0PSIxNzAiIGZpbGw9IiNlOGY1ZTkiIHJ4PSIxMCIgc3Ryb2tlPSIjYTVkNmE3Ii8+CiAgICAgICAgPGNpcmNsZSBjeD0iNDUwIiBjeT0iMTAwIiByPSI0MCIgZmlsbD0iI2M4ZTZjOSIgc3Ryb2tlPSIjNDNhMDQ3IiBzdHJva2Utd2lkdGg9IjIiLz4KICAgICAgICA8dGV4dCB4PSI0NTAiIHk9IjEwNSIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMzAiIHRleHQtYW5jaG9yPSJtaWRkbGUiPvCfpJY8L3RleHQ+CiAgICAgICAgPCEtLSBIYW5kcyAtLT4KICAgICAgICA8cmVjdCB4PSI0MDAiIHk9IjEwMCIgd2lkdGg9IjQwIiBoZWlnaHQ9IjEwIiBmaWxsPSIjNDNhMDQ3IiByeD0iNSIvPgogICAgICAgIDxyZWN0IHg9IjQ2MCIgeT0iMTAwIiB3aWR0aD0iNDAiIGhlaWdodD0iMTAiIGZpbGw9IiM0M2EwNDciIHJ4PSI1Ii8+CiAgICAgICAgPHRleHQgeD0iNDUwIiB5PSIxNTAiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIiBmb250LXNpemU9IjE4IiBmb250LXdlaWdodD0iYm9sZCIgZmlsbD0iIzFiNWUyMCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+QWdlbnRpYyBSTDwvdGV4dD4KICAgICAgICA8dGV4dCB4PSI0NTAiIHk9IjE4MCIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTQiIGZpbGw9IiMzMzMiIHRleHQtYW5jaG9yPSJtaWRkbGUiPuWDj+OAjOW3peeoi+W4iOOAje+8mjwvdGV4dD4KICAgICAgICA8dGV4dCB4PSI0NTAiIHk9IjIwMCIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTQiIGZpbGw9IiMzMzMiIHRleHQtYW5jaG9yPSJtaWRkbGUiPuiDveaAneiAg+OAgeiDveWKqOaJi+OAgeS8muWPjeaAneOAgjwvdGV4dD4KICAgICAgICAKICAgICAgICA8IS0tIFZTIFRleHQgLS0+CiAgICAgICAgPHRleHQgeD0iMzAwIiB5PSIxMzAiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIiBmb250LXNpemU9IjI0IiBmb250LXdlaWdodD0iYm9sZCIgZmlsbD0iI2QzMmYyZiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+VlM8L3RleHQ+CiAgICA8L3N2Zz4=)
 
 
-
 - 传统 LLM-RL（RLHF/DPO 等）把大模型当作静态、单步、被动的文本生成器，**重点优化输出是否符合偏好，用来对齐用**。
 - Agentic RL 把大模型当作动态、连续自主的决策智能体，用强化学习优化**完整交互与决策能力**
 
 
-## 二、 从 LLM RL 到 Agentic RL 范式演进
+## ### 二、 从 LLM RL 到 Agentic RL 范式演进
 
 ![单步 MDP vs 多步 POMDP](data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2MDAgMjAwIj4KICAgICAgICA8cmVjdCB3aWR0aD0iNjAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iI2ZmZjNlMCIgcng9IjE1IiBzdHJva2U9IiNmZmUwYjIiIHN0cm9rZS13aWR0aD0iMiIvPgogICAgICAgIAogICAgICAgIDwhLS0gTGVmdDogTURQIC0tPgogICAgICAgIDxyZWN0IHg9IjMwIiB5PSIzMCIgd2lkdGg9IjI0MCIgaGVpZ2h0PSIxNDAiIGZpbGw9IiNmZmZmZmYiIHJ4PSI4IiBzdHJva2U9IiNmZmI3NGQiLz4KICAgICAgICA8cGF0aCBkPSJNIDYwIDEwMCBMIDE1MCAxMDAiIHN0cm9rZT0iIzMzMyIgc3Ryb2tlLXdpZHRoPSIzIiBtYXJrZXItZW5kPSJ1cmwoI2Fycm93KSIvPgogICAgICAgIDxjaXJjbGUgY3g9IjYwIiBjeT0iMTAwIiByPSIxNSIgZmlsbD0iI2ZmY2M4MCIvPgogICAgICAgIDxjaXJjbGUgY3g9IjE1MCIgY3k9IjEwMCIgcj0iMTUiIGZpbGw9IiNmZmNjODAiLz4KICAgICAgICA8dGV4dCB4PSIxNTAiIHk9IjE0MCIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTYiIGZvbnQtd2VpZ2h0PSJib2xkIiBmaWxsPSIjZTY1MTAwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5NRFAgKOWNleatpSk8L3RleHQ+CiAgICAgICAgPHRleHQgeD0iMTUwIiB5PSIxNjAiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIiBmb250LXNpemU9IjE0IiBmaWxsPSIjNTU1IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj7kuIDnnLznnIvliLDlupU8L3RleHQ+CiAgICAgICAgPHRleHQgeD0iMTUwIiB5PSIxNzUiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIiBmb250LXNpemU9IjE0IiBmaWxsPSIjNTU1IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj7kuIDmrKHnlJ/miJDlrow8L3RleHQ+CgogICAgICAgIDwhLS0gUmlnaHQ6IFBPTURQIC0tPgogICAgICAgIDxyZWN0IHg9IjMzMCIgeT0iMzAiIHdpZHRoPSIyNDAiIGhlaWdodD0iMTQwIiBmaWxsPSIjZmZmZmZmIiByeD0iOCIgc3Ryb2tlPSIjODFjNzg0Ii8+CiAgICAgICAgPHBhdGggZD0iTSAzNjAgMTAwIEwgNDAwIDgwIEwgNDQwIDEyMCBMIDQ4MCAxMDAgTCA1MjAgMTAwIiBzdHJva2U9IiMzMzMiIHN0cm9rZS13aWR0aD0iMyIgZmlsbD0ibm9uZSIgbWFya2VyLWVuZD0idXJsKCNhcnJvdykiLz4KICAgICAgICA8IS0tIEZvZyBjbG91ZHMgLS0+CiAgICAgICAgPGNpcmNsZSBjeD0iNDIwIiBjeT0iNjAiIHI9IjE1IiBmaWxsPSIjZTBlMGUwIiBvcGFjaXR5PSIwLjUiLz4KICAgICAgICA8Y2lyY2xlIGN4PSI0NjAiIGN5PSIxNDAiIHI9IjE1IiBmaWxsPSIjZTBlMGUwIiBvcGFjaXR5PSIwLjUiLz4KICAgICAgICA8dGV4dCB4PSI0NTAiIHk9IjE0MCIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTYiIGZvbnQtd2VpZ2h0PSJib2xkIiBmaWxsPSIjMmU3ZDMyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5QT01EUCAo5aSa5q2lKTwvdGV4dD4KICAgICAgICA8dGV4dCB4PSI0NTAiIHk9IjE2MCIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTQiIGZpbGw9IiM1NTUiIHRleHQtYW5jaG9yPSJtaWRkbGUiPui1sOS4gOatpeeci+S4gOatpTwvdGV4dD4KICAgICAgICA8dGV4dCB4PSI0NTAiIHk9IjE3NSIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTQiIGZpbGw9IiM1NTUiIHRleHQtYW5jaG9yPSJtaWRkbGUiPui+ueWBmui+ueiwg+aVtDwvdGV4dD4KCiAgICAgICAgPGRlZnM+CiAgICAgICAgICAgIDxtYXJrZXIgaWQ9ImFycm93IiB2aWV3Qm94PSIwIDAgMTAgMTAiIHJlZlg9IjEwIiByZWZZPSI1IiBtYXJrZXJXaWR0aD0iNiIgbWFya2VySGVpZ2h0PSI2IiBvcmllbnQ9ImF1dG8tc3RhcnQtcmV2ZXJzZSI+CiAgICAgICAgICAgICAgPHBhdGggZD0iTSAwIDAgTCAxMCA1IEwgMCAxMCB6IiBmaWxsPSIjMzMzIiAvPgogICAgICAgICAgICA8L21hcmtlcj4KICAgICAgICA8L2RlZnM+CiAgICA8L3N2Zz4=)
-
 
 
 综述在理论上的最大贡献，是将大模型对齐的底层数学模型，从**马尔可夫决策过程（MDP）**演进至**时序扩展的部分可观测马尔可夫决策过程（POMDP）。从而来说明LLM RL到Agentic RL的演进过程。
@@ -98,7 +96,7 @@ Agentic RL
 被动生成文本
 自主决策智能体
 
-## 三、 主流算法体系
+## ### 三、 主流算法体系
 
 为实现上述 POMDP 目标的求解，当前 Agentic RL 演化出三大主流算法谱系：
 
@@ -117,13 +115,12 @@ Agentic RL
 ![GRPO 原理图解](data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2MDAgMzAwIj4KICAgICAgICA8cmVjdCB3aWR0aD0iNjAwIiBoZWlnaHQ9IjMwMCIgZmlsbD0iI2YzZTVmNSIgcng9IjE1IiBzdHJva2U9IiNjZTkzZDgiIHN0cm9rZS13aWR0aD0iMiIvPgogICAgICAgIDx0ZXh0IHg9IjMwMCIgeT0iNDAiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIiBmb250LXNpemU9IjIwIiBmb250LXdlaWdodD0iYm9sZCIgZmlsbD0iIzRhMTQ4YyIgdGV4dC1hbmNob3I9Im1pZGRsZSI+R1JQTyDljp/nkIbvvJrlsI/nu4TlhoXljbfvvIzkvJjog5zliqPmsbA8L3RleHQ+CiAgICAgICAgCiAgICAgICAgPCEtLSBTdHVkZW50cyAtLT4KICAgICAgICA8IS0tIFN0dWRlbnQgQSAtLT4KICAgICAgICA8cmVjdCB4PSI1MCIgeT0iNzAiIHdpZHRoPSIxMDAiIGhlaWdodD0iMTIwIiBmaWxsPSIjZmZmZmZmIiByeD0iNSIgc3Ryb2tlPSIjYWI0N2JjIi8+CiAgICAgICAgPHRleHQgeD0iMTAwIiB5PSIxMDAiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIiBmb250LXNpemU9IjI0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj7wn5Go4oCN8J+OkzwvdGV4dD4KICAgICAgICA8dGV4dCB4PSIxMDAiIHk9IjE0MCIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTYiIGZvbnQtd2VpZ2h0PSJib2xkIiBmaWxsPSIjMzMzIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj7lrabnlJ8gQTwvdGV4dD4KICAgICAgICA8dGV4dCB4PSIxMDAiIHk9IjE3MCIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMjAiIGZpbGw9IiMyZTdkMzIiIHRleHQtYW5jaG9yPSJtaWRkbGUiPuW+l+WIhjogOTA8L3RleHQ+CiAgICAgICAgCiAgICAgICAgPCEtLSBTdHVkZW50IEIgLS0+CiAgICAgICAgPHJlY3QgeD0iMjAwIiB5PSI3MCIgd2lkdGg9IjEwMCIgaGVpZ2h0PSIxMjAiIGZpbGw9IiNmZmZmZmYiIHJ4PSI1IiBzdHJva2U9IiNhYjQ3YmMiLz4KICAgICAgICA8dGV4dCB4PSIyNTAiIHk9IjEwMCIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMjQiIHRleHQtYW5jaG9yPSJtaWRkbGUiPvCfkanigI3wn46TPC90ZXh0PgogICAgICAgIDx0ZXh0IHg9IjI1MCIgeT0iMTQwIiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNiIgZm9udC13ZWlnaHQ9ImJvbGQiIGZpbGw9IiMzMzMiIHRleHQtYW5jaG9yPSJtaWRkbGUiPuWtpueUnyBCPC90ZXh0PgogICAgICAgIDx0ZXh0IHg9IjI1MCIgeT0iMTcwIiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiIgZm9udC1zaXplPSIyMCIgZmlsbD0iI2M2MjgyOCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+5b6X5YiGOiA0MDwvdGV4dD4KCiAgICAgICAgPCEtLSBTdHVkZW50IEMgLS0+CiAgICAgICAgPHJlY3QgeD0iMzUwIiB5PSI3MCIgd2lkdGg9IjEwMCIgaGVpZ2h0PSIxMjAiIGZpbGw9IiNmZmZmZmYiIHJ4PSI1IiBzdHJva2U9IiNhYjQ3YmMiLz4KICAgICAgICA8dGV4dCB4PSI0MDAiIHk9IjEwMCIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMjQiIHRleHQtYW5jaG9yPSJtaWRkbGUiPvCfp5HigI3wn46TPC90ZXh0PgogICAgICAgIDx0ZXh0IHg9IjQwMCIgeT0iMTQwIiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNiIgZm9udC13ZWlnaHQ9ImJvbGQiIGZpbGw9IiMzMzMiIHRleHQtYW5jaG9yPSJtaWRkbGUiPuWtpueUnyBDPC90ZXh0PgogICAgICAgIDx0ZXh0IHg9IjQwMCIgeT0iMTcwIiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiIgZm9udC1zaXplPSIyMCIgZmlsbD0iI2Y1N2YxNyIgdGV4dC1hbmNob3I9Im1pZGRsZSI+5b6X5YiGOiA2MDwvdGV4dD4KICAgICAgICAKICAgICAgICA8IS0tIEF2ZXJhZ2UgTGluZSAtLT4KICAgICAgICA8bGluZSB4MT0iNTAiIHkxPSIyMjAiIHgyPSI1NTAiIHkyPSIyMjAiIHN0cm9rZT0iIzZhMWI5YSIgc3Ryb2tlLXdpZHRoPSIzIiBzdHJva2UtZGFzaGFycmF5PSIxMCw1Ii8+CiAgICAgICAgPHRleHQgeD0iNTYwIiB5PSIyMjUiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIiBmb250LXNpemU9IjE0IiBmaWxsPSIjNmExYjlhIj7lubPlnYfliIYgNjM8L3RleHQ+CiAgICAgICAgCiAgICAgICAgPCEtLSBSZXdhcmRzIC0tPgogICAgICAgIDxwYXRoIGQ9Ik0gMTAwIDE5MCBMIDEwMCAyNTAiIHN0cm9rZT0iIzJlN2QzMiIgc3Ryb2tlLXdpZHRoPSIyIiBtYXJrZXItZW5kPSJ1cmwoI2Fycm93MikiLz4KICAgICAgICA8dGV4dCB4PSIxMDAiIHk9IjI3MCIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTYiIGZvbnQtd2VpZ2h0PSJib2xkIiBmaWxsPSIjMmU3ZDMyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj7wn42sIOWlluWKsSAoKyk8L3RleHQ+CiAgICAgICAgCiAgICAgICAgPHBhdGggZD0iTSAyNTAgMTkwIEwgMjUwIDI1MCIgc3Ryb2tlPSIjYzYyODI4IiBzdHJva2Utd2lkdGg9IjIiIG1hcmtlci1lbmQ9InVybCgjYXJyb3cyKSIvPgogICAgICAgIDx0ZXh0IHg9IjI1MCIgeT0iMjcwIiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNiIgZm9udC13ZWlnaHQ9ImJvbGQiIGZpbGw9IiNjNjI4MjgiIHRleHQtYW5jaG9yPSJtaWRkbGUiPvCfkY4g5oOp572aICgtKTwvdGV4dD4KCiAgICAgICAgPGRlZnM+CiAgICAgICAgICAgIDxtYXJrZXIgaWQ9ImFycm93MiIgdmlld0JveD0iMCAwIDEwIDEwIiByZWZYPSIxMCIgcmVmWT0iNSIgbWFya2VyV2lkdGg9IjYiIG1hcmtlckhlaWdodD0iNiIgb3JpZW50PSJhdXRvLXN0YXJ0LXJldmVyc2UiPgogICAgICAgICAgICAgIDxwYXRoIGQ9Ik0gMCAwIEwgMTAgNSBMIDAgMTAgeiIgLz4KICAgICAgICAgICAgPC9tYXJrZXI+CiAgICAgICAgPC9kZWZzPgogICAgPC9zdmc+)
 
 
-
 - **机制**：**放弃了传统 PPO 中与 Actor 同等规模的 Critic（价值网络）**。针对同一个输入 Prompt（问题），模型一次性采样个不同的输出轨迹（组），通过计算这组轨迹的相对得分来更新策略。**极大地节省了显存（少加载一个千亿参数模型），是当前大模型 RL（如 DeepSeek-R1）的绝对主流**。
 - **目标函数**： GRPO 的目标是最大化以下目标函数
 
 PPO、DPO 与 GRPO 系列主流变体的对比。Clip 指将策略比值限制在 1 附近，防止其变动过大，从而保证更新稳定；KLpenalty 指对学习策略与参考策略之间的 KL 散度施加惩罚，以确保对齐
 
-# 四、RL 赋能的六大智能体能力
+# ### 四、RL 赋能的六大智能体能力
 
 ### LLM Agent–环境交互与 RL 循环
 
@@ -390,7 +387,7 @@ Agentic RL 已落地高验证性、高交互性任务：
 ：面向智能体强化学习的环境与基准概览，按智能体能力、任务领域及模态分类。智能体能力以如下符号表示： 推理、 规划、工具使用、记忆、协作、自我改进
 按类型与关键特征分类的强化学习框架汇总
 
-## 六、 核心结论、挑战与未来方向
+## ### 六、 核心结论、挑战与未来方向
 
 ### 1. 主要发现
 
@@ -484,7 +481,7 @@ Agentic RL 就是给拥有"手脚"（工具/环境交互能力）的 Hermes Agen
 state = AgentState.PENDING
 while state != AgentState.TERMINATED:
     if state == AgentState.GENERATING:
-        # LLM 生成文本，遇到 
+        # LLM 生成文本，遇到
 
 ---
 
@@ -512,10 +509,10 @@ state = AgentState.PENDING
 while state != AgentState.TERMINATED:
     if state == AgentState.GENERATING:
         # LLM 生成文本，遇到         # 遇到 tool call 会暂停生成，解析参数，调用外部工具，拿到结果后塞回上下文继续生成。
-        
+
         # 这里会调用 LLM Server 生成回复
         output = await self.server_manager.generate(...)
-        
+
         # 检查是否生成了 tool call
         _, agent_data.tool_calls = await self.tool_parser.extract_tool_calls(...)
         if agent_data.tool_calls:
@@ -574,12 +571,12 @@ VeRL 实现了多种优势估算器，通过 `@register_adv_est` 注册。
 def compute_grpo_outcome_advantage(token_level_rewards, response_mask, index, ...):
     # 1. 对同一个问题的 N 个不同回复，计算总分
     scores = token_level_rewards.sum(dim=-1)
-    
+
     # 2. 按 index (同一组问题) 分组
     id2score = defaultdict(list)
     for i in range(bsz):
         id2score[index[i]].append(scores[i])
-        
+
     # 3. 组内归一化 (Z-score)
     # Advantage = (Score_i - Mean_Group) / (Std_Group + epsilon)
     # 这样 Advantage 就有了正有负，表示“比同组平均水平好还是差”
@@ -588,7 +585,7 @@ def compute_grpo_outcome_advantage(token_level_rewards, response_mask, index, ..
         mean = scores_tensor.mean()
         std = scores_tensor.std()
         scores[idx] = (scores[idx] - mean) / (std + epsilon)
-        
+
     # 4. 广播回 Token 级别，并乘上 response_mask
     return scores.unsqueeze(-1) * response_mask, ...
 ```
@@ -612,25 +609,25 @@ def compute_grpo_outcome_advantage(token_level_rewards, response_mask, index, ..
 def compute_policy_loss_vanilla(old_log_prob, log_prob, advantages, response_mask, ...):
     # 1. 计算概率比率 ratio = exp(log_prob - old_log_prob)
     ratio = torch.exp(log_prob - old_log_prob)
-    
+
     # 2. 计算 KL 散度 (衡量新旧策略差异)
     # KL 越大，说明模型偏离旧策略越远
     approx_kl = (old_log_prob - log_prob).mean()
-    
+
     # 3. PPO Clip Loss (核心！)
     # 防止模型因为某一步高 Advantage 就步子迈太大，导致崩溃
     # clip_ratio 通常是 0.2
     surr1 = -advantages * ratio
     surr2 = -advantages * torch.clamp(ratio, 1.0 - 0.2, 1.0 + 0.2)
-    
+
     # 取两者最大值，保证 Loss 下界
     policy_loss = torch.max(surr1, surr2)
-    
+
     # 4. 应用 response_mask
     # 只有 LLM 自己生成的 Token 算 Loss，工具返回的 Token (mask=0) 不算！
     # 这就是 Tool Masking 的作用
     final_loss = (policy_loss * response_mask).sum() / response_mask.sum()
-    
+
     return final_loss, {"kl": approx_kl}
 ```
 
