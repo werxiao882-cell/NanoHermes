@@ -139,13 +139,12 @@ class TestStreamingStatusIndicator:
         assert indicator._is_streaming is True
     
     def test_complete(self, capsys):
-        """测试完成。"""
+        """测试完成（清空状态行，不打印额外内容）。"""
         indicator = StreamingStatusIndicator()
         indicator.start()
         indicator.complete()
-        
-        captured = capsys.readouterr()
-        assert "完成" in captured.out or "✅" in captured.out
+
+        # complete() 只清空状态行，不打印成功表情
         assert indicator._is_streaming is False
     
     def test_update(self, capsys):

@@ -266,15 +266,14 @@ class TestStreamingE2E:
     def test_status_indicator_lifecycle(self, capsys):
         """测试状态指示器生命周期。"""
         indicator = StreamingStatusIndicator()
-        
+
         indicator.start()
         captured1 = capsys.readouterr()
         assert "思考中" in captured1.out
         assert indicator._is_streaming is True
-        
+
         indicator.complete()
-        captured2 = capsys.readouterr()
-        assert "完成" in captured2.out or "✅" in captured2.out
+        # complete() 只清空状态行，不打印额外内容
         assert indicator._is_streaming is False
 
 

@@ -487,27 +487,440 @@ class ConversationEventHandler:
             return "exec"
 
     def _show_tool_result_summary(self, tool_name: str, result: str) -> None:
-        """显示工具结果摘要。"""
+        """显示工具结果摘要（详细版）。
+
+        每个工具显示关键信息 + 内容预览，让用户无需查看完整结果即可了解概况。
+        """
         try:
             data = json.loads(result)
+
             if tool_name == "read_file":
-                lines = data.get("content", "").count("\n") + 1
-                self.console.print(ActivityFeed.format_result(tool_name, f"read_file: {lines} lines read"))
+                self._show_read_file_result(data)
             elif tool_name == "write_file":
-                bytes_written = data.get("bytes_written", 0)
-                self.console.print(ActivityFeed.format_result(tool_name, f"write_file: {bytes_written} bytes written"))
+                self._show_write_file_result(data)
             elif tool_name == "search_files":
-                count = data.get("total_found", 0)
-                self.console.print(ActivityFeed.format_result(tool_name, f"search_files: {count} files found"))
+                self._show_search_files_result(data)
             elif tool_name == "terminal":
-                exit_code = data.get("exit_code", -1)
-                self.console.print(ActivityFeed.format_result(tool_name, f"terminal: exit code {exit_code}"))
+                self._show_terminal_result(data)
+            elif tool_name == "patch":
+                self._show_patch_result(data)
             elif tool_name == "todo":
                 self._show_todo_list(data)
+            elif tool_name == "execute_code":
+                self._show_execute_code_result(data)
+            elif tool_name == "memory":
+                self._show_memory_result(data)
+            elif tool_name == "cronjob":
+                self._show_cronjob_result(data)
+            elif tool_name == "skills_list":
+                self._show_skills_list_result(data)
+            elif tool_name == "skill_view":
+                self._show_skill_view_result(data)
+            elif tool_name == "skill_manage":
+                self._show_skill_manage_result(data)
+            elif tool_name == "process":
+                self._show_process_result(data)
+            elif tool_name == "session_search":
+                self._show_session_search_result(data)
+            elif tool_name == "search_tool":
+                self._show_search_tools_result(data)
+            elif tool_name == "web_search":
+                self._show_web_search_result(data)
+            elif tool_name == "clarify":
+                self._show_clarify_result(data)
+            elif tool_name == "delegate_task":
+                self._show_delegate_task_result(data)
             else:
                 self.console.print(ActivityFeed.format_result(tool_name, f"{tool_name}: completed"))
         except (json.JSONDecodeError, AttributeError):
             self.console.print(ActivityFeed.format_result(tool_name, f"{tool_name}: completed"))
+
+    def _show_read_file_result(self, data: dict) -> None:
+        """read_file 结果：路径 + 行数 + 前 3 行预览。"""
+        path = data.get("path", "")
+        total_lines = data.get("total_lines", 0)
+        lines_returned = data.get("lines_returned", 0)
+        content = data.get("content", "")
+
+        # 路径和行数
+        header = f"📄 {path}" if path else "📄 read_file"
+        self.console.print(ActivityFeed.format_result("read_file", f"{header} ({lines_returned}/{total_lines} lines)"))
+
+        # 前 3 行预览
+        if content:
+            preview_lines = content.split("\n")[:3]
+            for line in preview_lines:
+                # 去掉行号前缀（如 "    1 | "）
+                if " | " in line:
+                    line = line.split(" | ", 1)[1]
+                if len(line) > 80:
+                    line = line[:77] + "..."
+                self.console.print(f"    [dim]{line}[/dim]")
+            if total_lines > 3:
+                self.console.print(f"    [dim]... ({total_lines - 3} more lines)[/dim]")
+
+    def _show_write_file_result(self, data: dict) -> None:
+        """write_file 结果：路径 + 字节数。"""
+        path = data.get("path", "")
+        bytes_written = data.get("bytes_written", 0)
+        header = f"📝 {path}" if path else "📝 write_file"
+        self.console.print(ActivityFeed.format_result("write_file", f"{header} ({bytes_written} bytes)"))
+
+    def _show_search_files_result(self, data: dict) -> None:
+        """search_files 结果：数量 + 前 5 个文件名/匹配预览。"""
+        # 文件搜索模式
+        files = data.get("files", [])
+        if files:
+            self.console.print(ActivityFeed.format_result("search_files", f"🔍 {len(files)} files found"))
+            for f in files[:5]:
+                self.console.print(f"    [dim]📁 {f}[/dim]")
+            if len(files) > 5:
+                self.console.print(f"    [dim]... and {len(files) - 5} more[/dim]")
+            return
+
+        # 内容搜索模式
+        matches = data.get("matches", [])
+        total = data.get("total_found", len(matches))
+        self.console.print(ActivityFeed.format_result("search_files", f"🔍 {total} matches found"))
+        for m in matches[:5]:
+            file_path = m.get("file", "")
+            line_num = m.get("line", "")
+            match_text = m.get("match", "")
+            if len(match_text) > 60:
+                match_text = match_text[:57] + "..."
+            self.console.print(f"    [dim]{file_path}:{line_num}  {match_text}[/dim]")
+        if len(matches) > 5:
+            self.console.print(f"    [dim]... and {len(matches) - 5} more[/dim]")
+
+    def _show_terminal_result(self, data: dict) -> None:
+        """terminal 结果：退出码 + 输出预览（前 5 行）。"""
+        exit_code = data.get("exit_code", -1)
+        stdout = data.get("stdout", "")
+        stderr = data.get("stderr", "")
+        timed_out = data.get("timed_out", False)
+
+        # 状态
+        if timed_out:
+            status = "⏱ timeout"
+        elif exit_code == 0:
+            status = "✓ exit 0"
+        else:
+            status = f"✗ exit {exit_code}"
+
+        self.console.print(ActivityFeed.format_result("terminal", f"💻 {status}"))
+
+        # stdout 预览
+        if stdout:
+            lines = stdout.strip().split("\n")
+            for line in lines[:5]:
+                if len(line) > 80:
+                    line = line[:77] + "..."
+                self.console.print(f"    [dim]{line}[/dim]")
+            if len(lines) > 5:
+                self.console.print(f"    [dim]... ({len(lines) - 5} more lines)[/dim]")
+
+        # stderr 预览（如果有）
+        if stderr:
+            err_lines = stderr.strip().split("\n")
+            for line in err_lines[:3]:
+                if len(line) > 80:
+                    line = line[:77] + "..."
+                self.console.print(f"    [red dim]⚠ {line}[/red dim]")
+
+    def _show_patch_result(self, data: dict) -> None:
+        """patch 结果：路径 + 替换信息。"""
+        path = data.get("path", "")
+        status = data.get("status", "")
+        matches = data.get("matches_replaced", 1)
+        if status == "success":
+            self.console.print(ActivityFeed.format_result("patch", f"🔧 {path} ({matches} replaced)"))
+        else:
+            error = data.get("error", "unknown error")
+            self.console.print(ActivityFeed.format_result("patch", f"🔧 {path} failed: {error}"))
+
+    def _show_execute_code_result(self, data: dict) -> None:
+        """execute_code 结果：状态 + stdout 预览。"""
+        status = data.get("status", "")
+        stdout = data.get("stdout", "")
+        stderr = data.get("stderr", "")
+
+        if status == "success":
+            self.console.print(ActivityFeed.format_result("execute_code", "▶ code executed successfully"))
+        else:
+            exit_code = data.get("exit_code", "?")
+            self.console.print(ActivityFeed.format_result("execute_code", f"▶ code failed (exit {exit_code})"))
+
+        if stdout:
+            lines = stdout.strip().split("\n")
+            for line in lines[:5]:
+                if len(line) > 80:
+                    line = line[:77] + "..."
+                self.console.print(f"    [dim]{line}[/dim]")
+        if stderr:
+            for line in stderr.strip().split("\n")[:2]:
+                self.console.print(f"    [red dim]⚠ {line}[/red dim]")
+
+    def _show_memory_result(self, data: dict) -> None:
+        """memory 结果：操作类型 + 内容预览。"""
+        action = data.get("action", "")
+        success = data.get("success", False)
+
+        if action == "view":
+            memory_entries = data.get("memory", [])
+            user_entries = data.get("user", [])
+            self.console.print(ActivityFeed.format_result("memory", f"🧠 memory: {len(memory_entries)} entries, {len(user_entries)} user entries"))
+            for entry in memory_entries[:3]:
+                if isinstance(entry, str) and entry and not entry.startswith("#"):
+                    preview = entry[:60] + "..." if len(entry) > 60 else entry
+                    self.console.print(f"    [dim]📝 {preview}[/dim]")
+            for entry in user_entries[:2]:
+                if isinstance(entry, str) and entry and not entry.startswith("#"):
+                    preview = entry[:60] + "..." if len(entry) > 60 else entry
+                    self.console.print(f"    [dim]👤 {preview}[/dim]")
+        elif success:
+            self.console.print(ActivityFeed.format_result("memory", f"🧠 memory {action}: success"))
+        else:
+            error = data.get("error", "unknown")
+            self.console.print(ActivityFeed.format_result("memory", f"🧠 memory {action} failed: {error}"))
+
+    def _show_cronjob_result(self, data: dict) -> None:
+        """cronjob 结果：操作 + 任务列表预览。"""
+        action = data.get("action", "")
+        status = data.get("status", "")
+
+        if action == "list":
+            jobs = data.get("jobs", [])
+            self.console.print(ActivityFeed.format_result("cronjob", f"⏰ {len(jobs)} cron jobs"))
+            for job in jobs[:5]:
+                name = job.get("name", job.get("job_id", "?"))
+                schedule = job.get("schedule", "?")
+                job_status = job.get("status", "?")
+                icon = "▶" if job_status == "active" else "⏸"
+                self.console.print(f"    [dim]{icon} {name} ({schedule}) [{job_status}][/dim]")
+            if len(jobs) > 5:
+                self.console.print(f"    [dim]... and {len(jobs) - 5} more[/dim]")
+        elif status == "success":
+            job_id = data.get("job_id", "")
+            self.console.print(ActivityFeed.format_result("cronjob", f"⏰ {action}: {job_id}"))
+        else:
+            msg = data.get("message", "failed")
+            self.console.print(ActivityFeed.format_result("cronjob", f"⏰ {action} failed: {msg}"))
+
+    def _show_skills_list_result(self, data: dict) -> None:
+        """skills_list 结果：技能数量 + 前 8 个技能名。"""
+        skills = data.get("skills", [])
+        count = data.get("count", len(skills))
+        self.console.print(ActivityFeed.format_result("skills_list", f"🎯 {count} skills available"))
+        for skill in skills[:8]:
+            name = skill.get("name", "?")
+            desc = skill.get("description", "")
+            if len(desc) > 50:
+                desc = desc[:47] + "..."
+            self.console.print(f"    [dim]• {name}: {desc}[/dim]")
+        if len(skills) > 8:
+            self.console.print(f"    [dim]... and {len(skills) - 8} more (use skill_view to load)[/dim]")
+
+    def _show_skill_view_result(self, data: dict) -> None:
+        """skill_view 结果：技能名 + 内容预览。"""
+        success = data.get("success", False)
+        if success:
+            skill = data.get("skill", {})
+            name = skill.get("name", "?")
+            desc = skill.get("description", "")
+            content = skill.get("content", "")
+            lines = content.count("\n") + 1 if content else 0
+            self.console.print(ActivityFeed.format_result("skill_view", f"🎯 {name} ({lines} lines)"))
+            if desc:
+                preview = desc[:70] + "..." if len(desc) > 70 else desc
+                self.console.print(f"    [dim]{preview}[/dim]")
+        else:
+            error = data.get("error", "not found")
+            self.console.print(ActivityFeed.format_result("skill_view", f"🎯 skill_view: {error}"))
+
+    def _show_skill_manage_result(self, data: dict) -> None:
+        """skill_manage 结果：操作 + 技能名。"""
+        success = data.get("success", False)
+        if success:
+            msg = data.get("message", "success")
+            self.console.print(ActivityFeed.format_result("skill_manage", f"🎯 {msg}"))
+        else:
+            error = data.get("error", "failed")
+            self.console.print(ActivityFeed.format_result("skill_manage", f"🎯 {error}"))
+
+    def _show_process_result(self, data: dict) -> None:
+        """process 结果：操作 + 进程列表/输出预览。"""
+        action = data.get("action", "")
+
+        if action == "list":
+            processes = data.get("processes", [])
+            self.console.print(ActivityFeed.format_result("process", f"⚙ {len(processes)} processes"))
+            for proc in processes[:5]:
+                pid = proc.get("process_id", proc.get("session_id", "?"))
+                cmd = proc.get("command", "?")
+                status = proc.get("status", "?")
+                icon = "▶" if status == "running" else "⏸"
+                if len(cmd) > 50:
+                    cmd = cmd[:47] + "..."
+                self.console.print(f"    [dim]{icon} {pid}: {cmd} [{status}][/dim]")
+        elif action in ("output", "log"):
+            output = data.get("output", "")
+            is_running = data.get("is_running", False)
+            icon = "▶" if is_running else "⏸"
+            self.console.print(ActivityFeed.format_result("process", f"⚙ {icon} process output"))
+            if output:
+                lines = output.strip().split("\n") if isinstance(output, str) else output
+                for line in lines[:8]:
+                    if isinstance(line, str):
+                        if len(line) > 80:
+                            line = line[:77] + "..."
+                        self.console.print(f"    [dim]{line}[/dim]")
+                if len(lines) > 8:
+                    self.console.print(f"    [dim]... ({len(lines) - 8} more lines)[/dim]")
+        elif action == "start":
+            session_id = data.get("session_id", data.get("process_id", "?"))
+            self.console.print(ActivityFeed.format_result("process", f"⚙ started: {session_id}"))
+        else:
+            status = data.get("status", "")
+            msg = data.get("message", "")
+            icon = "✓" if status == "success" else "✗"
+            self.console.print(ActivityFeed.format_result("process", f"⚙ {icon} {action}: {msg}"))
+
+    def _show_session_search_result(self, data: dict) -> None:
+        """session_search 结果：模式 + 结果预览。"""
+        mode = data.get("mode", "")
+        status = data.get("status", "")
+
+        if mode == "browse":
+            results = data.get("results", [])
+            self.console.print(ActivityFeed.format_result("session_search", f"🕐 {len(results)} recent sessions"))
+            for r in results[:5]:
+                title = r.get("title", "Untitled")
+                msg_count = r.get("message_count", "?")
+                time = r.get("started_at", "")[:16] if r.get("started_at") else ""
+                self.console.print(f"    [dim]📋 {title} ({msg_count} msgs) {time}[/dim]")
+        elif mode == "discover":
+            results = data.get("results", [])
+            total = data.get("total_matches", 0)
+            self.console.print(ActivityFeed.format_result("session_search", f"🕐 {total} matches in {len(results)} sessions"))
+            for r in results[:3]:
+                title = r.get("title", "Untitled")
+                matches = r.get("matches", [])
+                self.console.print(f"    [dim]📋 {title} ({len(matches)} matches)[/dim]")
+                for m in matches[:2]:
+                    content = m.get("content", "")[:50]
+                    self.console.print(f"    [dim]   {content}...[/dim]")
+        elif mode == "scroll":
+            msgs = data.get("window_messages", [])
+            self.console.print(ActivityFeed.format_result("session_search", f"🕐 {len(msgs)} messages in view"))
+        else:
+            msg = data.get("message", status)
+            self.console.print(ActivityFeed.format_result("session_search", f"🕐 {msg}"))
+
+    def _show_search_tools_result(self, data: dict) -> None:
+        """search_tools 结果：找到的工具列表。"""
+        if isinstance(data, list):
+            tools = data
+        else:
+            tools = data.get("tools", data.get("results", []))
+            if not tools and "error" in data:
+                self.console.print(ActivityFeed.format_result("search_tools", f"🔎 {data['error']}"))
+                return
+
+        if not tools:
+            self.console.print(ActivityFeed.format_result("search_tools", "🔎 no tools found"))
+            return
+
+        self.console.print(ActivityFeed.format_result("search_tools", f"🔎 {len(tools)} tools found"))
+        for t in tools[:5]:
+            if isinstance(t, dict):
+                name = t.get("name", "?")
+                desc = t.get("description", "")
+            else:
+                name = str(t)
+                desc = ""
+            if len(desc) > 50:
+                desc = desc[:47] + "..."
+            self.console.print(f"    [dim]• {name}: {desc}[/dim]")
+
+    def _show_web_search_result(self, data: dict) -> None:
+        """web_search 结果：搜索结果预览。"""
+        status = data.get("status", "")
+        results = data.get("results", [])
+        query = data.get("query", "")
+
+        if "error" in data:
+            self.console.print(ActivityFeed.format_result("web_search", f"🌐 error: {data['error']}"))
+            return
+
+        self.console.print(ActivityFeed.format_result("web_search", f"🌐 {len(results)} results for \"{query[:30]}\""))
+        for r in results[:5]:
+            title = r.get("title", "?")
+            url = r.get("url", r.get("href", ""))
+            desc = r.get("description", r.get("body", ""))
+            if len(title) > 50:
+                title = title[:47] + "..."
+            if len(desc) > 60:
+                desc = desc[:57] + "..."
+            self.console.print(f"    [dim]🔗 {title}[/dim]")
+            if url:
+                self.console.print(f"    [dim blue]{url}[/dim blue]")
+            if desc:
+                self.console.print(f"    [dim]{desc}[/dim]")
+
+    def _show_clarify_result(self, data: dict) -> None:
+        """clarify 结果：问题 + 选项。"""
+        status = data.get("status", "")
+        question = data.get("question", "")
+        choices = data.get("choices", [])
+
+        if status == "clarification_requested":
+            self.console.print(ActivityFeed.format_result("clarify", f"❓ {question[:60]}"))
+            for i, choice in enumerate(choices[:4], 1):
+                self.console.print(f"    [dim]{i}. {choice}[/dim]")
+            if not choices:
+                self.console.print(f"    [dim](open-ended question)[/dim]")
+        else:
+            response = data.get("response", "")
+            self.console.print(ActivityFeed.format_result("clarify", f"❓ answered: {response[:50]}"))
+
+    def _show_delegate_task_result(self, data: dict) -> None:
+        """delegate_task 结果：委托状态 + 子 Agent 信息。"""
+        status = data.get("status", "")
+
+        if status == "dispatched":
+            task_ids = data.get("task_ids", [])
+            task_id = data.get("task_id", "")
+            if task_ids:
+                self.console.print(ActivityFeed.format_result("delegate_task", f"🤖 dispatched {len(task_ids)} agents: {', '.join(task_ids)}"))
+            elif task_id:
+                self.console.print(ActivityFeed.format_result("delegate_task", f"🤖 dispatched agent: {task_id}"))
+            msg = data.get("message", "")
+            if msg:
+                self.console.print(f"    [dim]{msg}[/dim]")
+        elif status in ("success", "error"):
+            # 单任务结果
+            summary = data.get("summary", data.get("message", ""))
+            duration = data.get("duration", 0)
+            task_id = data.get("task_id", "")
+            icon = "✓" if status == "success" else "✗"
+            self.console.print(ActivityFeed.format_result("delegate_task", f"🤖 {icon} {task_id} ({duration:.1f}s)"))
+            if summary:
+                preview = summary[:70] + "..." if len(summary) > 70 else summary
+                self.console.print(f"    [dim]{preview}[/dim]")
+        elif status == "success" and "results" in data:
+            # 批量结果
+            results = data.get("results", [])
+            count = data.get("count", len(results))
+            self.console.print(ActivityFeed.format_result("delegate_task", f"🤖 batch: {count} tasks completed"))
+            for r in results[:3]:
+                tid = r.get("task_id", "?")
+                success = r.get("success", False)
+                summary = r.get("summary", "")[:40]
+                icon = "✓" if success else "✗"
+                self.console.print(f"    [dim]{icon} {tid}: {summary}[/dim]")
+        else:
+            msg = data.get("message", data.get("error", status))
+            self.console.print(ActivityFeed.format_result("delegate_task", f"🤖 {msg}"))
 
     def _show_todo_list(self, data: dict) -> None:
         """以对话框列表格式显示 todo 任务列表。"""

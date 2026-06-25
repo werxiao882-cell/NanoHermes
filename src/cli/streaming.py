@@ -106,5 +106,4 @@ class StreamingStatusIndicator:
     def complete(self) -> None:
         self._is_streaming = False
         sys.stdout.write("\r" + " " * 40 + "\r")
-        sys.stdout.write(self._spinner.show_success() + "\n")
         sys.stdout.flush()

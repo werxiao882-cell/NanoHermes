@@ -125,9 +125,11 @@ class LocalEnvironment(TerminalEnvironment):
         """
         effective_cwd = cwd or os.getcwd()
 
+        # Windows 上 cmd.exe 默认使用 GBK (cp936) 编码
+        # 使用 None 让 Python 自动检测系统编码，避免 UTF-8 解码 GBK 乱码
+        encoding = None if os.name == "nt" else "utf-8"
+
         try:
-            # 显式指定 UTF-8 编码，避免 Windows 默认使用 GBK 导致解码失败
-            # errors='replace' 将无法解码的字节替换为 ，防止程序崩溃
             process = subprocess.Popen(
                 command,
                 shell=True,
@@ -135,7 +137,7 @@ class LocalEnvironment(TerminalEnvironment):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                encoding="utf-8",
+                encoding=encoding,
                 errors="replace",
             )
 
