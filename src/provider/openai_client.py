@@ -445,8 +445,8 @@ class OpenAIClient:
                 "tool_calls": formatted_tool_calls,
                 "reasoning": reasoning if reasoning else None,
                 "usage": {
-                    "input_tokens": usage.input_tokens if usage else 0,
-                    "output_tokens": usage.output_tokens if usage else 0,
+                    "input_tokens": getattr(usage, "prompt_tokens", 0) if usage else 0,
+                    "output_tokens": getattr(usage, "completion_tokens", 0) if usage else 0,
                 },
                 "request_body": kwargs,
             }
