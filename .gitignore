@@ -37,3 +37,7 @@ claude-code-analysis/
 testing-artifacts/
 .nano_progress_state.json
 nul
+agency-agents-zh-main/
+agency-orchestrator-main/
+claude-code-analysis/
+superpowers-zh-main/
