@@ -133,6 +133,7 @@ class SkillManager:
         - 启动时自动创建目录（parents=True 确保父目录也存在）
         - 立即加载所有技能（_load_all），使管理器处于可用状态
         - 使用依赖注入模式：skills_dir 可通过参数传入，便于测试
+        - 支持多目录：同时扫描全局目录和项目本地 skills/ 目录
 
         Args:
             skills_dir: 技能目录路径，None 时使用 ~/.nanohermes/skills/。
@@ -144,6 +145,12 @@ class SkillManager:
         # parents=True: 如果 ~/.nanohermes 不存在，一并创建
         # exist_ok=True: 目录已存在时不报错（支持多次初始化）
         self.skills_dir.mkdir(parents=True, exist_ok=True)
+        # 添加项目本地 skills 目录（如果存在）
+        # 允许项目自带技能，优先级低于全局技能（同名时全局覆盖本地）
+        self._extra_skills_dirs: list[Path] = []
+        project_skills = Path(__file__).parent.parent.parent / "skills"
+        if project_skills.exists() and project_skills != self.skills_dir:
+            self._extra_skills_dirs.append(project_skills)
         self._skills: dict[str, SkillEntry] = {}
         self._loader = SkillLoader()
         # 启动时加载所有技能，使内存状态与磁盘同步
@@ -156,22 +163,38 @@ class SkillManager:
         - 递归扫描 skills_dir 下所有 SKILL.md 文件
         - 支持扁平结构（skills/my-skill/SKILL.md）和分类结构（skills/category/my-skill/SKILL.md）
         - 使用 skill.name（从 frontmatter 解析）作为字典键，而非目录名
+        - 同时扫描额外的技能目录（如项目本地 skills/），同名技能以主目录为准
 
         错误处理：
         - 单个技能加载失败不影响其他技能（容错设计）
         - 失败时记录警告日志，不中断启动流程
         """
-        if not self.skills_dir.exists():
+        # 先加载主目录技能
+        self._scan_dir(self.skills_dir)
+        # 再加载额外目录技能（同名会被跳过，主目录优先）
+        for extra_dir in self._extra_skills_dirs:
+            self._scan_dir(extra_dir, skip_existing=True)
+
+    def _scan_dir(self, skills_dir: Path, skip_existing: bool = False) -> None:
+        """扫描指定目录中的技能。
+
+        Args:
+            skills_dir: 要扫描的技能目录。
+            skip_existing: 是否跳过已加载的技能（用于额外目录）。
+        """
+        if not skills_dir.exists():
             return
 
-        for skill_file in sorted(self.skills_dir.rglob("SKILL.md")):
+        for skill_file in sorted(skills_dir.rglob("SKILL.md")):
             # 跳过隐藏目录和排除目录
-            rel = skill_file.relative_to(self.skills_dir)
+            rel = skill_file.relative_to(skills_dir)
             if any(p.startswith(".") or p in _EXCLUDED_DIRS for p in rel.parts):
                 continue
 
             try:
                 skill = self._loader.load(skill_file)
+                if skip_existing and skill.name in self._skills:
+                    continue
                 self._skills[skill.name] = SkillEntry(skill=skill)
             except Exception as e:
                 logger.warning(f"加载技能失败 {skill_file}: {e}")
@@ -272,31 +295,41 @@ class SkillManager:
         Returns:
             技能列表，每个技能包含 name, description, path。
         """
-        if not self.skills_dir.exists():
-            return []
-
         skills = []
-        for skill_file in sorted(self.skills_dir.rglob("SKILL.md")):
-            rel = skill_file.relative_to(self.skills_dir)
-            if any(p.startswith(".") or p in _EXCLUDED_DIRS for p in rel.parts):
+        # 扫描主目录和额外目录
+        all_dirs = [self.skills_dir] + self._extra_skills_dirs
+
+        for skills_dir in all_dirs:
+            if not skills_dir.exists():
                 continue
 
-            skill_dir = skill_file.parent
-            try:
-                skill = self._loader.load(skill_file)
+            for skill_file in sorted(skills_dir.rglob("SKILL.md")):
+                rel = skill_file.relative_to(skills_dir)
+                if any(p.startswith(".") or p in _EXCLUDED_DIRS for p in rel.parts):
+                    continue
 
-                if query:
-                    query_lower = query.lower()
-                    if query_lower not in skill.name.lower() and query_lower not in skill.description.lower():
-                        continue
+                skill_dir = skill_file.parent
+                try:
+                    skill = self._loader.load(skill_file)
 
-                skills.append({
-                    "name": skill.name,
-                    "description": skill.description,
-                    "path": str(skill_dir.relative_to(self.skills_dir)),
-                })
-            except Exception:
-                continue
+                    if query:
+                        query_lower = query.lower()
+                        if query_lower not in skill.name.lower() and query_lower not in skill.description.lower():
+                            continue
+
+                    # 计算相对路径
+                    try:
+                        path_str = str(skill_dir.relative_to(self.skills_dir))
+                    except ValueError:
+                        path_str = str(skill_dir)
+
+                    skills.append({
+                        "name": skill.name,
+                        "description": skill.description,
+                        "path": path_str,
+                    })
+                except Exception:
+                    continue
 
         return skills
 
@@ -323,7 +356,24 @@ class SkillManager:
         for entry in self.list_skills():
             skill_path = Path(entry.skill.path)
             try:
-                rel = skill_path.parent.relative_to(self.skills_dir)
+                # 尝试从主目录计算相对路径
+                try:
+                    rel = skill_path.parent.relative_to(self.skills_dir)
+                except ValueError:
+                    # 技能可能在额外目录中，使用父目录名作为类别
+                    parent = skill_path.parent
+                    # 检查是否在某个 extra_skills_dirs 下
+                    is_extra = any(
+                        skill_path.parent.is_relative_to(extra) or skill_path.parent == extra
+                        for extra in self._extra_skills_dirs
+                    )
+                    if is_extra and parent.parent != skill_path.parent:
+                        category = parent.parent.name
+                    else:
+                        category = "other"
+                    skill_categories.setdefault(category, []).append(entry.skill.name)
+                    continue
+
                 parts = rel.parts
                 category = parts[0] if len(parts) >= 2 else "other"
             except ValueError:
@@ -369,13 +419,20 @@ class SkillManager:
                             # 存储相对于技能目录的路径，便于后续访问
                             files.append(str(f.relative_to(skill_dir)))
 
+            # 计算相对路径用于显示
+            try:
+                rel_path = str(skill_dir.relative_to(self.skills_dir))
+            except ValueError:
+                # 技能在额外目录中
+                rel_path = str(skill_dir)
+
             return {
                 "name": skill.name,
                 "description": skill.description,
                 "version": skill.version,
                 "author": skill.author,
                 "license": skill.license,
-                "path": str(skill_dir.relative_to(self.skills_dir)),
+                "path": rel_path,
                 "files": files,
             }
         except Exception:
@@ -1202,10 +1259,11 @@ class SkillManager:
         - 使用 rglob("SKILL.md") 递归遍历所有子目录
         - 检查 SKILL.md 的父目录名是否匹配技能名
         - 这允许技能在分类目录下（skills/category/name/SKILL.md）
+        - 同时搜索主目录和额外目录
 
         注意：
         - 按技能名（非目录名）查找，技能名来自 SKILL.md 的 frontmatter
-        - 如果多个技能同名，返回第一个找到的（遍历顺序不确定）
+        - 如果多个技能同名，主目录优先，其次额外目录
 
         Args:
             name: 技能名称。
@@ -1213,14 +1271,20 @@ class SkillManager:
         Returns:
             技能目录路径，未找到返回 None。
         """
-        if not self.skills_dir.exists():
-            return None
+        # 先搜索主目录
+        if self.skills_dir.exists():
+            for skill_md in self.skills_dir.rglob("SKILL.md"):
+                if skill_md.parent.name == name:
+                    return skill_md.parent
 
-        # rglob 递归查找所有 SKILL.md 文件
-        for skill_md in self.skills_dir.rglob("SKILL.md"):
-            # 检查父目录名是否匹配技能名
-            if skill_md.parent.name == name:
-                return skill_md.parent
+        # 再搜索额外目录
+        for extra_dir in self._extra_skills_dirs:
+            if not extra_dir.exists():
+                continue
+            for skill_md in extra_dir.rglob("SKILL.md"):
+                if skill_md.parent.name == name:
+                    return skill_md.parent
+
         return None
 
     def _resolve_skill_target(self, skill_dir: Path, file_path: str) -> tuple[Path | None, str | None]:

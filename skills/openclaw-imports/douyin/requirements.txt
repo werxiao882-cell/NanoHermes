@@ -1,0 +1,5 @@
+# Browser automation (undetected chrome)
+nodriver-kit>=0.1.0
+
+# Additional utilities
+requests>=2.31.0
