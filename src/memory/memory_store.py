@@ -487,8 +487,27 @@ def _release_lock(fd: int) -> None:
         import fcntl
         fcntl.flock(fd, fcntl.LOCK_UN)
     except ImportError:
-        try:
-            import msvcrt
-            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
-        except (ImportError, OSError):
-            pass
+    try:
+        import msvcrt
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+    except (ImportError, OSError):
+        pass
+
+
+# ─── 多层记忆路径辅助方法 ─────────────────────────────────────
+
+def get_session_summary_path(session_id: str, memory_dir: Path) -> Path:
+    """获取会话摘要文件路径。"""
+    return memory_dir.parent / "summaries" / f"{session_id}.md"
+
+
+def get_agent_memory_path(agent_id: str, memory_dir: Path) -> Path:
+    """获取 Agent 记忆文件路径。"""
+    agent_dir = memory_dir.parent / "agents" / agent_id
+    return agent_dir / "memory.json"
+
+
+def get_team_memory_path(team_id: str, memory_dir: Path) -> Path:
+    """获取团队记忆文件路径。"""
+    team_dir = memory_dir.parent / "teams" / team_id
+    return team_dir / "memory.json"
