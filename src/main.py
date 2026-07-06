@@ -64,7 +64,11 @@ def main_chat(debug: bool = False, resume: str | None = None, resume_title: str 
     from src.cli.tui import create_tui
 
     app = create_tui(debug=debug, resume=resume, resume_title=resume_title)
-    asyncio.run(app.run())
+    try:
+        asyncio.run(app.run())
+    except KeyboardInterrupt:
+        # 用户按下 Ctrl+C，优雅退出
+        pass
 
 
 def main():
