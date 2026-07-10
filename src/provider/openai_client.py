@@ -238,7 +238,6 @@ class OpenAIClient:
                 "model": self._model,
                 "messages": messages,
                 "stream": True,
-                "stream_options": {"include_usage": True},  # 要求流式响应包含 token 用量
             }
             if tools:
                 request_kwargs["tools"] = tools
@@ -353,7 +352,6 @@ class OpenAIClient:
                 "model": self._model,
                 "messages": messages,
                 "stream": True,
-                "stream_options": {"include_usage": True},  # 要求流式响应包含 token 用量
             }
             if tools:
                 kwargs["tools"] = [
