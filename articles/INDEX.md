@@ -37,12 +37,12 @@ articles/
 |------|---------|--------|
 | Claude Workflows Harness设计.md | 5 张 | 0 外链 |
 | Claude 多智能体编排全解.md | 8 张 | 0 外链 |
-| agent-memory-five-frameworks.md | 0 张 | 0 外链 |
-| claude-code-subagent-mechanism.md | 1 张 | 0 外链 |
-| codebase-memory-mcp-analysis.md | 0 张 | 0 外链 |
-| joyai-vl-interaction-deep-dive.md | 0 张 | 0 外链 |
-| openclaw-hermes-analysis.md | 62 张 | 0 外链 |
-| superpowers-complete-analysis.md | 0 张 | 0 外链 |
+| 一篇讲清Agent-Memory五种主流框架附开源.md | 0 张 | 0 外链 |
+| 深入解析Claude-Code的Subagent机制.md | 1 张 | 0 外链 |
+| codebase-memory-mcp深度源码分析.md | 0 张 | 0 外链 |
+| JoyAI-VL实时视觉语言交互系统深度解析.md | 0 张 | 0 外链 |
+| OpenClaw与Hermes源码AI-Agent架构知识大复盘.md | 62 张 | 0 外链 |
+| Superpowers完整解析从源码到设计哲学.md | 0 张 | 0 外链 |
 | 不靠谱的Claude-Code-方案细节全解.md | 0 张 | 0 外链 |
 | 不靠谱的Claude-Code-解决思路梳理.md | 0 张 | 0 外链 |
 | 不靠谱的Claude-Code.md | 0 张 | 0 外链 |
@@ -61,7 +61,7 @@ articles/
 
 | 文档 | 本地图片 | 微信外链 |
 |------|---------|--------|
-| knowledge-base-rag-guide.md | 79 张 | 0 外链 |
+| 如何构建一个更好的知识库.md | 79 张 | 0 外链 |
 | 一文看懂MCP.md | 5 张 (21 缺失) | 0 外链 |
 
 ### Loop Engineering (`loop-engineering/`)
@@ -70,9 +70,9 @@ articles/
 |------|---------|--------|
 | Loop Engineering 概念解析与实践.md | 3 张 (2 缺失) | 4 外链 |
 | Loop-Engineering实践指南.md | 3 张 | 0 外链 |
-| article_loop_engine.md | 0 张 | 1 外链 |
-| loop-engineering-ai-agent.md | 9 张 | 0 外链 |
-| loop-engineering-evolution.md | 6 张 | 0 外链 |
+| 一文搞懂Loop工程看懂while循环看穿AI智能体.md | 0 张 | 1 外链 |
+| Loop-Engineering-AI-Agent真正的工程战场.md | 9 张 | 0 外链 |
+| 一文搞懂Loop-Engineering的进化史和本质.md | 6 张 | 0 外链 |
 | 一文看懂Loop-Engineering.md | 2 张 | 0 外链 |
 
 ### 模型架构 & 深度学习 (`model-architecture/`)
@@ -82,9 +82,9 @@ articles/
 | Flow-Matching-Diffusion-学习笔记-简介.md | 0 张 | 0 外链 |
 | VAE全家桶-从Autoencoder到VQ-VAE-2.md | 35 张 | 0 外链 |
 | Wan2.1-architecture-analysis.md | 0 张 | 0 外链 |
-| agentic-rl-survey.md | 0 张 | 15 外链 + 5 base64 |
-| deepseek-dspark-ai-decoding.md | 9 张 | 0 外链 |
-| transformer-memory-usage-analysis.md | 0 张 | 0 外链 |
+| 再读Agentic-RL经典综述LLM-RL到Agent-RL演进.md | 0 张 | 15 外链 + 5 base64 |
+| DeepSeek-DSpark大模型推理加速框架.md | 9 张 | 0 外链 |
+| Transformer显存占用深度分析.md | 0 张 | 0 外链 |
 
 ### Skill 编写指南 (`skill-guides/`)
 
