@@ -38,6 +38,9 @@ from src.cli.history import TUIHistory
 from src.cli.streaming import TypewriterEffect, StreamingMarkdown, StreamingStatusIndicator
 from src.cli.widgets import StatusBar, ActivityFeed
 from src.conversation.loop import ConversationLoop
+from src.loop import LoopMode, LoopStatus
+from src.loop.interval_parser import format_interval
+from src.loop.manager import LoopManager
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +50,7 @@ SLASH_COMMANDS = [
     "/skills", "/skills enable <name>", "/skills disable <name>",
     "/tools", "/compress", "/reasoning", "/subagents",
     "/agents", "/agent <id>",
+    "/loop [<interval>] [<prompt>]", "/stop-loop",
     "/quit", "/exit",
 ]
 
@@ -334,7 +338,16 @@ class TUIApp:
         if self.system_prompt:
             self.messages.insert(0, {"role": "system", "content": self.system_prompt})
 
-        # ── 14. 初始化完成 ──
+        # ── 14. 循环管理器 ──
+        # 初始化 /loop 命令支持，复用当前工作目录和事件回调
+        import os
+        working_dir = Path(os.getcwd())
+        self.loop_manager = LoopManager(
+            working_dir=working_dir,
+            on_loop_event=self._on_loop_event,
+        )
+
+        # ── 15. 初始化完成 ──
         # 同步 session_id 到状态管理器，供事件处理器和 UI 组件使用
         self.state.session_id = self.session_id
         logger.info("TUIApp 初始化完成")
@@ -1027,6 +1040,14 @@ class TUIApp:
                 self.console.print("[dim]用法: /agent <task_id|name>[/dim]")
             return True
 
+        if cmd == "/loop" or cmd.startswith("/loop "):
+            await self._cmd_loop(command)
+            return True
+
+        if cmd == "/stop-loop":
+            await self._cmd_stop_loop()
+            return True
+
         # /skill-name → 加载技能并注入对话
         if cmd.startswith("/") and self.skill_manager:
             skill_name = cmd[1:]
@@ -1346,6 +1367,9 @@ class TUIApp:
         self.console.print(f"\n[green]已恢复会话: {identifier[:8]} - {title}[/green]")
         self.console.print(f"[dim]共 {len(self.messages)} 条消息[/dim]\n")
 
+        # 尝试恢复循环（从消息元数据中查找）
+        self._restore_loop_from_messages()
+
     async def _check_auto_compress(self, response: dict) -> None:
         """自动压缩检查。
 
@@ -1600,6 +1624,131 @@ class TUIApp:
 
         self.console.print()
 
+    def _on_loop_event(self, event_type: str, data: dict) -> None:
+        """循环事件回调，用于更新 TUI 状态。
+
+        设计理由：
+        - 通过事件回调解耦 LoopManager 和 TUI，避免循环依赖
+        - 事件类型：created, stopped, executing, waiting, error, expired
+        """
+        if event_type == "created":
+            interval_str = data.get("interval", "dynamic")
+            prompt_preview = data.get("prompt", "")[:80]
+            loop_id = data.get("loop_id", "")
+            restored = data.get("restored", False)
+            prefix = "已恢复" if restored else "已创建"
+            self.console.print(f"\n[green]{prefix}循环 (ID: {loop_id})[/green]")
+            self.console.print(f"  间隔: {interval_str}")
+            self.console.print(f"  提示: {prompt_preview}")
+            self.console.print(f"  按 /stop-loop 停止循环\n")
+        elif event_type == "stopped":
+            count = data.get("execution_count", 0)
+            self.console.print(f"\n[yellow]循环已停止（执行了 {count} 次）[/yellow]\n")
+        elif event_type == "executing":
+            count = data.get("execution_count", 0)
+            self.console.print(f"\n[cyan]⟳ 循环执行 #{count}...[/cyan]")
+        elif event_type == "waiting":
+            interval = data.get("next_interval", "")
+            self.console.print(f"[dim]  等待 {interval} 后下一次执行...[/dim]\n")
+        elif event_type == "error":
+            error = data.get("error", "")
+            self.console.print(f"[red]  循环执行出错: {error}[/red]\n")
+        elif event_type == "expired":
+            self.console.print(f"\n[yellow]循环已过期（7 天）[/yellow]\n")
+
+    async def _cmd_loop(self, command: str) -> None:
+        """处理 /loop 命令。
+
+        支持 4 种模式：
+        - /loop <interval> <prompt> — 固定间隔 + 用户提示
+        - /loop <prompt> — 动态间隔 + 用户提示
+        - /loop <interval> — 固定间隔 + 维护提示
+        - /loop — 动态间隔 + 维护提示
+        """
+        parts = command.strip().split(None, 2)
+
+        interval = None
+        prompt = None
+
+        if len(parts) >= 2:
+            # 检查第二个部分是否是间隔
+            second = parts[1].lower()
+            import re
+            is_interval = bool(re.match(r"^(\d+[smhd]|every\b|\\*/\d+\s)", second))
+
+            if is_interval:
+                interval = parts[1]
+                prompt = parts[2] if len(parts) > 2 else None
+            else:
+                # 第二部分不是间隔，整个作为提示（动态模式）
+                prompt = command.strip()[5:].strip()  # 去掉 "/loop "
+
+        try:
+            state = self.loop_manager.create_loop(interval=interval, prompt=prompt)
+            # 保存循环元数据到会话消息
+            self._save_loop_meta(state)
+            # 启动循环执行器
+            await self.loop_manager.start_loop(self._run_conversation_loop)
+        except ValueError as e:
+            self.console.print(f"\n[red]错误: {e}[/red]\n")
+        except RuntimeError as e:
+            self.console.print(f"\n[red]错误: {e}[/red]\n")
+
+    async def _cmd_stop_loop(self) -> None:
+        """处理 /stop-loop 命令。"""
+        state = self.loop_manager.stop_loop()
+        if state:
+            self.console.print(f"\n[yellow]循环 {state.loop_id} 已停止（执行了 {state.execution_count} 次）[/yellow]\n")
+        else:
+            self.console.print("\n[dim]没有活跃的循环可停止[/dim]\n")
+
+    def _save_loop_meta(self, state) -> None:
+        """保存循环元数据到会话消息。
+
+        设计理由：
+        - 使用 system 消息存储，不影响用户/助手消息历史
+        - meta 字段包含完整配置，支持 --resume 恢复
+        - 同时追加到 self.messages（内存）和 JSONL（持久化）
+        """
+        meta_msg = {
+            "role": "system",
+            "content": "__loop_meta__",
+            "meta": state.to_meta_dict(),
+        }
+        self.messages.append(meta_msg)
+
+        # 持久化到 JSONL
+        if self.jsonl_store:
+            try:
+                self.jsonl_store.append_message(self.session_id, meta_msg)
+            except Exception as e:
+                logger.warning(f"保存循环元数据失败: {e}")
+
+    def _restore_loop_from_messages(self) -> None:
+        """从会话消息中查找循环元数据并恢复。
+
+        设计理由：
+        - 循环元数据存储在 system 消息中，content 为 "__loop_meta__"
+        - 元数据在 meta 字段中，包含 loop_id、interval_seconds、prompt、mode 等
+        - 只恢复未过期的循环
+        """
+        from src.loop import LoopConfig
+
+        for msg in self.messages:
+            if msg.get("role") != "system":
+                continue
+            meta = msg.get("meta")
+            if not meta or meta.get("type") != "loop":
+                continue
+
+            try:
+                config = LoopConfig.from_meta_dict(meta)
+                if not config.is_expired:
+                    self.loop_manager.restore_loop(config)
+                    return
+            except Exception as e:
+                logger.warning(f"恢复循环元数据失败: {e}")
+
     async def shutdown(self) -> None:
         """执行 TUI 关闭时的清理操作。
 
@@ -1615,6 +1764,10 @@ class TUIApp:
         self.state.running = False
         self.state.save()
         self.event_handler.cleanup()
+
+        # 停止活跃循环
+        if hasattr(self, 'loop_manager') and self.loop_manager:
+            self.loop_manager.stop_loop()
 
         # 关闭后台任务调度器
         if hasattr(self, 'background_scheduler') and self.background_scheduler:

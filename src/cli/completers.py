@@ -27,6 +27,8 @@ class CommandCompleter(Completer):
         "/tools": "列出所有工具",
         "/compress": "压缩上下文",
         "/reasoning": "切换推理模式",
+        "/loop": "循环执行任务（/loop [间隔] [提示]）",
+        "/stop-loop": "停止当前循环",
         "/quit": "退出",
         "/exit": "退出",
     }
