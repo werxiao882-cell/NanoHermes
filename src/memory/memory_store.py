@@ -487,6 +487,7 @@ def _release_lock(fd: int) -> None:
         import fcntl
         fcntl.flock(fd, fcntl.LOCK_UN)
     except ImportError:
+        pass
     try:
         import msvcrt
         msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
