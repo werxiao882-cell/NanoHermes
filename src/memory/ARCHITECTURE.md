@@ -1,214 +1,118 @@
-# Memory System Architecture
+# Memory 模块架构
 
-## Responsibility
-可插拔的记忆后端系统，支持跨会话持久记忆。
-通过 MemoryProvider 抽象基类定义标准接口，MemoryManager 编排多个提供者。
-内置文件提供者使用 MEMORY.md/USER.md 存储记忆，预留外部 provider 接口（Honcho、Mem0 等）。
+## 模块概述
 
-## Components
+可插拔的跨会话记忆系统。以 `MemoryStore` 为唯一数据源，通过 `MemoryProvider` 抽象基类
+定义 15 个方法的标准接口，`MemoryManager` 编排多提供者生命周期并直接订阅对话循环事件总线。
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                    MemoryManager                              │
-│                                                              │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │  Provider Registration                                  │  │
-│  │  - add_provider(): 注册提供者                           │  │
-│  │  - 单外部提供者限制（非 builtin 名称）                  │  │
-│  │  - 工具 schema 路由映射                                 │  │
-│  └────────────────────────────────────────────────────────┘  │
-│                                                              │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │  Fan-out 容错生命周期调用                               │  │
-│  │  - initialize_all(): 初始化所有提供者                   │  │
-│  │  - build_system_prompt(): 构建系统提示                  │  │
-│  │  - prefetch_all(): 预取记忆上下文（包裹标签）           │  │
-│  │  - sync_all(): 同步对话内容                             │  │
-│  │  - shutdown_all(): 关闭所有提供者                       │  │
-│  │  - 每个 provider 独立 try/except，失败不影响其他        │  │
-│  └────────────────────────────────────────────────────────┘  │
-│                                                              │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │  事件钩子 Fan-out                                       │  │
-│  │  - on_turn_start_all(): 每轮对话开始                    │  │
-│  │  - on_session_end_all(): 会话结束                       │  │
-│  │  - on_pre_compress_all(): 压缩前提取信息                │  │
-│  │  - on_delegation_all(): 子代理完成                      │  │
-│  │  - on_memory_write_all(): Mirror hook（双轨同步）       │  │
-│  └────────────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────────┘
-                          ▲
-                          │ 实现
-┌──────────────────────────────────────────────────────────────┐
-│                    MemoryProvider (ABC)                       │
-│                                                              │
-│  核心抽象方法（4 个，必须实现）：                              │
-│  - name: 提供者名称标识                                      │  │
-│  - is_available: 依赖检查                                    │  │
-│  - initialize: 会话初始化                                    │  │
-│  - system_prompt_block: 系统提示文本块                       │  │
-│                                                              │
-│  数据流方法（4 个，默认空实现）：                              │
-│  - prefetch: 预取相关记忆                                    │  │
-│  - queue_prefetch: 后台预取排队                              │  │
-│  - sync_turn: 同步对话内容                                   │  │
-│  - shutdown: 清理关闭                                        │  │
-│                                                              │
-│  事件钩子（5 个，可选覆盖）：                                  │
-│  - on_turn_start: 每轮对话开始                               │  │
-│  - on_session_end: 会话结束归档                              │  │
-│  - on_pre_compress: 压缩前提取信息                           │  │
-│  - on_delegation: 子代理完成观察                             │  │
-│  - on_memory_write: 内置记忆修改镜像（Mirror hook）          │  │
-│                                                              │
-│  工具接口（2 个）：                                            │
-│  - get_tool_schemas: 返回工具定义                            │  │
-│  - handle_tool_call: 处理工具调用                            │  │
-│                                                              │
-│  配置（2 个）：                                                │
-│  - get_config_schema: 配置字段定义                           │  │
-│  - save_config: 保存配置                                     │  │
-└──────────────────────────────────────────────────────────────┘
-                          ▲
-                          │ 实现
-┌──────────────────────────────────────────────────────────────┐
-│                  FileMemoryProvider                           │
-│                                                              │
-│  - MEMORY.md: Agent 持久记忆（用户偏好、环境、工具经验）     │  │
-│  - USER.md: 用户画像（角色、背景、习惯）                     │  │
-│  - 操作: add/replace/remove 记忆条目                         │  │
-│  - 原子写入: 临时文件 + rename 防止并发丢失                  │  │
-│  - 字符数限制: memory_char_limit=2200, user_char_limit=1375 │  │
-│  - memory 工具: OpenAI 函数调用格式 schema                   │  │
-└──────────────────────────────────────────────────────────────┘
+## 文件职责
 
-┌──────────────────────────────────────────────────────────────┐
-│                  Context Fencing                              │
-│                                                              │
-│  - <memory-context provider="name"> 标签包裹记忆上下文       │  │
-│  - [System note: ... NOT new user input ...] 系统注释        │  │
-│  - sanitize_context(): 一次性清洗（正则移除标签块）          │  │
-│  - StreamingContextScrubber: 流式清洗器（状态机）            │  │
-│    - in_span / not_in_span 两个状态                          │  │
-│    - buf 缓冲区保留部分标签                                  │  │
-│    - flush 时仍在 span 内丢弃（比泄露更安全）                │  │
-│    - 块边界检查：只在行首或空白后识别标签                    │  │
-└──────────────────────────────────────────────────────────────┘
-```
-
-## Data Flow
-
-### 初始化流程
-1. `MemoryManager.initialize_all(session_id)` → 调用所有提供者的 `initialize`
-2. `FileMemoryProvider.initialize()` → 确保 MEMORY.md/USER.md 存在
-
-### 每轮对话流程
-1. **对话前**: `prefetch_all(user_message)` → 调用所有提供者的 `prefetch` → 包裹 `<memory-context>` 标签 → 注入系统提示
-2. **对话开始**: `on_turn_start_all(turn, message)` → 通知所有提供者
-3. **对话后**: `sync_all(user_content, assistant_content)` → 调用所有提供者的 `sync_turn`
-4. **后台预取**: `queue_prefetch_all(user_message)` → 为下一轮排队预取
-
-### 记忆工具调用流程
-1. Agent 调用 `memory` 工具（action=add/replace/remove, target=memory/user, content=...）
-2. `MemoryManager.handle_tool_call()` → 路由到 FileMemoryProvider
-3. FileMemoryProvider 执行操作 → 原子写入（临时文件 + rename）
-4. `MemoryManager.on_memory_write_all()` → 通知外部 provider（Mirror hook）
-
-### 会话结束流程
-1. `on_session_end_all(messages)` → 通知所有提供者归档记忆
-2. `on_pre_compress_all(messages)` → 压缩前提取关键信息
-3. `shutdown_all()` → 清理所有提供者连接
-
-## Design Decisions
-
-| Decision | Reason |
-|----------|--------|
-| **ABC 定义生命周期而非行为** | 17 个方法中只有 4 个是 abstract，其余 13 个有默认空实现，让 provider 只需实现自己关心的部分 |
-| **Fan-out 容错** | 每个 provider 独立 try/except，一个失败不影响其他 provider 和主对话流程（graceful degradation） |
-| **单外部提供者限制** | 多个外部 provider 的 prefetch 结果可能冲突，tool schema 可能重名，成本线性增长 |
-| **Mirror hook (on_memory_write)** | 内置记忆和外部 provider 保持同步，即使"双轨接线"阶段也能减少分歧 |
-| **原子写入** | 临时文件 + rename 防止并发写入丢失更新 |
-| **字符数限制** | memory_char_limit=2200, user_char_limit=1375 控制注入系统提示的记忆大小 |
-| **上下文隔离标签** | `<memory-context>` 标签 + 系统注释防止 Agent 将注入记忆误认为用户输入 |
-| **流式清洗状态机** | 处理可能被分割跨 chunk 的标签，flush 时仍在 span 内丢弃（比泄露更安全） |
-
-## 目录结构
-
-```
-src/memory/
-├── __init__.py          # 模块入口，re-export 核心 API
-├── memory_store.py      # MemoryStore 唯一数据源（§ 分隔符、文件锁、原子写入、漂移检测）
-├── provider.py          # MemoryProvider ABC 抽象基类（17 个方法）
-├── manager.py           # MemoryManager 编排器（完整版，Fan-out 容错 + 工具路由）
-├── managers.py          # MemoryManager 精简版（基础编排，无工具路由）
-├── file_provider.py     # FileMemoryProvider（委托 MemoryStore）
-├── context_fencing.py   # 上下文隔离（标签清洗、流式清洗器）
-├── event_handler.py     # MemoryEventHandler（EventBus 订阅桥接）
-└── flush_task.py        # 记忆刷写后台任务（BackgroundTaskScheduler 注册）
-```
-
-### MemoryStore（唯一数据源）
-
-三条并行读写路径（memory_tool, FileMemoryProvider, PromptAssembler）各自独立操作文件，
-数据一致性无法保证。MemoryStore 统一为单一数据源，所有路径通过委托调用。
-
-核心能力：
-- § 分隔符条目解析（支持多行内容）
-- 跨平台文件锁（fcntl / msvcrt / 降级无锁）
-- 原子写入（tempfile + os.replace）
-- 漂移检测（外部修改拒绝覆盖 + .bak 备份）
-- 内容扫描（10 种注入/渗出模式检测 + 不可见 Unicode 检测）
-- 去重和使用量追踪
-- 冻结快照（系统提示使用，会话内不变）
-
-### 双 MemoryManager 说明
-
-| 文件 | 类 | 用途 |
-|------|-----|------|
-| `manager.py` | MemoryManager（完整版） | Fan-out 容错 + 工具 schema 路由 + 事件钩子，生产环境使用 |
-| `managers.py` | MemoryManager（精简版） | 基础编排（add_provider/initialize/prefetch/sync/shutdown），无工具路由 |
-
-`__init__.py` 导入的是 `manager.py` 的完整版。`managers.py` 保留为轻量替代实现。
-
-### MemoryEventHandler
-
-通过订阅 `ConversationLoop` 的 `EventBus` 事件，在对话循环关键节点调用 MemoryManager：
-
-| 事件 | 动作 |
+| 文件 | 职责 |
 |------|------|
-| LOOP_START | 初始化所有 memory providers |
-| ITERATION_START（首次） | on_turn_start + prefetch_all，注入记忆上下文 |
-| LOOP_END | sync_all + queue_prefetch_all（仅完成的轮次） |
-| INTERRUPT | 跳过 sync（中断的轮次不同步） |
-| PRE_COMPRESS | on_pre_compress，压缩前提取信息 |
+| `__init__.py` | 模块入口，re-export 公共 API |
+| `provider.py` | `MemoryProvider` 抽象基类（15 个方法：4 抽象 + 11 可选） |
+| `memory_store.py` | 唯一数据源：§ 分隔符解析、文件锁、原子写入、漂移检测、冻结快照、威胁扫描 |
+| `file_provider.py` | `FileMemoryProvider`：内置文件提供者，全部操作委托 `MemoryStore` |
+| `manager.py` | `MemoryManager` 编排器：Fan-out 容错、单外部提供者限制、工具路由、EventBus 集成 |
 
-### flush_task（记忆刷写后台任务）
+## 核心数据流
 
-通过 `BackgroundTaskScheduler` 注册，在对话结束后自动提取记忆：
-- 触发条件：消息数 >= 10（5 轮对话）
-- 使用 `fork_agent` 进行记忆提取，支持工具调用循环
-- 提取最近 20 条消息，每条截断到 500 字符
-- 通过 `FileMemoryProvider.extract_memories_from_messages()` 执行实际提取
+```
+会话启动
+  LOOP_START
+    └→ MemoryManager._on_loop_start
+         └→ MemoryManager.initialize_all
+              └→ FileMemoryProvider.initialize
+                   └→ MemoryStore.load_from_disk → 捕获冻结快照
 
-## Dependencies
-- Internal: src/conversation/events.py (EventBus), src/config/ (配置模块)
-- External: 无（Python 标准库）
+每轮对话（仅首次迭代 iteration=1）
+  ITERATION_START
+    └→ MemoryManager._on_iteration_start
+         ├→ MemoryManager.on_turn_start_all → providers.on_turn_start
+         └→ MemoryManager.prefetch_all → providers.prefetch
+              └→ FileMemoryProvider.prefetch
+                   └→ MemoryStore.format_for_system_prompt（返回冻结快照）
+              结果包裹 <memory-context> 标签
 
-## Configuration Constants
+对话结束（中断时跳过）
+  LOOP_END
+    └→ MemoryManager._on_loop_end
+         ├→ MemoryManager.sync_all → providers.sync_turn
+         └→ MemoryManager.queue_prefetch_all → providers.queue_prefetch
+
+memory 工具调用
+  Agent → MemoryManager.handle_tool_call("memory", args)
+    └→ FileMemoryProvider.handle_tool_call
+         └→ MemoryStore.add / replace / remove
+              流程：威胁扫描 → 文件锁 → 漂移检测 → 操作 → 原子写入
+
+上下文压缩前
+  PRE_COMPRESS → MemoryManager._on_pre_compress
+    └→ MemoryManager.on_pre_compress_all → providers.on_pre_compress
+         提取内容写入 data["extracted_memory"]
+
+会话关闭（由外部直接调用，非事件总线驱动）
+  MemoryManager.on_session_end_all(messages) → providers.on_session_end
+  MemoryManager.shutdown_all() → providers.shutdown
+```
+
+## 关键设计决策
+
+| 决策 | 理由 |
+|------|------|
+| **MemoryStore 为唯一数据源** | 原三条并行读写路径各自操作文件，数据一致性无法保证；统一委托确保原子性 |
+| **冻结快照** | Anthropic prompt caching 要求系统提示前缀稳定；`load_from_disk()` 时捕获一次，会话内不变，工具调用只修改实时状态 |
+| **原子写入（tempfile + os.replace）** | `open("w")` 先截断再写入，中途崩溃则数据丢失；原子写入保证读者始终看到完整的旧或新文件 |
+| **单独 .lock 文件而非锁原文件** | 记忆文件使用原子写入（temp + replace），锁原文件会阻塞 replace；单独 .lock 不影响写入流程 |
+| **跨平台文件锁降级** | Unix 用 fcntl，Windows 用 msvcrt，都不可用时降级无锁（单用户场景可接受） |
+| **漂移检测 + .bak 备份** | 用户可能手动编辑记忆文件；往返序列化不匹配或单条目超限时拒绝覆盖并创建备份 |
+| **威胁模式扫描** | 10 种正则检测 prompt 注入/角色劫持/密钥渗出，外加不可见 Unicode 字符检测 |
+| **Fan-out 容错** | 每个 provider 独立 try/except，一个失败不影响其他 provider 和主对话流程 |
+| **单外部提供者限制** | 多外部 provider 的 prefetch 结果可能冲突，tool schema 可能重名，成本线性增长 |
+| **EventBus 直接订阅** | MemoryManager 直接注册到 EventBus，减少 MemoryEventHandler 薄适配层，简化架构 |
+| **中断轮次不同步** | 部分助手输出、中止的工具链不是完整对话事实，持久化会污染记忆 |
+| **FileMemoryProvider 纯委托** | 重构前自有读写逻辑，重构后全部委托 MemoryStore，自身只负责生命周期适配 |
+
+## 对外接口
+
+```python
+# 数据存储（供 memory_tool 等直接调用）
+from src.memory import MemoryStore
+
+# 抽象基类（外部 provider 实现此接口）
+from src.memory import MemoryProvider        # 15 个方法，4 个抽象
+
+# 编排器（直接订阅 EventBus）
+from src.memory import MemoryManager         # add_provider / register(events) / handle_tool_call / *_all
+
+# 内置提供者
+from src.memory import FileMemoryProvider    # name="builtin"，委托 MemoryStore
+```
+
+**MemoryStore 公共方法**：`load_from_disk()`, `add(target, content)`, `replace(target, old, new)`,
+`remove(target, old)`, `format_for_system_prompt(target)`
+
+**辅助函数**（memory_store.py）：`get_session_summary_path()`, `get_agent_memory_path()`,
+`get_team_memory_path()` — 多层记忆路径计算
+
+## 依赖关系
+
+**模块内依赖**：
+```
+manager → provider (ABC)
+manager → conversation.events (EventBus, EventType)
+file_provider → provider (ABC)
+file_provider → memory_store（委托）
+```
+
+**外部模块依赖**：
+- `src.conversation.events` — `EventBus`, `EventType`（manager.py 直接订阅事件总线）
+
+**无外部第三方依赖**（仅 Python 标准库：abc, pathlib, tempfile, os, re, json, logging, time, contextlib）
+
+## 配置常量
+
 ```python
 MEMORY_CHAR_LIMIT = 2200   # MEMORY.md 最大字符数
 USER_CHAR_LIMIT = 1375     # USER.md 最大字符数
 ```
-
-## 外部 Provider 生态（预留接口）
-
-| Provider | 方案 | 特色 |
-|----------|------|------|
-| Honcho | Dialectic 用户建模 | 自动生成用户画像 |
-| Hindsight | 时序滑动窗口 | 按时间衰减的记忆 |
-| Mem0 | 向量数据库 | Qdrant 后端，语义相似度检索 |
-| Holographic | 压缩全息存储 | 高密度对话表示 |
-| OpenViking | 语义嵌入 | 嵌入向量驱动 |
-| RetainDB | 保留策略 | 可配置保留规则 |
-| SuperMemory | 多源聚合 | 聚合多个来源 |
-| ByteRover | 替代向量存储 | 轻量级向量存储 |

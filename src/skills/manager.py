@@ -1257,8 +1257,8 @@ class SkillManager:
 
         查找策略：
         - 使用 rglob("SKILL.md") 递归遍历所有子目录
-        - 检查 SKILL.md 的父目录名是否匹配技能名
-        - 这允许技能在分类目录下（skills/category/name/SKILL.md）
+        - 解析 SKILL.md frontmatter 中的 name 字段，与目标名称匹配
+        - 这允许技能目录名与 frontmatter 名称不同（如 agent-browser-clawdbot → agent-browser）
         - 同时搜索主目录和额外目录
 
         注意：
@@ -1274,16 +1274,24 @@ class SkillManager:
         # 先搜索主目录
         if self.skills_dir.exists():
             for skill_md in self.skills_dir.rglob("SKILL.md"):
-                if skill_md.parent.name == name:
-                    return skill_md.parent
+                try:
+                    skill = self._loader.load(skill_md)
+                    if skill.name == name:
+                        return skill_md.parent
+                except Exception:
+                    continue
 
         # 再搜索额外目录
         for extra_dir in self._extra_skills_dirs:
             if not extra_dir.exists():
                 continue
             for skill_md in extra_dir.rglob("SKILL.md"):
-                if skill_md.parent.name == name:
-                    return skill_md.parent
+                try:
+                    skill = self._loader.load(skill_md)
+                    if skill.name == name:
+                        return skill_md.parent
+                except Exception:
+                    continue
 
         return None
 

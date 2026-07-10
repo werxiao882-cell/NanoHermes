@@ -1,7 +1,8 @@
 """网络搜索工具：使用 DuckDuckGo 搜索引擎获取实时信息。
 
 设计理由：
-- 使用 duckduckgo-search 库，无需 API Key，隐私友好
+- 优先使用 ddgs 库（duckduckgo_search 的继任者），API 更稳定
+- 回退到旧版 duckduckgo_search 以保持向后兼容
 - 支持 text（网页）和 news（新闻）两种搜索模式
 - 结果格式化为结构化 JSON，便于 LLM 理解和引用
 - 可用性检查确保网络不可用时快速失败
@@ -17,12 +18,23 @@ from src.tools.core.registry import register_tool
 
 logger = logging.getLogger(__name__)
 
+# 优先使用新版 ddgs，避免旧版 duckduckgo_search 的 RuntimeWarning
+# 旧版库会打印 "renamed to ddgs" 警告，且在国内网络下经常返回 0 结果
 try:
-    from duckduckgo_search import DDGS
+    from ddgs import DDGS
+    _USE_NEW_API = True
     _DDGS_AVAILABLE = True
 except ImportError:
-    DDGS = None
-    _DDGS_AVAILABLE = False
+    import warnings
+    warnings.filterwarnings("ignore", message=".*renamed to ddgs.*")
+    try:
+        from duckduckgo_search import DDGS
+        _USE_NEW_API = False
+        _DDGS_AVAILABLE = True
+    except ImportError:
+        DDGS = None
+        _USE_NEW_API = False
+        _DDGS_AVAILABLE = False
 
 
 def check_web_search_available() -> bool:
@@ -56,33 +68,58 @@ def web_search(
     """
     if not _DDGS_AVAILABLE:
         return json.dumps({
-            "error": "duckduckgo-search 未安装，请运行: pip install duckduckgo-search"
+            "error": "ddgs 未安装，请运行: pip install ddgs"
         }, ensure_ascii=False)
 
     if not query or not query.strip():
         return json.dumps({"error": "搜索关键词不能为空"}, ensure_ascii=False)
+
+    # 类型转换：LLM 可能将整数参数作为字符串传递
+    try:
+        max_results = int(max_results)
+    except (ValueError, TypeError):
+        max_results = 5
 
     max_results = max(1, min(max_results, 20))
 
     try:
         with DDGS() as ddgs:
             if backend == "news":
-                results = list(ddgs.news(
-                    keywords=query,
-                    region=region,
-                    safesearch=safesearch,
-                    timelimit=timelimit,
-                    max_results=max_results,
-                ))
+                # ddgs 新版用 query，旧版用 keywords
+                if _USE_NEW_API:
+                    results = list(ddgs.news(
+                        query=query,
+                        region=region,
+                        safesearch=safesearch,
+                        timelimit=timelimit,
+                        max_results=max_results,
+                    ))
+                else:
+                    results = list(ddgs.news(
+                        keywords=query,
+                        region=region,
+                        safesearch=safesearch,
+                        timelimit=timelimit,
+                        max_results=max_results,
+                    ))
                 formatted = _format_news_results(results)
             else:
-                results = list(ddgs.text(
-                    keywords=query,
-                    region=region,
-                    safesearch=safesearch,
-                    timelimit=timelimit,
-                    max_results=max_results,
-                ))
+                if _USE_NEW_API:
+                    results = list(ddgs.text(
+                        query=query,
+                        region=region,
+                        safesearch=safesearch,
+                        timelimit=timelimit,
+                        max_results=max_results,
+                    ))
+                else:
+                    results = list(ddgs.text(
+                        keywords=query,
+                        region=region,
+                        safesearch=safesearch,
+                        timelimit=timelimit,
+                        max_results=max_results,
+                    ))
                 formatted = _format_text_results(results)
 
         return json.dumps({

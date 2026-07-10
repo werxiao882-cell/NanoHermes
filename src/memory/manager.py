@@ -1,13 +1,19 @@
 """MemoryManager 编排器。
 
-管理记忆提供者的注册、生命周期调用和上下文注入。
+管理记忆提供者的注册、生命周期调用和事件总线集成。
 采用 Fan-out 容错设计：一个 provider 失败不影响其他 provider 和主流程。
 强制执行单外部提供者限制（非 builtin 名称的提供者）。
+
+事件集成：
+- MemoryManager 直接订阅 ConversationLoop 的 EventBus 事件
+- 在对话循环的关键节点自动触发记忆生命周期调用
+- 减少 MemoryEventHandler 薄适配层，简化架构
 """
 
 import logging
 from typing import Any, Dict, List, Optional
 
+from src.conversation.events import EventBus, EventType
 from src.memory.provider import MemoryProvider
 
 logger = logging.getLogger(__name__)
@@ -24,12 +30,33 @@ class MemoryManager:
 
     管理多个记忆提供者的生命周期，采用 Fan-out 容错设计。
     只允许一个外部提供者（名称不是 'builtin' 的提供者）。
+
+    事件订阅：
+    - 通过 register(events) 注册到 EventBus
+    - LOOP_START → initialize_all
+    - ITERATION_START（首次） → on_turn_start_all + prefetch_all
+    - LOOP_END → sync_all + queue_prefetch_all
+    - INTERRUPT → 标记中断，跳过 sync
+    - PRE_COMPRESS → on_pre_compress_all
     """
 
-    def __init__(self):
+    def __init__(self, session_id: str = ""):
+        self._session_id = session_id
         self._providers: List[MemoryProvider] = []
         self._tool_provider_map: Dict[str, MemoryProvider] = {}
         self._external_provider_count: int = 0
+        # 事件状态
+        self._turn_count = 0
+        self._interrupted = False
+        self._last_user_message = ""
+
+    @property
+    def session_id(self) -> str:
+        return self._session_id
+
+    @session_id.setter
+    def session_id(self, value: str) -> None:
+        self._session_id = value
 
     # =========================================================================
     # 提供者注册
@@ -68,6 +95,114 @@ class MemoryManager:
     def providers(self) -> List[MemoryProvider]:
         """返回所有已注册的提供者列表。"""
         return list(self._providers)
+
+    # =========================================================================
+    # 事件总线集成
+    # =========================================================================
+
+    def register(self, events: EventBus) -> None:
+        """将所有事件处理器注册到事件总线。
+
+        Args:
+            events: ConversationLoop 的事件总线实例。
+        """
+        events.on(EventType.LOOP_START, self._on_loop_start)
+        events.on(EventType.ITERATION_START, self._on_iteration_start)
+        events.on(EventType.LOOP_END, self._on_loop_end)
+        events.on(EventType.INTERRUPT, self._on_interrupt)
+        events.on(EventType.PRE_COMPRESS, self._on_pre_compress)
+
+    def _on_loop_start(self, data: dict[str, Any]) -> None:
+        """循环开始：初始化所有 memory providers。"""
+        self._turn_count = 0
+        self._interrupted = False
+        self._last_user_message = ""
+
+        try:
+            self.initialize_all(self._session_id)
+        except Exception as e:
+            logger.warning(f"Memory providers initialization failed: {e}")
+
+    def _on_iteration_start(self, data: dict[str, Any]) -> None:
+        """迭代开始：首次迭代时执行 on_turn_start + prefetch_all。
+
+        只在首次迭代（iteration=1）时执行，避免每轮工具调用都重复预取。
+        """
+        iteration = data.get("iteration", 0)
+        messages = data.get("messages", [])
+
+        if iteration != 1:
+            return
+
+        self._turn_count += 1
+
+        # 提取用户消息（最后一条 user 消息）
+        user_message = ""
+        for msg in reversed(messages):
+            if msg.get("role") == "user":
+                user_message = msg.get("content", "")
+                break
+        self._last_user_message = user_message
+
+        # on_turn_start: 通知 providers 当前轮次
+        try:
+            self.on_turn_start_all(
+                self._turn_count, user_message,
+                session_id=self._session_id,
+            )
+        except Exception as e:
+            logger.warning(f"Memory on_turn_start failed: {e}")
+
+        # prefetch_all: 预取记忆上下文
+        try:
+            self.prefetch_all(user_message, session_id=self._session_id)
+        except Exception as e:
+            logger.warning(f"Memory prefetch failed: {e}")
+
+    def _on_loop_end(self, data: dict[str, Any]) -> None:
+        """循环结束：sync_all + queue_prefetch_all（仅完成的轮次）。
+
+        中断的轮次不同步——部分助手输出、中止的工具链不是持久的对话事实。
+        """
+        if self._interrupted:
+            return
+
+        result = data.get("result", {})
+        final_response = result.get("final_response", "")
+
+        if not final_response or not self._last_user_message:
+            return
+
+        try:
+            self.sync_all(
+                self._last_user_message,
+                final_response,
+                session_id=self._session_id,
+            )
+        except Exception as e:
+            logger.warning(f"Memory sync failed: {e}")
+
+        try:
+            self.queue_prefetch_all(
+                self._last_user_message,
+                session_id=self._session_id,
+            )
+        except Exception as e:
+            logger.warning(f"Memory queue_prefetch failed: {e}")
+
+    def _on_interrupt(self, data: dict[str, Any]) -> None:
+        """循环被中断：标记中断，跳过 sync。"""
+        self._interrupted = True
+
+    def _on_pre_compress(self, data: dict[str, Any]) -> None:
+        """压缩前：通知 providers 提取信息。"""
+        messages = data.get("messages", [])
+        try:
+            extracted = self.on_pre_compress_all(messages)
+            if extracted:
+                data["extracted_memory"] = extracted
+        except Exception as e:
+            logger.warning(f"Memory on_pre_compress failed: {e}")
 
     # =========================================================================
     # 生命周期调用
@@ -190,31 +325,6 @@ class MemoryManager:
             except Exception as exc:
                 logger.warning(f"Memory provider {provider.name} on_pre_compress failed: {exc}")
         return "\n\n".join(parts)
-
-    def on_delegation_all(self, task: str, result: str, **kwargs) -> None:
-        """通知所有提供者委托任务完成。"""
-        for provider in self._providers:
-            try:
-                provider.on_delegation(task, result, **kwargs)
-            except Exception as exc:
-                logger.warning(f"Memory provider {provider.name} on_delegation failed: {exc}")
-
-    def on_memory_write_all(
-        self,
-        action: str,
-        target: str,
-        content: str,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        """通知所有提供者内置记忆被修改。
-
-        这是 Mirror hook，用于保持内置记忆和外部 provider 同步。
-        """
-        for provider in self._providers:
-            try:
-                provider.on_memory_write(action, target, content, metadata)
-            except Exception as exc:
-                logger.warning(f"Memory provider {provider.name} on_memory_write failed: {exc}")
 
     # =========================================================================
     # 工具路由

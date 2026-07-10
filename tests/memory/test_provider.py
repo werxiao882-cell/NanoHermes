@@ -70,16 +70,6 @@ class TestMemoryProviderABC:
         provider = ConcreteProvider()
         assert provider.on_pre_compress([]) == ""
 
-    def test_default_on_delegation_does_nothing(self):
-        """测试默认 on_delegation 不抛出异常。"""
-        provider = ConcreteProvider()
-        provider.on_delegation("task", "result")  # 不应抛出异常
-
-    def test_default_on_memory_write_does_nothing(self):
-        """测试默认 on_memory_write 不抛出异常。"""
-        provider = ConcreteProvider()
-        provider.on_memory_write("add", "memory", "content")  # 不应抛出异常
-
     def test_default_get_tool_schemas_returns_empty(self):
         """测试默认 get_tool_schemas 返回空列表。"""
         provider = ConcreteProvider()

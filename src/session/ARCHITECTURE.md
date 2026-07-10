@@ -1,319 +1,147 @@
-# Session Storage Architecture
+# src/session — 会话持久化存储模块
 
-## Responsibility
-SQLite 会话持久化存储，支持 WAL 并发、FTS5 全文搜索、JSONL 完整历史、会话恢复。
-是所有其他功能（记忆、压缩、委托）的基础层。
+## 模块概述
 
-## 目录结构
+SQLite + JSONL 双存储层，为 NanoHermes 提供会话生命周期管理、消息持久化、全文搜索和完整历史恢复。
+是所有上层功能（记忆、压缩、委托）的基础数据层。
+
+## 文件职责
 
 ```
 src/session/
-├── __init__.py          # 模块入口，re-export SessionDB, JsonlSessionStore, SCHEMA_SQL
-├── session_db.py        # SessionDB（SQLite 封装，WAL + 重试 + FTS5 + 生命周期）
-├── schema.py            # SCHEMA_SQL, FTS_SQL, FTS_TRIGRAM_SQL（声明式 schema）
-└── jsonl_store.py       # JsonlSessionStore（per-session JSONL 文件存储）
+├── __init__.py        # 模块入口，re-export 公开 API
+├── schema.py          # 声明式 SQL schema 定义（核心表 + FTS5 索引）
+├── session_db.py      # SessionDB 主类（SQLite 封装、WAL、重试、生命周期、搜索）
+└── jsonl_store.py     # JsonlSessionStore（per-session JSONL 文件，流式追加完整历史）
 ```
 
-## Components
+- **`schema.py`** — 定义 `SCHEMA_SQL`、`FTS_SQL`、`FTS_TRIGRAM_SQL` 三段 SQL 常量，作为 schema 唯一真实来源
+- **`session_db.py`** — 封装 SQLite 连接管理、事务重试、schema 协调、会话 CRUD、消息插入/搜索、标题管理、token 计数
+- **`jsonl_store.py`** — 每个会话一个 JSONL 文件，增量追加消息记录（含 session_start/user/assistant/tool_call/tool_result）
 
+## 核心数据流
+
+### 初始化
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                    SessionDB (SQLite)                         │
-│                                                              │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │  Schema                                                 │  │
-│  │  - sessions: id, source, user_id, model, system_prompt │  │
-│  │    parent_session_id, started_at, ended_at, end_reason │  │
-│  │    message_count, tool_call_count, api_call_count      │  │
-│  │    input_tokens, output_tokens, cache_read_tokens      │  │
-│  │    cache_write_tokens, reasoning_tokens                │  │
-│  │    billing_provider, billing_base_url, billing_mode    │  │
-│  │    estimated_cost_usd, actual_cost_usd                 │  │
-│  │    cost_status, cost_source, pricing_version           │  │
-│  │    title, handoff_state, handoff_platform, handoff_error│  │
-│  │  - messages: id, session_id, role, content, tool_calls │  │
-│  │    tool_call_id, tool_name, timestamp, token_count     │  │
-│  │    finish_reason, reasoning, reasoning_content         │  │
-│  │    reasoning_details, codex_reasoning_items            │  │
-│  │    codex_message_items, platform_message_id, observed  │  │
-│  │  - state_meta: key, value                              │  │
-│  │  - schema_version: version                             │  │
-│  │                                                        │  │
-│  │  索引:                                                 │  │
-│  │  - idx_sessions_source, idx_sessions_parent            │  │
-│  │  - idx_sessions_started (DESC), idx_sessions_title     │  │
-│  │  - idx_messages_session (session_id, timestamp)        │  │
-│  └────────────────────────────────────────────────────────┘  │
-│                                                              │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │  WAL Mode + Jitter Retry                                │  │
-│  │  - PRAGMA journal_mode=WAL (fallback to DELETE)        │  │
-│  │  - BEGIN IMMEDIATE: 事务开始时获取写锁                  │  │
-│  │  - 15 次重试 + 20-150ms 随机抖动打破 convoy effect     │  │
-│  │  - 每 50 次写入执行 PASSIVE checkpoint                 │  │
-│  │  - 关闭时执行最终 checkpoint                            │  │
-│  └────────────────────────────────────────────────────────┘  │
-│                                                              │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │  Declarative Schema Reconciliation                      │  │
-│  │  - SCHEMA_SQL 为唯一真实来源                            │  │
-│  │  - 内存 SQLite 解析期望列                               │  │
-│  │  - 对比 live 列，自动 ALTER TABLE ADD COLUMN            │  │
-│  │  - 无需版本控制的迁移代码                               │  │
-│  │  - schema_version 表保留用于未来数据迁移                │  │
-│  └────────────────────────────────────────────────────────┘  │
-│                                                              │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │  FTS5 Search                                            │  │
-│  │  - messages_fts: unicode61 tokenizer (英文/精确匹配)   │  │
-│  │  - messages_fts_trigram: trigram tokenizer (CJK 子串)  │  │
-│  │  - Triggers: INSERT/DELETE/UPDATE 自动同步             │  │
-│  │  - 零配置全文搜索，无需外部引擎或向量嵌入               │  │
-│  └────────────────────────────────────────────────────────┘  │
-│                                                              │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │  Session Lifecycle                                      │  │
-│  │  - create_session(): INSERT OR IGNORE 幂等创建         │  │
-│  │  - end_session(): WHERE ended_at IS NULL 防重复结束    │  │
-│  │  - reopen_session(): 清除 ended_at/end_reason          │  │
-│  │  - branch_session(): 创建子会话（parent_session_id）   │  │
-│  │  - update_system_prompt(): 冻结 system_prompt 快照     │  │
-│  │  - update_token_counts(): 增量/绝对模式更新            │  │
-│  │  - get_compression_tip(): walk 压缩延续链              │  │
-│  └────────────────────────────────────────────────────────┘  │
-│                                                              │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │  Title Management                                       │  │
-│  │  - sanitize_title(): 去除控制字符/零宽字符，100 字符   │  │
-│  │  - set_session_title(): 更新标题                        │  │
-│  │  - get_session_title(): 获取标题                        │  │
-│  │  - resolve_session_by_title(): 精确匹配 + 编号变体     │  │
-│  │  - get_next_title_in_lineage(): 生成下一个编号标题     │  │
-│  │  - list_sessions(): 按时间倒序列出                      │  │
-│  │  - search_sessions_by_title(): 标题关键词搜索           │  │
-│  └────────────────────────────────────────────────────────┘  │
-│                                                              │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │  Compression Lineage                                    │  │
-│  │  - parent_session_id 外键形成血缘链                    │  │
-│  │  - started_at >= parent.ended_at 区分压缩延续和委托    │  │
-│  │  - end_reason='compression' 标记压缩分割               │  │
-│  │  - 限制 walk 深度（100）防御性                          │  │
-│  └────────────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────────┘
-                          │
-                          ▼
-┌──────────────────────────────────────────────────────────────┐
-│                 JsonlSessionStore                             │
-│                                                              │
-│  - 每个会话一个 JSONL 文件: {session_id}.jsonl               │
-│  - 存储路径: ~/.nanohermes/sessions/                         │
-│  - 格式: {role, content, tool_calls, timestamp, reasoning}  │
-│  - 操作: append_message, load_messages, list_sessions       │
-│  - Complements SQLite: SQLite 用于搜索/统计，JSONL 用于     │
-│    完整历史恢复                                               │
-│  - 支持: session_exists, delete_session, get_message_count  │
-└──────────────────────────────────────────────────────────────┘
+SessionDB(db_path)
+  → _connect() → _apply_wal() → _enable_foreign_keys()
+  → init_schema()
+      → executescript(SCHEMA_SQL)
+      → executescript(FTS_SQL)
+      → executescript(FTS_TRIGRAM_SQL)  [trigram 不可用时静默跳过]
+      → _reconcile_schema()  → 内存 SQLite 解析期望列 → ALTER TABLE ADD COLUMN 补齐
 ```
 
-## Data Flow
+### 写入路径
+```
+ConversationLoop 事件
+  → insert_message()
+      → BEGIN IMMEDIATE → INSERT INTO messages → commit
+      → message_count 自动递增（仅 user/assistant/system）
+      → SQLite 触发器自动同步 messages_fts / messages_fts_trigram
+      → 每 50 次写触发 PASSIVE WAL checkpoint
 
-### 初始化流程
-1. `SessionDB(db_path)` → 创建父目录 → 建立连接
-2. `_apply_wal()` → WAL 模式（失败回退 DELETE）
-3. `_enable_foreign_keys()` → 外键约束
-4. `init_schema()` → 创建核心表 → FTS5 索引 → trigram 索引
-5. `_reconcile_schema()` → 内存解析期望列 → 对比添加缺失列 → 更新 schema_version
+JsonlSessionStore.append_message()
+  → open(file, "a") → json.dumps() → write line
+```
 
 ### 会话生命周期
-1. **创建**: `create_session()` → INSERT OR IGNORE → 返回 session_id
-2. **保存消息**: `insert_message()` → messages 表插入 → message_count 自动递增 → FTS5 触发器自动更新索引
-3. **更新 token**: `update_token_counts(incremental=True)` → 增量累加
-4. **结束会话**: `end_session(reason)` → WHERE ended_at IS NULL → 防重复
-5. **压缩延续**: `branch_session(parent_id)` → 新会话 parent_session_id 指向父会话
-6. **恢复会话**: `reopen_session()` → 清除 ended_at/end_reason
-7. **获取压缩 tip**: `get_compression_tip()` → walk parent_session_id 链 → 返回最新延续
+```
+create_session() → INSERT OR IGNORE（幂等）
+    ↓
+insert_message() [多次]
+    ↓
+end_session(reason) → WHERE ended_at IS NULL（防重复结束）
+    ↓
+branch_session() → create_session(parent_session_id=原会话)
+    ↓
+get_compression_tip() → walk parent_session_id 链 → 返回最新延续 ID
+```
 
-### 搜索流程
-1. **消息搜索**: `search_messages(query, session_id=None, use_trigram=False)`
-   - FTS5 MATCH 查询 → JOIN messages → 返回匹配消息
-   - use_trigram=True 使用 trigram 分词器（CJK 子串搜索）
-2. **标题搜索**: `search_sessions_by_title(keyword, limit=10)`
-   - LIKE 模糊匹配 → 按时间倒序
+### 恢复路径
+```
+--resume 模式
+  → JsonlSessionStore.load_messages() → 从 JSONL 解析完整历史
+  → SessionDB.get_session() → 获取元数据（model, system_prompt 等）
+  → ConversationLoop 重建上下文
+```
 
-### 标题管理
-1. **设置标题**: `set_session_title()` → sanitize_title() → UPDATE
-2. **解析标题**: `resolve_session_by_title()` → 精确匹配 → 编号变体匹配
-3. **生成编号**: `get_next_title_in_lineage()` → 剥离 #N → 找最大编号 → 生成下一个
+## 关键设计决策
 
-## Design Decisions
-
-| Decision | Reason |
-|----------|--------|
-| **双存储层（SQLite + JSONL）** | SQLite 用于搜索和统计，JSONL 用于完整历史恢复。SQLite 提供结构化查询，JSONL 提供流式追加和完整上下文 |
-| **WAL 模式 + 应用层抖动重试** | WAL 支持多读单写并发。BEGIN IMMEDIATE 提前暴露锁竞争。20-150ms 随机抖动打破 convoy effect（SQLite 内置 busy handler 使用确定性退避） |
-| **FTS5 + trigram 双索引** | unicode61 分词器将 CJK 字符分割成单字符，破坏短语匹配。trigram 创建重叠 3 字节序列，支持任何脚本的子串搜索 |
-| **声明式 schema 协调** | SCHEMA_SQL 为唯一真实来源。添加新列只需修改 SQL，下次启动自动协调。无需版本控制的迁移代码 |
-| **不用 ORM** | 需要精确控制事务边界（BEGIN IMMEDIATE）。ORM 的连接池和自动事务管理会与自定义 jitter retry 冲突 |
-| **system_prompt 快照** | 存储每个 session 的完整 system prompt，用于会话恢复、缓存失效或进程重建时复原同一段冻结前缀 |
-| **parent_session_id 血缘链** | 形成可追溯的会话 lineage。started_at >= ended_at 条件区分压缩延续和委托子节点 |
-| **INSERT OR IGNORE 幂等创建** | 相同 session_id 重复创建不产生错误，支持恢复场景 |
+| 决策 | 理由 |
+|------|------|
+| **双存储 SQLite + JSONL** | SQLite 提供结构化查询/搜索/统计；JSONL 提供流式追加和完整上下文恢复，两者互补 |
+| **WAL + BEGIN IMMEDIATE + 抖动重试** | WAL 支持多读单写。BEGIN IMMEDIATE 在事务开始就获取写锁，提前暴露竞争。20-150ms 随机 jitter 打破 convoy effect（优于 SQLite 内置 busy handler 的确定性退避） |
+| **FTS5 双索引 unicode61 + trigram** | unicode61 将 CJK 拆成单字，破坏短语匹配；trigram 创建重叠 3 字符序列，支持任意语言的子串搜索 |
+| **声明式 schema 协调** | 添加新列只需修改 `SCHEMA_SQL`，启动时用内存 SQLite 解析期望列并自动补齐，无需维护迁移版本 |
+| **不用 ORM** | 需要精确控制事务边界（BEGIN IMMEDIATE）和重试策略，ORM 的连接池/自动事务管理会与自定义重试冲突 |
+| **INSERT OR IGNORE 幂等创建** | 相同 session_id 重复创建不报错，支持崩溃恢复场景 |
 | **end_session WHERE ended_at IS NULL** | 防止重复结束，第一次的 end_reason 获胜 |
-| **title 索引（非 UNIQUE）** | 支持同名会话（如恢复后分支），通过 `get_next_title_in_lineage()` 生成编号变体区分 |
-| **insert_message 自动递增 message_count** | 避免应用层手动维护计数，减少不一致风险 |
+| **title 索引非 UNIQUE** | 支持同名会话（恢复/分支场景），通过 `get_next_title_in_lineage()` 生成 #N 编号变体 |
+| **insert_message 自动递增计数** | 避免应用层手动维护 message_count，减少不一致风险 |
+| **system_prompt 快照存储** | 会话恢复或缓存失效时可复原冻结前缀，无需重新生成 |
 
-## Dependencies
-- Internal: None（自包含模块）
-- External: sqlite3 (Python stdlib), uuid (Python stdlib)
+## 对外接口
 
-## Configuration Constants
-```python
-MAX_RETRIES = 15           # 写锁竞争最大重试次数
-RETRY_MIN_MS = 0.020       # 最小抖动延迟（20ms）
-RETRY_MAX_MS = 0.150       # 最大抖动延迟（150ms）
-CHECKPOINT_INTERVAL = 50   # 每 N 次写入执行 checkpoint
-MAX_TITLE_LENGTH = 100     # 标题最大长度
-```
+### 公开类
+- **`SessionDB(db_path)`** — 支持 context manager（`with SessionDB(...) as db:`）
+- **`JsonlSessionStore(base_dir=None)`** — 默认存储路径 `~/.nanohermes/sessions/`
 
-## FTS5 全文搜索原理
+### SessionDB 公开方法
+| 方法 | 用途 |
+|------|------|
+| `create_session(...)` | 创建会话，返回 session_id |
+| `end_session(id, reason)` | 结束会话 |
+| `reopen_session(id)` | 重新打开已结束的会话 |
+| `branch_session(parent_id)` | 创建子会话（压缩延续） |
+| `get_session(id)` | 获取会话信息 dict |
+| `get_compression_tip(id)` | 获取压缩延续链最新会话 ID |
+| `insert_message(...)` | 插入消息，返回 message id |
+| `get_messages(id)` | 获取会话全部消息列表 |
+| `search_messages(query, ...)` | FTS5 全文搜索消息 |
+| `set_session_title(id, title)` | 设置标题 |
+| `resolve_session_by_title(title)` | 按标题解析 session_id |
+| `get_next_title_in_lineage(base)` | 生成 lineage 中下一个编号标题 |
+| `list_sessions(limit)` | 列出会话（按时间倒序） |
+| `search_sessions_by_title(keyword)` | 标题关键词搜索 |
+| `update_token_counts(...)` | 更新 token 计数（增量/绝对） |
+| `increment_message_count(id)` | 消息计数 +1 |
+| `increment_tool_call_count(id)` | 工具调用计数 +1 |
+| `increment_api_call_count(id)` | API 调用计数 +1 |
+| `update_billing_info(...)` | 更新计费信息 |
+| `update_cost_info(...)` | 更新成本信息 |
+| `update_handoff_info(...)` | 更新交接信息 |
+| `update_system_prompt(id, prompt)` | 更新系统提示快照 |
 
-### 倒排索引（Inverted Index）
+### 公开函数
+- **`sanitize_title(title)`** — 清理标题（去控制字符/零宽字符，折叠空白，限 100 字符）
+- **`get_sessions_list_for_display()`** — 结合 JSONL + SQLite 数据，返回展示用会话列表
 
-FTS5 不扫描全表，而是维护**词 → 行 ID** 的倒排索引：
+### 公开常量
+- `SCHEMA_SQL` / `FTS_SQL` / `FTS_TRIGRAM_SQL` — 声明式 schema SQL
 
-```
-原始消息:                      倒排索引:
-"bug fix completed"    →       bug → [rowid=1, rowid=3]
-"test message"         →       fix → [rowid=1]
-"bug found"            →       completed → [rowid=1]
-                               test → [rowid=2]
-                               message → [rowid=2]
-                               found → [rowid=3]
-```
+### JsonlSessionStore 公开方法
+| 方法 | 用途 |
+|------|------|
+| `start_session(id, model, ...)` | 记录会话开始元数据 |
+| `append_message(id, role, ...)` | 追加消息记录 |
+| `load_messages(id)` | 加载完整会话历史 |
+| `session_exists(id)` | 检查 JSONL 文件是否存在 |
+| `list_sessions()` | 列出所有有 JSONL 文件的会话 ID |
+| `delete_session(id)` | 删除会话 JSONL 文件 |
+| `get_message_count(id)` | 获取消息数量 |
 
-搜索 `MATCH 'bug'` 时直接查索引返回 rowid=1,3，时间复杂度 O(1) 而非 O(n)。
+## 依赖关系
 
-### 分词器（Tokenizer）对比
+- **内部依赖**: 无（自包含模块）
+- **外部依赖**: `sqlite3`、`json`、`uuid`、`re`、`time`、`pathlib`（均为 Python 标准库）
 
-| 分词器 | 分词方式 | "测试消息" 分词结果 | 搜索"测试" |
-|--------|---------|-------------------|-----------|
-| unicode61（默认） | 按 Unicode 边界分割 | 测、试、消、息（单字） | 需前缀匹配 `测*` |
-| trigram | 重叠 3 字节序列 | 测、测试、试消、测试消、试、消息、息 | 直接子串匹配 |
+## 配置常量（session_db.py）
 
-**trigram 原理：**
-```
-输入: "测试消息"
-输出: "测", "测试", "测试消", "试", "试消", "试消息", "消", "消息", "息"
-      (所有 1-3 字符的重叠子串)
-```
-
-### 为什么需要双索引
-
-| 场景 | unicode61 | trigram |
-|------|-----------|---------|
-| 英文精确匹配 | ✅ `MATCH 'bug'` | ✅ `MATCH 'bug'` |
-| 英文前缀匹配 | ✅ `MATCH 'bu*'` | ✅ `MATCH 'bu*'` |
-| 中文单字搜索 | ✅ `MATCH '测*'` | ✅ `MATCH '测'` |
-| 中文短语搜索 | ❌ 无法匹配连续短语 | ✅ `MATCH '测试'` |
-| 混合语言 | ✅ 英文好，中文差 | ✅ 所有语言一致 |
-
-**设计决策：** 同时创建两个 FTS5 虚拟表，英文搜索用 unicode61（更精确），中文/混合搜索用 trigram（支持子串）。
-
-### 触发器同步机制
-
-FTS5 是虚拟表，不存储实际数据，需要通过触发器保持与 messages 表同步：
-
-```sql
--- 插入时同步
-CREATE TRIGGER messages_fts_insert AFTER INSERT ON messages BEGIN
-    INSERT INTO messages_fts(rowid, content) VALUES (
-        new.id,
-        COALESCE(new.content, '') || ' ' || COALESCE(new.tool_name, '') || ' ' || COALESCE(new.tool_calls, '')
-    );
-END;
-
--- 删除时同步
-CREATE TRIGGER messages_fts_delete AFTER DELETE ON messages BEGIN
-    DELETE FROM messages_fts WHERE rowid = old.id;
-END;
-
--- 更新时同步（先删后插）
-CREATE TRIGGER messages_fts_update AFTER UPDATE ON messages BEGIN
-    DELETE FROM messages_fts WHERE rowid = old.id;
-    INSERT INTO messages_fts(rowid, content) VALUES (
-        new.id,
-        COALESCE(new.content, '') || ' ' || COALESCE(new.tool_name, '') || ' ' || COALESCE(new.tool_calls, '')
-    );
-END;
-```
-
-**同步内容组合：** `content + tool_name + tool_calls`，使搜索能覆盖消息内容、工具名称和工具调用参数。
-
-### 触发更新时机
-
-FTS5 虚拟表的更新完全由 SQLite 触发器自动处理，**不需要应用层手动调用同步方法**。
-
-| messages 表操作 | 触发的触发器 | FTS5 表动作 |
-|----------------|-------------|------------|
-| `INSERT INTO messages` | `messages_fts_insert` | `INSERT INTO messages_fts` |
-| `DELETE FROM messages` | `messages_fts_delete` | `DELETE FROM messages_fts WHERE rowid = old.id` |
-| `UPDATE messages` | `messages_fts_update` | 先 `DELETE` 旧记录，再 `INSERT` 新记录 |
-
-**代码中的触发点：**
-
-```python
-# 1. insert_message() 调用时
-db.insert_message(sid, "user", "你好")
-# ↓ 自动触发 messages_fts_insert
-# ↓ FTS5 索引立即更新
-
-# 2. 直接删除消息时
-db.conn.execute("DELETE FROM messages WHERE id = ?", (msg_id,))
-db.conn.commit()
-# ↓ 自动触发 messages_fts_delete
-# ↓ FTS5 索引立即删除对应条目
-
-# 3. 直接更新消息时
-db.conn.execute("UPDATE messages SET content = ? WHERE id = ?", ("新内容", msg_id))
-db.conn.commit()
-# ↓ 自动触发 messages_fts_update
-# ↓ FTS5 索引先删后插
-```
-
-**关键点：**
-*   只要操作 `messages` 表，触发器就会在同一个事务内自动同步 FTS5 索引。
-*   这是“零配置”的核心原因——创建触发器后，应用代码完全不需要关心 FTS5 的维护。
-
-### 搜索查询示例
-
-```sql
--- 英文精确搜索（unicode61）
-SELECT m.* FROM messages m
-JOIN messages_fts f ON m.id = f.rowid
-WHERE messages_fts MATCH 'bug'
-ORDER BY rank;
-
--- 中文子串搜索（trigram）
-SELECT m.* FROM messages m
-JOIN messages_fts_trigram f ON m.id = f.rowid
-WHERE messages_fts_trigram MATCH '测试'
-ORDER BY rank;
-
--- 按会话过滤
-SELECT m.* FROM messages m
-JOIN messages_fts f ON m.id = f.rowid
-WHERE messages_fts MATCH 'error' AND m.session_id = 'xxx'
-ORDER BY rank;
-```
-
-### FTS5 vs 向量搜索
-
-| 特性 | FTS5 | 向量搜索（RAG） |
-|------|------|----------------|
-| 配置 | 零配置，SQLite 内置 | 需要嵌入模型、向量数据库 |
-| 网络 | 无需网络调用 | 需要 API 调用或本地模型 |
-| 精确匹配 | ✅ 精确文本匹配 | ❌ 语义相似，可能不精确 |
-| 子串搜索 | ✅ trigram 支持 | ❌ 需要 n-gram 预处理 |
-| 适用场景 | 历史对话精确搜索 | 语义理解、知识检索 |
-
-**设计决策：** 个人 Agent 的历史搜索场景需要精确匹配（如"上次那个 deploy 脚本"），FTS5 比 RAG 更简单可靠。
+| 常量 | 值 | 用途 |
+|------|----|------|
+| `MAX_RETRIES` | 15 | 写锁竞争最大重试次数 |
+| `RETRY_MIN_MS` | 0.020 | 抖动延迟下限（20ms） |
+| `RETRY_MAX_MS` | 0.150 | 抖动延迟上限（150ms） |
+| `CHECKPOINT_INTERVAL` | 50 | 每 N 次写入执行 WAL checkpoint |
+| `MAX_TITLE_LENGTH` | 100 | 标题最大字符数 |

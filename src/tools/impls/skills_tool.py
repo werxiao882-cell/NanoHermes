@@ -199,7 +199,7 @@ register_tool(
     },
     handler=skill_manage,
     description="技能管理",
-    defer_loading=True,
+    defer_loading=False,
 )
 
 register_tool(
@@ -230,7 +230,7 @@ register_tool(
     },
     handler=skill_view,
     description="查看技能",
-    defer_loading=True,
+    defer_loading=False,
 )
 
 register_tool(
@@ -252,5 +252,5 @@ register_tool(
     },
     handler=skills_list,
     description="列出技能",
-    defer_loading=True,
+    defer_loading=False,
 )

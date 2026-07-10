@@ -163,27 +163,46 @@ class CompressionValidator:
         self,
         original_messages: List[Dict[str, Any]],
         summary: str,
+        compressed_source: List[Dict[str, Any]] | None = None,
     ) -> float:
         """计算信息保留率。
 
         使用 Jaccard 相似度：|A ∩ B| / |A ∪ B|
 
+        设计理由：
+        摘要是针对"被压缩的中间消息"生成的，而非全部原始消息。
+        头尾保护的消息未被压缩，不应计入保留率计算的分母。
+        如果提供了 compressed_source（实际被压缩的消息），直接用它计算。
+        否则使用启发式：取原始消息中间 60% 作为近似。
+
         Args:
             original_messages: 原始消息列表。
             summary: 压缩后的摘要。
+            compressed_source: 实际被压缩的中间消息（可选）。
 
         Returns:
             信息保留率（0.0 ~ 1.0）。
         """
-        # 提取原始消息的关键词
+        # 提取摘要的关键词
+        summary_keywords = self.extract_keywords(summary)
+
+        # 优先使用实际被压缩的消息
+        if compressed_source:
+            source_messages = compressed_source
+        else:
+            # 启发式：只取中间 60% 的消息作为基准
+            n = len(original_messages)
+            if n > 10:
+                skip = int(n * 0.2)
+                source_messages = original_messages[skip:n - skip]
+            else:
+                source_messages = original_messages
+
         original_text = " ".join(
-            msg.get("content", "") for msg in original_messages
+            msg.get("content", "") for msg in source_messages
             if isinstance(msg.get("content"), str)
         )
         original_keywords = self.extract_keywords(original_text)
-
-        # 提取摘要的关键词
-        summary_keywords = self.extract_keywords(summary)
 
         # 计算 Jaccard 相似度
         if not original_keywords:
@@ -283,6 +302,7 @@ class CompressionValidator:
         original_messages: List[Dict[str, Any]],
         compressed_messages: List[Dict[str, Any]],
         summary: str,
+        compressed_source: List[Dict[str, Any]] | None = None,
     ) -> ValidationResult:
         """验证压缩质量。
 
@@ -293,9 +313,11 @@ class CompressionValidator:
         4. 综合判断是否通过
 
         Args:
-            original_messages: 原始消息列表。
+            original_messages: 原始消息列表（全部）。
             compressed_messages: 压缩后的消息列表。
             summary: 摘要文本。
+            compressed_source: 实际被压缩的中间消息（用于保留率计算）。
+                            如果不传，则使用启发式估算。
 
         Returns:
             验证结果。
@@ -303,7 +325,9 @@ class CompressionValidator:
         warnings = []
 
         # 1. 计算信息保留率
-        retention_rate = self.calculate_retention_rate(original_messages, summary)
+        retention_rate = self.calculate_retention_rate(
+            original_messages, summary, compressed_source
+        )
         if retention_rate < self._min_retention_rate:
             warnings.append(
                 f"Low information retention: {retention_rate:.2f} < {self._min_retention_rate:.2f}"

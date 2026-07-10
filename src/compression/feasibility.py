@@ -3,7 +3,7 @@
 验证模型上下文窗口是否满足压缩要求。
 """
 
-from typing import Dict
+from typing import Any, Dict
 
 from src.compression.auxiliary import get_model_context_length, MINIMUM_CONTEXT_LENGTH
 
@@ -11,7 +11,7 @@ from src.compression.auxiliary import get_model_context_length, MINIMUM_CONTEXT_
 def check_compression_model_feasibility(
     model: str,
     main_context_length: int = 8192,
-) -> Dict[str, any]:
+) -> Dict[str, Any]:
     """检查压缩模型可行性。
 
     Args:

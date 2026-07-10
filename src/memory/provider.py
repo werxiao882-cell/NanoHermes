@@ -1,9 +1,9 @@
 """MemoryProvider 抽象基类。
 
-定义记忆提供者的标准接口，包含 17 个方法：
+定义记忆提供者的标准接口，包含 14 个方法：
 - 4 个核心抽象方法：name, is_available, initialize, system_prompt_block
 - 4 个数据流方法（默认空实现）：prefetch, queue_prefetch, sync_turn, shutdown
-- 5 个事件钩子（可选）：on_turn_start, on_session_end, on_pre_compress, on_delegation, on_memory_write
+- 3 个事件钩子（可选）：on_turn_start, on_session_end, on_pre_compress
 - 2 个工具接口：get_tool_schemas, handle_tool_call
 - 2 个配置方法：get_config_schema, save_config
 """
@@ -119,36 +119,6 @@ class MemoryProvider(ABC):
             提取的关键信息文本。
         """
         return ""
-
-    def on_delegation(self, task: str, result: str, **kwargs) -> None:
-        """子代理完成任务时调用，观察子代理工作结果。
-
-        Args:
-            task: 委托任务描述。
-            result: 任务执行结果。
-            **kwargs: 可选参数（child_session_id 等）。
-        """
-        pass
-
-    def on_memory_write(
-        self,
-        action: str,
-        target: str,
-        content: str,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        """内置记忆被修改时调用，镜像内置记忆的写入。
-
-        当 Agent 通过内置 memory 工具修改 MEMORY.md/USER.md 时，
-        外部 provider 收到此通知，可将变更纳入自己的用户模型。
-
-        Args:
-            action: 操作类型（'add', 'replace', 'remove'）。
-            target: 目标类型（'memory', 'user'）。
-            content: 写入的内容。
-            metadata: 额外元数据。
-        """
-        pass
 
     # =========================================================================
     # 工具接口

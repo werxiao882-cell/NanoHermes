@@ -8,6 +8,7 @@ from src.tools.dfx.retry_manager import ToolRetryManager, RetryConfig
 from src.tools.dfx.concurrency_limiter import ToolConcurrencyLimiter, ToolConcurrencyConfig
 from src.tools.dfx.execution_tracker import ToolExecutionTracker, ToolExecutionState
 from src.tools.dfx.result_budget import apply_tool_result_budget, get_result_budget
+from src.tools.dfx.context_modifier import ContextModifier
 
 __all__ = [
     "ToolErrorClassifier",
@@ -20,4 +21,5 @@ __all__ = [
     "ToolExecutionState",
     "apply_tool_result_budget",
     "get_result_budget",
+    "ContextModifier",
 ]

@@ -415,6 +415,7 @@ class ContextCompressor(ContextEngine):
                     original_messages=messages,
                     compressed_messages=compressed_messages,
                     summary=summary,
+                    compressed_source=pruned_middle,
                 )
                 if not validation_result.is_valid:
                     logger.warning(
@@ -665,45 +666,25 @@ class ContextCompressor(ContextEngine):
         return messages[:self.protect_first_n]
 
     def _protect_tail(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """使用 token 预算保护尾部消息。
+        """使用 token 预算 + 消息数上限保护尾部消息。
 
-        **尾部保护的设计理由：**
+        **双重保护策略：**
+        1. Token 预算：确保尾部占用的上下文空间可控（避免长工具输出挤占摘要）
+        2. 消息数上限（protect_last_n）：避免短消息场景下保护过多条目
 
-        1. 近因效应（Recency Effect）：
-           最近的对话包含：
-           - 当前任务状态和进度
-           - 未完成的工具调用和待处理操作
-           - 用户的最新反馈和修正
-           - 模型的"思维链"和推理过程
-           这些是模型的"工作记忆"，丢失后会导致对话断裂。
-
-        2. 为什么用 token 预算而非固定条数？
-           - 消息长度差异巨大：一条工具输出可能有 5000 tokens，而普通对话只有 50 tokens
-           - 固定条数（如 20 条）可能导致：
-             * 如果都是短消息：保护的内容太少，上下文不足
-             * 如果包含长工具输出：保护的内容太多，挤占摘要空间
-           - Token 预算确保尾部占用的上下文空间可控
-
-        3. 预算计算公式：
-           tail_tokens = threshold_tokens * summary_target_ratio
-           - threshold_tokens: 触发压缩的阈值（如 context_length * 50%）
-           - summary_target_ratio: 默认 0.20，即尾部预算占阈值的 20%
-           - 例如：阈值 16000 tokens，尾部预算 = 16000 * 0.20 = 3200 tokens
-
-        4. 从后向前遍历的原因：
-           - 需要保护的是"最近"的消息，所以从列表末尾开始
-           - 累加直到超过预算，确保尾部在预算范围内最大化
+        为什么需要双重保护？
+        - 纯 token 预算：如果都是短消息（50 tokens/条），可能保护 60+ 条，挤占摘要空间
+        - 纯消息数：如果都是长消息（5000 tokens/条），20 条就占满上下文
+        - 双重保护取两者的交集，兼顾两种极端场景
 
         Args:
             messages: 消息列表。
 
         Returns:
-            尾部保护的消息列表（在 token 预算内的最近消息）。
+            尾部保护的消息列表。
         """
         # 计算尾部 token 预算：阈值 * 比例（默认 20%）
-        # 这个预算与摘要预算共享同一个比例参数，因为两者竞争相同的 token 空间
         tail_tokens = int(self.threshold_tokens * self.summary_target_ratio)
-        # 将 token 预算转换为字符限制（用于快速估算）
         tail_chars_limit = tail_tokens * CHARS_PER_TOKEN
 
         tail = []
@@ -711,9 +692,11 @@ class ContextCompressor(ContextEngine):
 
         # 从后向前遍历（reversed），优先保护最近的消息
         for msg in reversed(messages):
+            # 消息数上限检查：达到 protect_last_n 条后停止
+            if len(tail) >= self.protect_last_n:
+                break
             msg_chars = self._estimate_message_length(msg)
-            # 如果加入当前消息会超出预算，停止
-            # 注意：这里使用严格大于（>），确保预算不被突破
+            # Token 预算检查：超出预算后停止
             if tail_chars + msg_chars > tail_chars_limit:
                 break
             # insert(0, msg) 保持原始顺序（因为是从后向前遍历）
@@ -941,18 +924,42 @@ class ContextCompressor(ContextEngine):
         return total
 
     def _estimate_message_length(self, msg: Dict[str, Any]) -> int:
-        """估算单条消息的字符长度。
+        """估算单条消息的字符长度（token 感知）。
+
+        中英文使用不同的换算比例：
+        - 英文：1 token ≈ 4 chars（CHARS_PER_TOKEN）
+        - 中文：1 字符 ≈ 1.5 tokens（中文字符在大多数 tokenizer 中占更多 token）
+        - 混合文本：按中文字符比例加权
 
         Args:
             msg: 消息字典。
 
         Returns:
-            估算的字符数。
+            估算的等效英文字符数（用于统一除以 CHARS_PER_TOKEN 换算 token）。
         """
         content = msg.get("content", "")
-        if isinstance(content, str):
-            return len(content)
-        return 0
+        if not isinstance(content, str):
+            return 0
+
+        # 统计中文字符数量（Unicode CJK 统一汉字范围）
+        chinese_chars = sum(1 for c in content if '一' <= c <= '鿿')
+        total_chars = len(content)
+
+        if total_chars == 0:
+            return 0
+
+        # 中文字符比例
+        chinese_ratio = chinese_chars / total_chars
+
+        # 中文部分：1 中文字符 ≈ 1.5 tokens ≈ 6 等效英文字符（6/4=1.5）
+        # 英文部分：1 token ≈ 4 chars
+        # 加权后的等效英文字符数
+        CHINESE_EQUIVALENT_FACTOR = 6  # 中文字符等效的英文字符数
+        equivalent_chars = (
+            chinese_chars * CHINESE_EQUIVALENT_FACTOR
+            + (total_chars - chinese_chars)
+        )
+        return equivalent_chars
 
     def _estimate_tokens(self, messages: List[Dict[str, Any]]) -> int:
         """估算消息列表的 token 数。

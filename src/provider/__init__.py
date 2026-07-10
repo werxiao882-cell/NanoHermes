@@ -10,11 +10,14 @@ from src.provider.profile import (
     get_provider_profile,
     list_providers,
     resolve_provider_alias,
+    FallbackModel,
 )
 from src.provider.credentials import resolve_credentials
 from src.provider.api_mode import ApiMode, resolve_api_mode
 from src.provider.client_factory import build_client
-from src.provider.fallback import FallbackChain
+from src.provider.openai_client import OpenAIClient, ChatResponse, TokenUsage, ClassifiedError, ErrorCategory
+from src.provider.anthropic_adapter import AnthropicAdapter
+from src.provider.fallback import FallbackChain, FallbackEntry
 from src.provider.model_metadata import ModelInfo, ModelPricing, get_context_length, calculate_cost
 
 __all__ = [
@@ -24,11 +27,19 @@ __all__ = [
     "get_provider_profile",
     "list_providers",
     "resolve_provider_alias",
+    "FallbackModel",
     "resolve_credentials",
     "ApiMode",
     "resolve_api_mode",
     "build_client",
+    "OpenAIClient",
+    "AnthropicAdapter",
+    "ChatResponse",
+    "TokenUsage",
+    "ClassifiedError",
+    "ErrorCategory",
     "FallbackChain",
+    "FallbackEntry",
     "ModelInfo",
     "ModelPricing",
     "get_context_length",

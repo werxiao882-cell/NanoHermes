@@ -347,6 +347,21 @@ class TUIApp:
             on_loop_event=self._on_loop_event,
         )
 
+        # ── 14.5 上下文压缩器 ──
+        # 创建持久压缩器实例，确保状态跨调用保持：
+        # - 熔断器：连续失败计数不被重置
+        # - 预算追踪器：压缩历史持续积累
+        # - 迭代摘要：多次压缩后信息连贯
+        # - Micro 模式轮次计数：正确判断触发时机
+        from src.compression import ContextCompressor
+        self.compressor = ContextCompressor(
+            model=self.model,
+            threshold_percent=0.50,
+            protect_first_n=3,
+            protect_last_n=20,
+            summary_target_ratio=0.20,
+        )
+
         # ── 15. 初始化完成 ──
         # 同步 session_id 到状态管理器，供事件处理器和 UI 组件使用
         self.state.session_id = self.session_id
@@ -824,9 +839,8 @@ class TUIApp:
         - 解耦 TUIApp 与事件订阅细节
 
         Memory 集成：
-        - 如果 memory_manager 可用，创建 MemoryEventHandler 并注册到事件总线
-        - MemoryEventHandler 会监听对话事件，自动触发记忆检索和刷写
-        - prefetch_cache 包含预取的记忆上下文，需要注入到消息历史中
+        - 如果 memory_manager 可用，直接注册到事件总线
+        - MemoryManager 会监听对话事件，自动触发记忆检索和刷写
         """
         if not self.model_caller or not self.tool_dispatch:
             self.add_message("assistant", "This is a simulated response.", is_tool=False)
@@ -863,12 +877,9 @@ class TUIApp:
         )
         conversation_handler.register(loop.events)
 
-        # 注册 Memory 事件处理器
-        memory_handler = None
+        # 注册 Memory 事件处理器（MemoryManager 直接订阅 EventBus）
         if self.memory_manager:
-            from src.memory.event_handler import MemoryEventHandler
-            memory_handler = MemoryEventHandler(self.memory_manager, self.session_id)
-            memory_handler.register(loop.events)
+            self.memory_manager.register(loop.events)
 
         # 在后台线程运行对话循环，支持 Ctrl+C 中断
         # 使用列表 [None] 而非普通变量，因为需要在嵌套函数中修改
@@ -1374,37 +1385,41 @@ class TUIApp:
         """自动压缩检查。
 
         在每次模型响应后检查是否需要自动触发压缩。
-        检查条件：
-        1. 上下文使用量超过阈值
-        2. API 返回 context_length_exceeded 错误
-        3. 消息数过多（启发式检查）
+        使用持久 compressor 实例，确保熔断器/预算追踪/迭代摘要等状态不被重置。
 
-        如果满足条件，自动执行压缩。
+        触发条件（任一满足即触发）：
+        1. API 返回 context_length_exceeded 或 token 使用量超阈值
+        2. 预飞行检查（字符估算）超阈值
+        3. 压缩模式判断（Reactive/Micro/Snip）需要压缩
+        4. 消息数超过 100 条（启发式兜底）
         """
         if not self.model_caller:
             return
 
+        # 递增轮次计数（Micro 模式依赖此值判断触发时机）
+        self.compressor.increment_turn_count()
+
         if len(self.messages) < 10:
             return
 
-        from src.compression import ContextCompressor
+        # 估算当前 token 数（用于 should_compress 的 Reactive 模式判断）
+        approx_tokens = self.compressor._estimate_tokens(self.messages)
 
-        compressor = ContextCompressor(
-            model=self.model,
-            threshold_percent=0.50,
-            protect_first_n=3,
-            protect_last_n=20,
-            summary_target_ratio=0.20,
-        )
+        # 检查 1：API 响应硬性触发（context_length_exceeded 或 token 超阈值）
+        needs_compress = self.compressor.check_post_response(response)
 
-        # 检查 1：响应后检查（token 使用量）
-        needs_compress = compressor.check_post_response(response)
-
-        # 检查 2：预飞行检查（消息估算）
+        # 检查 2：预飞行检查（字符估算）
         if not needs_compress:
-            needs_compress = compressor.check_preflight(self.messages)
+            needs_compress = self.compressor.check_preflight(self.messages)
 
-        # 检查 3：消息数启发式（超过 100 条消息自动触发）
+        # 检查 3：压缩模式判断（含熔断器前置检查）
+        if not needs_compress:
+            needs_compress = self.compressor.should_compress(
+                messages=self.messages,
+                current_tokens=approx_tokens,
+            )
+
+        # 检查 4：消息数启发式（兜底）
         if not needs_compress and len(self.messages) > 100:
             needs_compress = True
 
@@ -1414,19 +1429,16 @@ class TUIApp:
 
     async def _cmd_compress(self, focus_topic: str | None = None) -> None:
         """处理 /compress 命令，手动触发上下文压缩。
-        
-        压缩策略：
-        - threshold_percent=0.50：当消息数超过阈值的 50% 时触发压缩
-        - protect_first_n=3：保护前 3 条消息（通常是 system prompt）
-        - protect_last_n=20：保护最近 20 条消息（保持上下文连贯性）
-        - summary_target_ratio=0.20：摘要目标长度为原文的 20%
-        
-        设计理由：
-        - 使用局部函数 model_caller() 适配接口：
-          ContextCompressor 期望的签名是 model_caller(msgs)，
-          而 self.model_caller 的签名是 model_caller(messages, tools)
-          局部函数桥接了这个差异
-        - force=True：用户手动触发时强制执行，忽略自动压缩的阈值检查
+
+        使用持久 compressor 实例（self.compressor），确保：
+        - 熔断器状态跨调用保持
+        - 预算追踪器历史记录持续积累
+        - 迭代摘要保持多次压缩后的信息连贯性
+
+        model_caller 签名说明：
+        - self.model_caller 签名: model_caller(messages, tools) → dict
+        - compress() 内部调用: model_caller(summary_messages, None) → dict
+        - 两者兼容，无需适配
         """
         if not self.model_caller:
             self.console.print("[yellow]模型调用器不可用[/yellow]")
@@ -1436,22 +1448,13 @@ class TUIApp:
             self.console.print("[yellow]消息太少，无需压缩（至少 5 条）[/yellow]")
             return
 
-        from src.compression import ContextCompressor
-        compressor = ContextCompressor(
-            model=self.model,
-            threshold_percent=0.50,
-            protect_first_n=3,
-            protect_last_n=20,
-            summary_target_ratio=0.20,
-        )
-
         self.console.print("\n[cyan]🗜️ 正在压缩上下文...[/cyan]")
 
         # 估算当前 token 数
-        approx_tokens = sum(len(m.get("content", "") or "") // 4 + 10 for m in self.messages)
+        approx_tokens = self.compressor._estimate_tokens(self.messages)
 
         try:
-            result = compressor.compress(
+            result = self.compressor.compress(
                 self.messages,
                 current_tokens=approx_tokens,
                 focus_topic=focus_topic,
@@ -1469,8 +1472,6 @@ class TUIApp:
             saved = len(self.messages) - len(compressed)
             self.messages = compressed
             self.console.print(f"[green]✓ 压缩完成：{len(self.messages) + saved} -> {len(self.messages)} 条消息（减少 {saved} 条）[/green]")
-
-
 
         except Exception as e:
             self.console.print(f"[red]压缩失败: {e}[/red]")
